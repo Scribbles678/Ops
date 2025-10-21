@@ -1,0 +1,221 @@
+export const useSchedule = () => {
+  const { $supabase } = useNuxtApp()
+  
+  const scheduleAssignments = ref([])
+  const shifts = ref([])
+  const dailyTargets = ref([])
+  const loading = ref(false)
+  const error = ref(null)
+
+  const fetchShifts = async () => {
+    try {
+      const { data, error: fetchError } = await $supabase
+        .from('shifts')
+        .select('*')
+        .eq('is_active', true)
+        .order('start_time', { ascending: true })
+      
+      if (fetchError) throw fetchError
+      
+      shifts.value = data
+      return data
+    } catch (e) {
+      console.error('Error fetching shifts:', e)
+      return []
+    }
+  }
+
+  const fetchScheduleForDate = async (date) => {
+    loading.value = true
+    error.value = null
+    
+    try {
+      const { data, error: fetchError } = await $supabase
+        .from('schedule_assignments')
+        .select(`
+          *,
+          employee:employees(*),
+          job_function:job_functions(*),
+          shift:shifts(*)
+        `)
+        .eq('schedule_date', date)
+        .order('start_time', { ascending: true })
+      
+      if (fetchError) throw fetchError
+      
+      scheduleAssignments.value = data
+      return data
+    } catch (e) {
+      error.value = e.message
+      console.error('Error fetching schedule:', e)
+      return []
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const createAssignment = async (assignmentData) => {
+    loading.value = true
+    error.value = null
+    
+    try {
+      const { data, error: createError } = await $supabase
+        .from('schedule_assignments')
+        .insert([assignmentData])
+        .select()
+      
+      if (createError) throw createError
+      
+      return data[0]
+    } catch (e) {
+      error.value = e.message
+      console.error('Error creating assignment:', e)
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const updateAssignment = async (id, assignmentData) => {
+    loading.value = true
+    error.value = null
+    
+    try {
+      const { data, error: updateError } = await $supabase
+        .from('schedule_assignments')
+        .update(assignmentData)
+        .eq('id', id)
+        .select()
+      
+      if (updateError) throw updateError
+      
+      return data[0]
+    } catch (e) {
+      error.value = e.message
+      console.error('Error updating assignment:', e)
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const deleteAssignment = async (id) => {
+    loading.value = true
+    error.value = null
+    
+    try {
+      const { error: deleteError } = await $supabase
+        .from('schedule_assignments')
+        .delete()
+        .eq('id', id)
+      
+      if (deleteError) throw deleteError
+      
+      return true
+    } catch (e) {
+      error.value = e.message
+      console.error('Error deleting assignment:', e)
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const copySchedule = async (fromDate, toDate) => {
+    loading.value = true
+    error.value = null
+    
+    try {
+      // Fetch source schedule
+      const { data: sourceData, error: fetchError } = await $supabase
+        .from('schedule_assignments')
+        .select('*')
+        .eq('schedule_date', fromDate)
+      
+      if (fetchError) throw fetchError
+      
+      // Create new assignments with new date
+      const newAssignments = sourceData.map(assignment => ({
+        employee_id: assignment.employee_id,
+        job_function_id: assignment.job_function_id,
+        shift_id: assignment.shift_id,
+        schedule_date: toDate,
+        assignment_order: assignment.assignment_order,
+        start_time: assignment.start_time,
+        end_time: assignment.end_time
+      }))
+      
+      if (newAssignments.length > 0) {
+        const { error: insertError } = await $supabase
+          .from('schedule_assignments')
+          .insert(newAssignments)
+        
+        if (insertError) throw insertError
+      }
+      
+      return true
+    } catch (e) {
+      error.value = e.message
+      console.error('Error copying schedule:', e)
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const fetchDailyTargets = async (date) => {
+    try {
+      const { data, error: fetchError } = await $supabase
+        .from('daily_targets')
+        .select('*, job_function:job_functions(*)')
+        .eq('schedule_date', date)
+      
+      if (fetchError) throw fetchError
+      
+      dailyTargets.value = data
+      return data
+    } catch (e) {
+      console.error('Error fetching daily targets:', e)
+      return []
+    }
+  }
+
+  const upsertDailyTarget = async (targetData) => {
+    loading.value = true
+    error.value = null
+    
+    try {
+      const { data, error: upsertError } = await $supabase
+        .from('daily_targets')
+        .upsert(targetData)
+        .select()
+      
+      if (upsertError) throw upsertError
+      
+      return data[0]
+    } catch (e) {
+      error.value = e.message
+      console.error('Error upserting daily target:', e)
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  return {
+    scheduleAssignments,
+    shifts,
+    dailyTargets,
+    loading,
+    error,
+    fetchShifts,
+    fetchScheduleForDate,
+    createAssignment,
+    updateAssignment,
+    deleteAssignment,
+    copySchedule,
+    fetchDailyTargets,
+    upsertDailyTarget
+  }
+}
+
