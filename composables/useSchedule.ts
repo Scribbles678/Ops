@@ -8,6 +8,9 @@ export const useSchedule = () => {
   const error = ref(null)
 
   const fetchShifts = async () => {
+    loading.value = true
+    error.value = null
+    
     try {
       const { data, error: fetchError } = await $supabase
         .from('shifts')
@@ -20,8 +23,81 @@ export const useSchedule = () => {
       shifts.value = data
       return data
     } catch (e) {
+      error.value = e.message
       console.error('Error fetching shifts:', e)
       return []
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const createShift = async (shiftData) => {
+    loading.value = true
+    error.value = null
+    
+    try {
+      const { data, error: createError } = await $supabase
+        .from('shifts')
+        .insert([shiftData])
+        .select()
+      
+      if (createError) throw createError
+      
+      await fetchShifts()
+      return data[0]
+    } catch (e) {
+      error.value = e.message
+      console.error('Error creating shift:', e)
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const updateShift = async (id, shiftData) => {
+    loading.value = true
+    error.value = null
+    
+    try {
+      const { data, error: updateError } = await $supabase
+        .from('shifts')
+        .update(shiftData)
+        .eq('id', id)
+        .select()
+      
+      if (updateError) throw updateError
+      
+      await fetchShifts()
+      return data[0]
+    } catch (e) {
+      error.value = e.message
+      console.error('Error updating shift:', e)
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const deleteShift = async (id) => {
+    loading.value = true
+    error.value = null
+    
+    try {
+      const { error: deleteError } = await $supabase
+        .from('shifts')
+        .delete()
+        .eq('id', id)
+      
+      if (deleteError) throw deleteError
+      
+      await fetchShifts()
+      return true
+    } catch (e) {
+      error.value = e.message
+      console.error('Error deleting shift:', e)
+      return false
+    } finally {
+      loading.value = false
     }
   }
 
@@ -209,6 +285,9 @@ export const useSchedule = () => {
     loading,
     error,
     fetchShifts,
+    createShift,
+    updateShift,
+    deleteShift,
     fetchScheduleForDate,
     createAssignment,
     updateAssignment,

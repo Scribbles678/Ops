@@ -20,6 +20,8 @@ CREATE TABLE job_functions (
     name TEXT UNIQUE NOT NULL,
     color_code TEXT NOT NULL DEFAULT '#3B82F6',
     productivity_rate INTEGER,
+    unit_of_measure TEXT,
+    custom_unit TEXT,
     is_active BOOLEAN DEFAULT true,
     sort_order INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -157,14 +159,17 @@ INSERT INTO shifts (name, start_time, end_time, break_1_start, break_1_end, brea
 ('12:00 PM - 8:30 PM', '12:00:00', '20:30:00', '13:45:00', '14:00:00', '16:00:00', '16:30:00', '18:00:00', '18:15:00'),
 ('4:00 PM - 8:30 PM', '16:00:00', '20:30:00', NULL, NULL, NULL, NULL, NULL, NULL);
 
--- Seed Data: Sample Job Functions
-INSERT INTO job_functions (name, color_code, productivity_rate, sort_order) VALUES
-('RT-Pick', '#FFFF00', 200, 1),
-('EM9 Packsize', '#90EE90', 180, 2),
-('X4 Packsize', '#32CD32', 175, 3),
-('Meter 11', '#4169E1', 150, 4),
-('Locus All', '#FF6347', 220, 5),
-('Help Desk', '#9370DB', NULL, 6);
+-- Seed Data: Job Functions
+INSERT INTO job_functions (name, color_code, productivity_rate, unit_of_measure, sort_order) VALUES
+('RT Pick', '#FFA500', 200, 'cartons/hour', 1),
+('Pick', '#FFFF00', 180, 'cartons/hour', 2),
+('Meter', '#87CEEB', 150, 'boxes/hour', 3),
+('Locus', '#FFFFFF', 220, 'cartons/hour', 4),
+('Helpdesk', '#FFD700', NULL, NULL, 5),
+('Coordinator', '#C0C0C0', NULL, NULL, 6),
+('Team Lead', '#000080', NULL, NULL, 7),
+('Validated', '#FF0000', NULL, NULL, 8),
+('Freight', '#800080', NULL, NULL, 9);
 
 -- Seed Data: Sample Employees
 INSERT INTO employees (first_name, last_name) VALUES
