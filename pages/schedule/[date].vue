@@ -5,7 +5,7 @@
       <div class="flex items-center justify-between mb-8">
         <div>
           <h1 class="text-4xl font-bold text-gray-800">Edit Today's Schedule</h1>
-          <p class="text-gray-600 mt-2">{{ formatDate(scheduleDate) }}</p>
+          <p class="text-gray-600 mt-2">{{ formatDate(scheduleDate || '') }}</p>
         </div>
         <div class="flex space-x-4">
           <button @click="saveSchedule" class="btn-primary">
@@ -48,184 +48,49 @@
       <!-- Job Function Hours Breakdown -->
       <div class="card mb-8">
         <h3 class="text-xl font-bold text-gray-800 mb-4">Job Function Hours Breakdown</h3>
-        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-          <div v-for="jobFunction in jobFunctionHours" :key="jobFunction.name" class="text-center">
-            <div class="flex items-center justify-center mb-2">
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-6">
+          <div v-for="jobFunction in jobFunctionHours" :key="jobFunction.name" class="text-center bg-gray-50 rounded-lg p-4 border border-gray-200 hover:shadow-sm transition-shadow">
+            <div class="flex items-center justify-center mb-3">
               <div 
-                class="w-4 h-4 rounded border border-gray-300 mr-2" 
+                class="w-5 h-5 rounded border-2 border-gray-400 mr-3 shadow-sm" 
                 :style="{ backgroundColor: jobFunction.color }"
               ></div>
-              <span class="text-sm font-medium text-gray-700">{{ jobFunction.name }}</span>
+              <span class="text-sm font-semibold text-gray-800">{{ jobFunction.name }}</span>
             </div>
-            <div class="text-2xl font-bold" :style="{ color: jobFunction.color }">
-              {{ jobFunction.hours }}h
+            <div class="text-3xl font-bold text-gray-900 bg-white rounded-lg py-2 px-3 shadow-sm">
+              {{ jobFunction.hours }}
             </div>
-            <div class="text-xs text-gray-500">{{ jobFunction.employees }} people</div>
           </div>
         </div>
       </div>
 
-      <!-- Employee-Centric Schedule Grid -->
-      <div class="card">
-        <div class="overflow-x-auto">
-          <table class="w-full border-collapse text-sm">
-            <thead>
-              <tr class="bg-gray-50">
-                <th class="border border-gray-200 px-3 py-2 text-left text-xs font-medium text-gray-700 sticky left-0 bg-gray-50 z-10 min-w-[120px]">Employee</th>
-                <th class="border border-gray-200 px-1 py-2 text-center text-xs font-medium text-gray-700 min-w-[80px]">6:00 AM</th>
-                <th class="border border-gray-200 px-1 py-2 text-center text-xs font-medium text-gray-700 min-w-[80px]">8:00 AM</th>
-                <th class="border border-gray-200 px-1 py-2 text-center text-xs font-medium text-gray-700 min-w-[80px]">10:00 AM</th>
-                <th class="border border-gray-200 px-1 py-2 text-center text-xs font-medium text-gray-700 min-w-[80px]">12:00 PM</th>
-                <th class="border border-gray-200 px-1 py-2 text-center text-xs font-medium text-gray-700 min-w-[80px]">2:00 PM</th>
-                <th class="border border-gray-200 px-1 py-2 text-center text-xs font-medium text-gray-700 min-w-[80px]">4:00 PM</th>
-                <th class="border border-gray-200 px-1 py-2 text-center text-xs font-medium text-gray-700 min-w-[80px]">6:00 PM</th>
-                <th class="border border-gray-200 px-1 py-2 text-center text-xs font-medium text-gray-700 min-w-[80px]">8:00 PM</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="employee in employees" :key="employee.id" class="hover:bg-gray-50">
-                <td class="border border-gray-200 px-3 py-2 font-medium text-gray-800 sticky left-0 bg-white z-10 text-xs">
-                  {{ employee.last_name }}, {{ employee.first_name }}
-                </td>
-                <td class="border border-gray-200 px-1 py-2">
-                  <div class="h-8 flex items-center justify-center">
-                    <div v-if="getEmployeeAssignment(employee.id, '6am')" 
-                         @click="removeAssignment(getEmployeeAssignment(employee.id, '6am').id)"
-                         class="w-full h-full flex items-center justify-center rounded cursor-pointer hover:opacity-80 transition text-xs font-medium"
-                         :style="{ 
-                           backgroundColor: getJobFunctionColor(getEmployeeAssignment(employee.id, '6am').job_function), 
-                           color: getEmployeeAssignment(employee.id, '6am').job_function === 'Locus' ? '#000' : '#fff' 
-                         }">
-                      {{ getEmployeeAssignment(employee.id, '6am').job_function }}
-                    </div>
-                    <button v-else @click="addAssignmentToEmployee(employee.id, '6am')" 
-                            class="w-full h-full text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition text-xs border border-dashed border-gray-300">
-                      +
-                    </button>
-                  </div>
-                </td>
-                <td class="border border-gray-200 px-1 py-2">
-                  <div class="h-8 flex items-center justify-center">
-                    <div v-if="getEmployeeAssignment(employee.id, '8am')" 
-                         @click="removeAssignment(getEmployeeAssignment(employee.id, '8am').id)"
-                         class="w-full h-full flex items-center justify-center rounded cursor-pointer hover:opacity-80 transition text-xs font-medium"
-                         :style="{ 
-                           backgroundColor: getJobFunctionColor(getEmployeeAssignment(employee.id, '8am').job_function), 
-                           color: getEmployeeAssignment(employee.id, '8am').job_function === 'Locus' ? '#000' : '#fff' 
-                         }">
-                      {{ getEmployeeAssignment(employee.id, '8am').job_function }}
-                    </div>
-                    <button v-else @click="addAssignmentToEmployee(employee.id, '8am')" 
-                            class="w-full h-full text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition text-xs border border-dashed border-gray-300">
-                      +
-                    </button>
-                  </div>
-                </td>
-                <td class="border border-gray-200 px-1 py-2">
-                  <div class="h-8 flex items-center justify-center">
-                    <div v-if="getEmployeeAssignment(employee.id, '10am')" 
-                         @click="removeAssignment(getEmployeeAssignment(employee.id, '10am').id)"
-                         class="w-full h-full flex items-center justify-center rounded cursor-pointer hover:opacity-80 transition text-xs font-medium"
-                         :style="{ 
-                           backgroundColor: getJobFunctionColor(getEmployeeAssignment(employee.id, '10am').job_function), 
-                           color: getEmployeeAssignment(employee.id, '10am').job_function === 'Locus' ? '#000' : '#fff' 
-                         }">
-                      {{ getEmployeeAssignment(employee.id, '10am').job_function }}
-                    </div>
-                    <button v-else @click="addAssignmentToEmployee(employee.id, '10am')" 
-                            class="w-full h-full text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition text-xs border border-dashed border-gray-300">
-                      +
-                    </button>
-                  </div>
-                </td>
-                <td class="border border-gray-200 px-1 py-2">
-                  <div class="h-8 flex items-center justify-center">
-                    <div v-if="getEmployeeAssignment(employee.id, '12pm')" 
-                         @click="removeAssignment(getEmployeeAssignment(employee.id, '12pm').id)"
-                         class="w-full h-full flex items-center justify-center rounded cursor-pointer hover:opacity-80 transition text-xs font-medium"
-                         :style="{ 
-                           backgroundColor: getJobFunctionColor(getEmployeeAssignment(employee.id, '12pm').job_function), 
-                           color: getEmployeeAssignment(employee.id, '12pm').job_function === 'Locus' ? '#000' : '#fff' 
-                         }">
-                      {{ getEmployeeAssignment(employee.id, '12pm').job_function }}
-                    </div>
-                    <button v-else @click="addAssignmentToEmployee(employee.id, '12pm')" 
-                            class="w-full h-full text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition text-xs border border-dashed border-gray-300">
-                      +
-                    </button>
-                  </div>
-                </td>
-                <td class="border border-gray-200 px-1 py-2">
-                  <div class="h-8 flex items-center justify-center">
-                    <div v-if="getEmployeeAssignment(employee.id, '2pm')" 
-                         @click="removeAssignment(getEmployeeAssignment(employee.id, '2pm').id)"
-                         class="w-full h-full flex items-center justify-center rounded cursor-pointer hover:opacity-80 transition text-xs font-medium"
-                         :style="{ 
-                           backgroundColor: getJobFunctionColor(getEmployeeAssignment(employee.id, '2pm').job_function), 
-                           color: getEmployeeAssignment(employee.id, '2pm').job_function === 'Locus' ? '#000' : '#fff' 
-                         }">
-                      {{ getEmployeeAssignment(employee.id, '2pm').job_function }}
-                    </div>
-                    <button v-else @click="addAssignmentToEmployee(employee.id, '2pm')" 
-                            class="w-full h-full text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition text-xs border border-dashed border-gray-300">
-                      +
-                    </button>
-                  </div>
-                </td>
-                <td class="border border-gray-200 px-1 py-2">
-                  <div class="h-8 flex items-center justify-center">
-                    <div v-if="getEmployeeAssignment(employee.id, '4pm')" 
-                         @click="removeAssignment(getEmployeeAssignment(employee.id, '4pm').id)"
-                         class="w-full h-full flex items-center justify-center rounded cursor-pointer hover:opacity-80 transition text-xs font-medium"
-                         :style="{ 
-                           backgroundColor: getJobFunctionColor(getEmployeeAssignment(employee.id, '4pm').job_function), 
-                           color: getEmployeeAssignment(employee.id, '4pm').job_function === 'Locus' ? '#000' : '#fff' 
-                         }">
-                      {{ getEmployeeAssignment(employee.id, '4pm').job_function }}
-                    </div>
-                    <button v-else @click="addAssignmentToEmployee(employee.id, '4pm')" 
-                            class="w-full h-full text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition text-xs border border-dashed border-gray-300">
-                      +
-                    </button>
-                  </div>
-                </td>
-                <td class="border border-gray-200 px-1 py-2">
-                  <div class="h-8 flex items-center justify-center">
-                    <div v-if="getEmployeeAssignment(employee.id, '6pm')" 
-                         @click="removeAssignment(getEmployeeAssignment(employee.id, '6pm').id)"
-                         class="w-full h-full flex items-center justify-center rounded cursor-pointer hover:opacity-80 transition text-xs font-medium"
-                         :style="{ 
-                           backgroundColor: getJobFunctionColor(getEmployeeAssignment(employee.id, '6pm').job_function), 
-                           color: getEmployeeAssignment(employee.id, '6pm').job_function === 'Locus' ? '#000' : '#fff' 
-                         }">
-                      {{ getEmployeeAssignment(employee.id, '6pm').job_function }}
-                    </div>
-                    <button v-else @click="addAssignmentToEmployee(employee.id, '6pm')" 
-                            class="w-full h-full text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition text-xs border border-dashed border-gray-300">
-                      +
-                    </button>
-                  </div>
-                </td>
-                <td class="border border-gray-200 px-1 py-2">
-                  <div class="h-8 flex items-center justify-center">
-                    <div v-if="getEmployeeAssignment(employee.id, '8pm')" 
-                         @click="removeAssignment(getEmployeeAssignment(employee.id, '8pm').id)"
-                         class="w-full h-full flex items-center justify-center rounded cursor-pointer hover:opacity-80 transition text-xs font-medium"
-                         :style="{ 
-                           backgroundColor: getJobFunctionColor(getEmployeeAssignment(employee.id, '8pm').job_function), 
-                           color: getEmployeeAssignment(employee.id, '8pm').job_function === 'Locus' ? '#000' : '#fff' 
-                         }">
-                      {{ getEmployeeAssignment(employee.id, '8pm').job_function }}
-                    </div>
-                    <button v-else @click="addAssignmentToEmployee(employee.id, '8pm')" 
-                            class="w-full h-full text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition text-xs border border-dashed border-gray-300">
-                      +
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+      <!-- Shift-Based Schedule Layout -->
+      <div v-if="loading" class="card text-center py-8">
+        <p class="text-gray-600">Loading schedule data...</p>
+      </div>
+      
+      <div v-else-if="error" class="card text-center py-8">
+        <p class="text-red-600">Error loading schedule: {{ error }}</p>
+      </div>
+      
+      <div v-else-if="!employees.length" class="card text-center py-8">
+        <p class="text-gray-600">No employees found. Please add employees first.</p>
+      </div>
+      
+      <!-- Full-width schedule container with horizontal scroll -->
+      <div v-else class="w-full overflow-x-auto">
+        <div class="min-w-max">
+          <ShiftGroupedSchedule
+            :employees="employees"
+            :schedule-assignments="scheduleAssignments"
+            :job-functions="jobFunctions"
+            :shifts="scheduleData"
+            :schedule-assignments-data="scheduleAssignmentsData"
+            @add-assignment="handleAddAssignment"
+            @edit-assignment="handleEditAssignment"
+            @assign-break-coverage="handleBreakCoverage"
+            @schedule-data-updated="handleScheduleDataUpdated"
+          />
         </div>
       </div>
 
@@ -233,7 +98,7 @@
       <div v-if="showEmployeeModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div class="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
           <h3 class="text-xl font-bold mb-4">
-            Assign Job Function to {{ selectedEmployee?.last_name }}, {{ selectedEmployee?.first_name }}
+            Assign Job Function to {{ selectedEmployee?.last_name || '' }}, {{ selectedEmployee?.first_name || '' }}
             <span v-if="selectedShift"> - {{ selectedShift.name }}</span>
           </h3>
           
@@ -245,7 +110,7 @@
                    class="flex items-center justify-between p-2 border border-gray-200 rounded hover:bg-gray-50">
                 <div class="flex items-center space-x-2">
                   <div class="w-4 h-4 rounded border border-gray-300" 
-                       :style="{ backgroundColor: getJobFunctionColor([jobFunction]) }"></div>
+                       :style="{ backgroundColor: getJobFunctionColor(jobFunction) }"></div>
                   <span class="text-sm">{{ jobFunction }}</span>
                 </div>
                 <button @click="assignJobFunction(jobFunction)" 
@@ -264,7 +129,7 @@
                    class="flex items-center justify-between p-2 bg-gray-50 rounded">
                 <div class="flex items-center space-x-2">
                   <div class="w-4 h-4 rounded" 
-                       :style="{ backgroundColor: getJobFunctionColor([assignment.job_function]) }"></div>
+                       :style="{ backgroundColor: getJobFunctionColor(assignment.job_function) }"></div>
                   <span class="text-sm">{{ assignment.job_function }}</span>
                 </div>
                 <button @click="removeAssignment(assignment.id)" 
@@ -287,182 +152,196 @@
 </template>
 
 <script setup lang="ts">
-// Mock data for shifts
-const scheduleData = ref([
-  {
-    id: '6am',
-    name: '6:00 AM Shift',
-    start_time: '6:00 AM',
-    end_time: '2:30 PM',
-    employee_count: 4
-  },
-  {
-    id: '7am',
-    name: '7:00 AM Shift',
-    start_time: '7:00 AM',
-    end_time: '3:30 PM',
-    employee_count: 1
-  },
-  {
-    id: '8am',
-    name: '8:00 AM Shift',
-    start_time: '8:00 AM',
-    end_time: '4:30 PM',
-    employee_count: 12
-  },
-  {
-    id: '10am',
-    name: '10:00 AM Shift',
-    start_time: '10:00 AM',
-    end_time: '6:30 PM',
-    employee_count: 15
-  },
-  {
-    id: '12pm',
-    name: '12:00 PM Shift',
-    start_time: '12:00 PM',
-    end_time: '8:30 PM',
-    employee_count: 10
-  },
-  {
-    id: '4pm',
-    name: '4:00 PM Shift',
-    start_time: '4:00 PM',
-    end_time: '8:30 PM',
-    employee_count: 5
-  }
-])
+// Import the component explicitly
+import ShiftGroupedSchedule from '~/components/schedule/ShiftGroupedSchedule.vue'
 
-// Mock employee data
-const employees = ref([
-  { id: '1', first_name: 'John', last_name: 'Smith', trained_job_functions: ['RT Pick', 'Pick'] },
-  { id: '2', first_name: 'Sarah', last_name: 'Johnson', trained_job_functions: ['Pick', 'Meter'] },
-  { id: '3', first_name: 'Mike', last_name: 'Davis', trained_job_functions: ['RT Pick', 'Locus'] },
-  { id: '4', first_name: 'Lisa', last_name: 'Wilson', trained_job_functions: ['Meter', 'Helpdesk'] },
-  { id: '5', first_name: 'Tom', last_name: 'Brown', trained_job_functions: ['Locus', 'Coordinator'] },
-  { id: '6', first_name: 'Emma', last_name: 'Garcia', trained_job_functions: ['Team Lead', 'Helpdesk'] },
-  { id: '7', first_name: 'Chris', last_name: 'Martinez', trained_job_functions: ['RT Pick', 'Pick', 'Meter'] },
-  { id: '8', first_name: 'Amy', last_name: 'Anderson', trained_job_functions: ['Pick', 'Locus'] },
-  { id: '9', first_name: 'David', last_name: 'Taylor', trained_job_functions: ['Meter', 'Helpdesk'] },
-  { id: '10', first_name: 'Jessica', last_name: 'Thomas', trained_job_functions: ['Locus', 'Coordinator'] },
-  { id: '11', first_name: 'Kevin', last_name: 'Jackson', trained_job_functions: ['Team Lead', 'Helpdesk'] },
-  { id: '12', first_name: 'Rachel', last_name: 'White', trained_job_functions: ['RT Pick', 'Pick'] },
-  { id: '13', first_name: 'Mark', last_name: 'Harris', trained_job_functions: ['Pick', 'Meter'] },
-  { id: '14', first_name: 'Nicole', last_name: 'Martin', trained_job_functions: ['RT Pick', 'Locus'] },
-  { id: '15', first_name: 'Steve', last_name: 'Thompson', trained_job_functions: ['Meter', 'Helpdesk'] },
-  { id: '16', first_name: 'Michelle', last_name: 'Garcia', trained_job_functions: ['Locus', 'Coordinator'] },
-  { id: '17', first_name: 'Ryan', last_name: 'Martinez', trained_job_functions: ['Team Lead', 'Helpdesk'] },
-  { id: '18', first_name: 'Stephanie', last_name: 'Robinson', trained_job_functions: ['RT Pick', 'Pick', 'Meter'] },
-  { id: '19', first_name: 'Brian', last_name: 'Clark', trained_job_functions: ['Pick', 'Locus'] },
-  { id: '20', first_name: 'Jennifer', last_name: 'Rodriguez', trained_job_functions: ['Meter', 'Helpdesk'] },
-  { id: '21', first_name: 'Jason', last_name: 'Lewis', trained_job_functions: ['Locus', 'Coordinator'] },
-  { id: '22', first_name: 'Amanda', last_name: 'Lee', trained_job_functions: ['Team Lead', 'Helpdesk'] },
-  { id: '23', first_name: 'Daniel', last_name: 'Walker', trained_job_functions: ['RT Pick', 'Pick'] },
-  { id: '24', first_name: 'Laura', last_name: 'Hall', trained_job_functions: ['Pick', 'Meter'] },
-  { id: '25', first_name: 'Robert', last_name: 'Allen', trained_job_functions: ['RT Pick', 'Locus'] },
-  { id: '26', first_name: 'Heather', last_name: 'Young', trained_job_functions: ['Meter', 'Helpdesk'] },
-  { id: '27', first_name: 'Michael', last_name: 'King', trained_job_functions: ['Locus', 'Coordinator'] },
-  { id: '28', first_name: 'Melissa', last_name: 'Wright', trained_job_functions: ['Team Lead', 'Helpdesk'] },
-  { id: '29', first_name: 'Andrew', last_name: 'Lopez', trained_job_functions: ['RT Pick', 'Pick', 'Meter'] },
-  { id: '30', first_name: 'Kimberly', last_name: 'Hill', trained_job_functions: ['Pick', 'Locus'] }
-])
+// Use real composables instead of mock data
+const { 
+  employees, 
+  loading: employeesLoading, 
+  error: employeesError, 
+  fetchEmployees 
+} = useEmployees()
 
-// Schedule assignments - this would come from database
-const scheduleAssignments = ref([
-  // Sample assignments for 2-hour blocks
-  { id: '1', employee_id: '1', shift_id: '6am', job_function: 'RT Pick' },
-  { id: '2', employee_id: '2', shift_id: '6am', job_function: 'Pick' },
-  { id: '3', employee_id: '3', shift_id: '8am', job_function: 'Meter' },
-  { id: '4', employee_id: '4', shift_id: '8am', job_function: 'Locus' },
-  { id: '5', employee_id: '5', shift_id: '10am', job_function: 'Helpdesk' },
-  { id: '6', employee_id: '6', shift_id: '10am', job_function: 'Team Lead' },
-  { id: '7', employee_id: '7', shift_id: '12pm', job_function: 'RT Pick' },
-  { id: '8', employee_id: '8', shift_id: '12pm', job_function: 'Pick' },
-  { id: '9', employee_id: '9', shift_id: '2pm', job_function: 'Meter' },
-  { id: '10', employee_id: '10', shift_id: '2pm', job_function: 'Locus' },
-  { id: '11', employee_id: '11', shift_id: '4pm', job_function: 'Helpdesk' },
-  { id: '12', employee_id: '12', shift_id: '4pm', job_function: 'Coordinator' },
-  { id: '13', employee_id: '13', shift_id: '6pm', job_function: 'RT Pick' },
-  { id: '14', employee_id: '14', shift_id: '6pm', job_function: 'Pick' },
-  { id: '15', employee_id: '15', shift_id: '8pm', job_function: 'Meter' }
-])
+const { 
+  jobFunctions, 
+  loading: functionsLoading, 
+  error: functionsError, 
+  fetchJobFunctions 
+} = useJobFunctions()
+
+const { 
+  shifts, 
+  loading: shiftsLoading, 
+  error: shiftsError, 
+  fetchShifts 
+} = useSchedule()
+
+const { 
+  scheduleAssignments: scheduleAssignmentsRef, 
+  loading: assignmentsLoading, 
+  error: assignmentsError, 
+  fetchScheduleForDate,
+  createAssignment,
+  deleteAssignment
+} = useSchedule()
+
+// Ensure scheduleAssignments is always an array
+const scheduleAssignments = computed(() => (scheduleAssignmentsRef.value || []) as any[])
+
+// Create schedule data from shifts
+const scheduleData = computed(() => {
+  if (!shifts.value || shifts.value.length === 0) return []
+  return shifts.value.map((shift: any) => ({
+    id: shift.id,
+    name: shift.name,
+    start_time: shift.start_time,
+    end_time: shift.end_time,
+    break_1_start: shift.break_1_start,
+    break_1_end: shift.break_1_end,
+    break_2_start: shift.break_2_start,
+    break_2_end: shift.break_2_end,
+    lunch_start: shift.lunch_start,
+    lunch_end: shift.lunch_end,
+    employee_count: 0 // Will be calculated
+  }))
+})
+
+// Data loading
+const loading = computed(() => 
+  employeesLoading.value || functionsLoading.value || shiftsLoading.value || assignmentsLoading.value
+)
+
+const error = computed(() => 
+  employeesError.value || functionsError.value || shiftsError.value || assignmentsError.value
+)
 
 // Modal state
 const showEmployeeModal = ref(false)
-const selectedEmployee = ref(null)
-const selectedShift = ref(null)
+const selectedEmployee = ref<any>(null)
+const selectedShift = ref<any>(null)
 const selectedJobFunction = ref('')
+const scheduleAssignmentsData = ref<Record<string, any>>({})
 
 // Get route params
 const route = useRoute()
-const scheduleDate = ref(route.params.date || new Date().toISOString().split('T')[0])
+const scheduleDate = ref((route.params.date as string) || new Date().toISOString().split('T')[0])
+
+// Initialize schedule data from existing assignments
+const initializeScheduleData = () => {
+  console.log('Initializing schedule data...')
+  console.log('Schedule assignments:', scheduleAssignments.value)
+  console.log('Employees:', employees.value.length)
+  console.log('Job functions:', jobFunctions.value.length)
+  
+  const initialData: Record<string, any> = {}
+  
+  // Initialize data for each employee
+  employees.value.forEach((employee: any) => {
+    initialData[employee.id] = {}
+  })
+  
+  // Add existing assignments
+  scheduleAssignments.value.forEach((assignment: any) => {
+    if (!initialData[assignment.employee_id]) {
+      initialData[assignment.employee_id] = {}
+    }
+    
+    const jobFunction = jobFunctions.value.find((jf: any) => jf.id === assignment.job_function_id)
+    if (jobFunction) {
+      // Convert time format from "HH:MM:SS" to "HH:MM" for consistency
+      const timeKey = assignment.start_time.substring(0, 5) // "07:00:00" -> "07:00"
+      
+      initialData[assignment.employee_id][timeKey] = {
+        assignment: jobFunction.name,
+        until: assignment.end_time ? assignment.end_time.substring(0, 5) : ''
+      }
+    }
+  })
+  
+  console.log('Initialized schedule data:', initialData)
+  scheduleAssignmentsData.value = initialData
+  console.log('scheduleAssignmentsData after initialization:', scheduleAssignmentsData.value)
+}
+
+// Load data on mount
+onMounted(async () => {
+  try {
+    await Promise.all([
+      fetchEmployees(),
+      fetchJobFunctions(),
+      fetchShifts(),
+      fetchScheduleForDate(scheduleDate.value)
+    ])
+    
+    // Initialize schedule data from existing assignments
+    // Use nextTick to ensure all reactive data is updated
+    await nextTick()
+    initializeScheduleData()
+    
+  } catch (error) {
+    console.error('Error loading schedule data:', error)
+  }
+})
 
 // Computed properties
 const totalEmployees = computed(() => {
-  return scheduleAssignments.value.length
+  return employees.value.length
 })
 
 const totalLaborHours = computed(() => {
-  // Calculate based on shift durations (simplified)
-  const hoursPerShift = {
-    '6am': 8.5,
-    '7am': 8.5,
-    '8am': 8.5,
-    '10am': 8.5,
-    '12pm': 8.5,
-    '4pm': 4.5
-  }
-  
-  return scheduleAssignments.value.reduce((total, assignment) => {
-    return total + (hoursPerShift[assignment.shift_id] || 0)
-  }, 0)
+  // Calculate as total employees × 8 hours (standard work day)
+  return totalEmployees.value * 8
 })
 
 const totalShifts = computed(() => {
-  return scheduleData.value.length
+  return shifts.value.length
 })
 
 const unassignedEmployees = computed(() => {
-  const assignedEmployeeIds = new Set(scheduleAssignments.value.map(a => a.employee_id))
-  return employees.value.filter(e => !assignedEmployeeIds.has(e.id)).length
+  if (!scheduleAssignments.value || !employees.value) return 0
+  const assignedEmployeeIds = new Set(scheduleAssignments.value.map((a: any) => a.employee_id))
+  return employees.value.filter((e: any) => !assignedEmployeeIds.has(e.id)).length
 })
 
 const jobFunctionHours = computed(() => {
-  const jobFunctions = [
-    { name: 'RT Pick', color: '#FFA500' },
-    { name: 'Pick', color: '#FFFF00' },
-    { name: 'Meter', color: '#87CEEB' },
-    { name: 'Locus', color: '#FFFFFF' },
-    { name: 'Helpdesk', color: '#FFD700' },
-    { name: 'Coordinator', color: '#C0C0C0' },
-    { name: 'Team Lead', color: '#000080' }
-  ]
+  if (!jobFunctions.value || !scheduleAssignmentsData.value) return []
   
-  const hoursPerShift = {
-    '6am': 8.5,
-    '7am': 8.5,
-    '8am': 8.5,
-    '10am': 8.5,
-    '12pm': 8.5,
-    '4pm': 4.5
-  }
+  // Calculate hours based on actual schedule data from the component
+  const jobFunctionTotals: Record<string, number> = {}
   
-  return jobFunctions.map(job => {
-    const assignments = scheduleAssignments.value.filter(a => a.job_function === job.name)
-    const totalHours = assignments.reduce((total, assignment) => {
-      return total + (hoursPerShift[assignment.shift_id] || 0)
-    }, 0)
+  // Initialize all job functions with 0 hours
+  jobFunctions.value.forEach((job: any) => {
+    jobFunctionTotals[job.name] = 0
+  })
+  
+  // Calculate hours for each employee's schedule
+  Object.entries(scheduleAssignmentsData.value).forEach(([employeeId, employeeSchedule]: [string, any]) => {
+    Object.entries(employeeSchedule).forEach(([timeSlot, data]: [string, any]) => {
+      if (data.assignment && data.assignment.trim() !== '') {
+        // Each 15-minute slot = 0.25 hours
+        const jobName = data.assignment
+        if (jobFunctionTotals.hasOwnProperty(jobName)) {
+          jobFunctionTotals[jobName] += 0.25
+        }
+      }
+    })
+  })
+  
+  return jobFunctions.value.map((job: any) => {
+    const totalHours = jobFunctionTotals[job.name] || 0
     
     return {
-      ...job,
-      hours: totalHours,
-      employees: assignments.length
+      name: job.name,
+      color: job.color_code,
+      hours: Math.round(totalHours * 10) / 10, // Round to 1 decimal place
+      employees: 0 // We'll calculate this separately if needed
     }
   })
 })
 
 // Functions
-const formatDate = (dateString) => {
+const formatDate = (dateString: string) => {
   const date = new Date(dateString)
   return date.toLocaleDateString('en-US', { 
     weekday: 'long', 
@@ -472,33 +351,37 @@ const formatDate = (dateString) => {
   })
 }
 
-const getEmployeeAssignment = (employeeId, timeBlock) => {
-  return scheduleAssignments.value.find(a => 
+const getEmployeeAssignment = (employeeId: string, timeBlock: string) => {
+  if (!scheduleAssignments.value) return null
+  return scheduleAssignments.value.find((a: any) => 
     a.employee_id === employeeId && a.shift_id === timeBlock
   )
 }
 
-const getEmployeeAssignments = (employeeId, shiftId) => {
-  return scheduleAssignments.value.filter(a => 
+const getEmployeeAssignments = (employeeId: string, shiftId: string) => {
+  if (!scheduleAssignments.value) return []
+  return scheduleAssignments.value.filter((a: any) => 
     a.employee_id === employeeId && a.shift_id === shiftId
   )
 }
 
-const getEmployeesForShiftAndJob = (shiftId, jobFunction) => {
-  const assignments = scheduleAssignments.value.filter(a => 
+const getEmployeesForShiftAndJob = (shiftId: string, jobFunction: string) => {
+  if (!scheduleAssignments.value || !employees.value) return []
+  const assignments = scheduleAssignments.value.filter((a: any) => 
     a.shift_id === shiftId && a.job_function === jobFunction
   )
-  return assignments.map(assignment => 
-    employees.value.find(e => e.id === assignment.employee_id)
+  return assignments.map((assignment: any) => 
+    employees.value.find((e: any) => e.id === assignment.employee_id)
   ).filter(Boolean)
 }
 
-const getTotalEmployeesForShift = (shiftId) => {
-  return scheduleAssignments.value.filter(a => a.shift_id === shiftId).length
+const getTotalEmployeesForShift = (shiftId: string) => {
+  if (!scheduleAssignments.value) return 0
+  return scheduleAssignments.value.filter((a: any) => a.shift_id === shiftId).length
 }
 
-const getJobFunctionColor = (jobFunctions) => {
-  const colors = {
+const getJobFunctionColor = (jobFunctions: string) => {
+  const colors: Record<string, string> = {
     'RT Pick': '#FFA500',
     'Pick': '#FFFF00',
     'Meter': '#87CEEB',
@@ -507,17 +390,17 @@ const getJobFunctionColor = (jobFunctions) => {
     'Coordinator': '#C0C0C0',
     'Team Lead': '#000080'
   }
-  return colors[jobFunctions[0]] || '#3B82F6'
+  return colors[jobFunctions] || '#3B82F6'
 }
 
-const addAssignmentToEmployee = (employeeId, shiftId) => {
-  selectedEmployee.value = employees.value.find(e => e.id === employeeId)
-  selectedShift.value = scheduleData.value.find(s => s.id === shiftId)
+const addAssignmentToEmployee = (employeeId: string, shiftId: string) => {
+  selectedEmployee.value = employees.value.find((e: any) => e.id === employeeId) || null
+  selectedShift.value = scheduleData.value.find((s: any) => s.id === shiftId) || null
   showEmployeeModal.value = true
 }
 
-const addEmployeeToShift = (shiftId, jobFunction) => {
-  selectedShift.value = scheduleData.value.find(s => s.id === shiftId)
+const addEmployeeToShift = (shiftId: string, jobFunction: string) => {
+  selectedShift.value = scheduleData.value.find((s: any) => s.id === shiftId) || null
   selectedJobFunction.value = jobFunction
   showEmployeeModal.value = true
 }
@@ -526,51 +409,58 @@ const availableJobFunctions = computed(() => {
   if (!selectedEmployee.value) return []
   
   // Get job functions the employee is trained for
-  return selectedEmployee.value.trained_job_functions || []
+  return (selectedEmployee.value as any).trained_job_functions || []
 })
 
 const availableEmployees = computed(() => {
-  if (!selectedShift.value || !selectedJobFunction.value) return []
+  if (!selectedShift.value || !selectedJobFunction.value || !scheduleAssignments.value || !employees.value) return []
   
   const assignedEmployeeIds = scheduleAssignments.value
-    .filter(a => a.shift_id === selectedShift.value.id)
-    .map(a => a.employee_id)
+    .filter((a: any) => a.shift_id === (selectedShift.value as any).id)
+    .map((a: any) => a.employee_id)
   
-  return employees.value.filter(employee => 
+  return employees.value.filter((employee: any) => 
     !assignedEmployeeIds.includes(employee.id) && 
     employee.trained_job_functions.includes(selectedJobFunction.value)
   )
 })
 
-const assignJobFunction = (jobFunction) => {
+const assignJobFunction = (jobFunction: string) => {
+  if (!scheduleAssignments.value || !selectedEmployee.value || !selectedShift.value) return
+  
   scheduleAssignments.value.push({
     id: Date.now().toString(), // Simple ID generation
-    employee_id: selectedEmployee.value.id,
-    shift_id: selectedShift.value.id,
+    employee_id: (selectedEmployee.value as any).id,
+    shift_id: (selectedShift.value as any).id,
     job_function: jobFunction
   })
 }
 
-const removeAssignment = (assignmentId) => {
-  const index = scheduleAssignments.value.findIndex(a => a.id === assignmentId)
+const removeAssignment = (assignmentId: string) => {
+  if (!scheduleAssignments.value) return
+  const index = scheduleAssignments.value.findIndex((a: any) => a.id === assignmentId)
   if (index > -1) {
     scheduleAssignments.value.splice(index, 1)
   }
 }
 
-const assignEmployee = (employeeId) => {
+const assignEmployee = (employeeId: string) => {
+  if (!scheduleAssignments.value || !selectedShift.value) return
+  
   scheduleAssignments.value.push({
     id: Date.now().toString(),
     employee_id: employeeId,
-    shift_id: selectedShift.value.id,
+    shift_id: (selectedShift.value as any).id,
     job_function: selectedJobFunction.value
   })
 }
 
-const removeEmployee = (employeeId) => {
-  const index = scheduleAssignments.value.findIndex(a => 
+const removeEmployee = (employeeId: string) => {
+  if (!scheduleAssignments.value || !selectedShift.value) return
+  
+  const index = scheduleAssignments.value.findIndex((a: any) => 
     a.employee_id === employeeId && 
-    a.shift_id === selectedShift.value.id &&
+    a.shift_id === (selectedShift.value as any).id &&
     a.job_function === selectedJobFunction.value
   )
   if (index > -1) {
@@ -585,9 +475,128 @@ const closeEmployeeModal = () => {
   selectedJobFunction.value = ''
 }
 
-const saveSchedule = () => {
-  // This would save to database
-  console.log('Saving schedule:', scheduleAssignments.value)
-  alert('Schedule saved successfully!')
+// Time utility functions
+const timeToMinutes = (timeStr: string): number => {
+  const [hours, minutes] = timeStr.split(':').map(Number)
+  return hours * 60 + minutes
 }
+
+const minutesToTime = (minutes: number): string => {
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
+}
+
+const clearAssignmentsForDate = async (date: string) => {
+  try {
+    // Get all assignments for this date
+    const assignmentsToDelete = scheduleAssignments.value.filter(assignment => 
+      assignment.schedule_date === date
+    )
+    
+    // Delete each assignment
+    for (const assignment of assignmentsToDelete) {
+      await deleteAssignment(assignment.id)
+    }
+  } catch (error) {
+    console.error('Error clearing assignments:', error)
+    throw error
+  }
+}
+
+const saveSchedule = async () => {
+  try {
+    // Clear existing assignments for this date first
+    await clearAssignmentsForDate(scheduleDate.value)
+    
+    // Convert scheduleAssignmentsData to database format and save
+    const assignmentsToSave = []
+    
+    Object.entries(scheduleAssignmentsData.value).forEach(([employeeId, employeeSchedule]) => {
+      Object.entries(employeeSchedule).forEach(([timeSlot, data]) => {
+        if (data.assignment && data.assignment.trim() !== '') {
+          // Find the job function ID
+          const jobFunction = jobFunctions.value.find(jf => jf.name === data.assignment)
+          if (jobFunction) {
+            // Find the shift ID for this time slot
+            const shift = shifts.value.find(s => {
+              // Check if this time slot falls within the shift hours
+              const timeSlotMinutes = timeToMinutes(timeSlot)
+              const shiftStartMinutes = timeToMinutes(s.start_time)
+              const shiftEndMinutes = timeToMinutes(s.end_time)
+              return timeSlotMinutes >= shiftStartMinutes && timeSlotMinutes < shiftEndMinutes
+            })
+            
+            if (shift) {
+              // Calculate end time (15 minutes later)
+              const startTimeMinutes = timeToMinutes(timeSlot)
+              const endTimeMinutes = startTimeMinutes + 15
+              const endTime = minutesToTime(endTimeMinutes)
+              
+              assignmentsToSave.push({
+                employee_id: employeeId,
+                job_function_id: jobFunction.id,
+                shift_id: shift.id,
+                start_time: timeSlot,
+                end_time: endTime,
+                schedule_date: scheduleDate.value
+              })
+            }
+          }
+        }
+      })
+    })
+    
+    // Save all assignments
+    if (assignmentsToSave.length > 0) {
+      for (const assignment of assignmentsToSave) {
+        await createAssignment(assignment)
+      }
+    }
+    
+    // Refresh the schedule data
+    await fetchScheduleForDate(scheduleDate.value)
+    
+    alert(`Schedule saved successfully! ${assignmentsToSave.length} assignments created.`)
+  } catch (error) {
+    console.error('Error saving schedule:', error)
+    alert(`Error saving schedule: ${error.message || 'Unknown error'}. Please try again.`)
+  }
+}
+
+// Event handlers for 15-minute grid
+const handleAddAssignment = (employeeId: string, timeSlot: string) => {
+  selectedEmployee.value = employees.value.find((e: any) => e.id === employeeId) || null
+  selectedShift.value = { id: timeSlot, name: `${timeSlot} Slot` }
+  showEmployeeModal.value = true
+}
+
+const handleEditAssignment = (employeeId: string, timeSlot: string) => {
+  const assignment = getEmployeeAssignment(employeeId, timeSlot)
+  if (assignment) {
+    selectedEmployee.value = employees.value.find((e: any) => e.id === employeeId) || null
+    selectedShift.value = { id: timeSlot, name: `${timeSlot} Slot` }
+    selectedJobFunction.value = (assignment as any).job_function
+    showEmployeeModal.value = true
+  }
+}
+
+const handleBreakCoverage = (employeeId: string, timeSlot: any) => {
+  // Handle break coverage assignment
+  console.log('Assigning break coverage:', employeeId, timeSlot)
+  // You can implement break coverage logic here
+}
+
+const handleScheduleDataUpdated = (newScheduleData: Record<string, any>) => {
+  scheduleAssignmentsData.value = newScheduleData
+}
+
+// Watch for changes in schedule assignments and update schedule data
+watch(scheduleAssignments, () => {
+  initializeScheduleData()
+}, { deep: true })
+
 </script>
+
+<style scoped>
+</style>

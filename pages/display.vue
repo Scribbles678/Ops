@@ -42,37 +42,48 @@
           {{ shift.name }}
         </h2>
 
-        <!-- Assignments Grid -->
-        <div v-if="shift.assignments.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <!-- Employees Grid -->
+        <div v-if="shift.employees && shift.employees.length > 0" class="space-y-4">
           <div
-            v-for="assignment in shift.assignments"
-            :key="assignment.id"
-            class="rounded-lg p-4 text-white font-semibold border-2 border-opacity-50"
-            :style="{
-              backgroundColor: assignment.job_function.color_code,
-              borderColor: darkenColor(assignment.job_function.color_code)
-            }"
+            v-for="employee in shift.employees"
+            :key="employee.id"
+            class="bg-gray-700 rounded-lg p-4"
           >
-            <div class="flex flex-col">
-              <div class="text-lg mb-1">
-                {{ assignment.employee.last_name }}, {{ assignment.employee.first_name }}
-              </div>
-              <div class="text-sm opacity-90 mb-2">
-                {{ assignment.job_function.name }}
-              </div>
-              <div class="text-sm opacity-75 flex items-center">
-                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                {{ formatTime(assignment.start_time) }} - {{ formatTime(assignment.end_time) }}
+            <!-- Employee Header -->
+            <div class="text-lg font-semibold mb-3 text-white">
+              {{ employee.last_name }}, {{ employee.first_name }}
+            </div>
+            
+            <!-- Employee Assignments -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              <div
+                v-for="assignment in employee.assignments"
+                :key="assignment.id"
+                class="rounded-lg p-3 text-white font-medium border-2 border-opacity-50"
+                :style="{
+                  backgroundColor: assignment.job_function.color_code,
+                  borderColor: darkenColor(assignment.job_function.color_code)
+                }"
+              >
+                <div class="flex flex-col">
+                  <div class="text-sm font-semibold mb-1">
+                    {{ assignment.job_function.name }}
+                  </div>
+                  <div class="text-xs opacity-90 flex items-center">
+                    <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {{ formatTime(assignment.start_time) }} - {{ formatTime(assignment.end_time) }}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- No assignments message -->
+        <!-- No employees message -->
         <div v-else class="text-center py-8 text-gray-500">
-          No assignments scheduled for this shift
+          No staff scheduled for this shift
         </div>
       </div>
 
@@ -87,7 +98,7 @@
 
     <!-- Auto-refresh indicator -->
     <div class="fixed bottom-4 right-4 bg-gray-800 px-4 py-2 rounded-lg text-sm text-gray-400 border border-gray-700">
-      Auto-refreshing every 30 seconds
+      Auto-refreshing every 2 minutes
     </div>
   </div>
 </template>
@@ -114,19 +125,116 @@ const formattedDate = computed(() => {
 })
 
 const shiftsWithAssignments = computed(() => {
-  return shifts.value.map((shift: any) => ({
-    ...shift,
-    assignments: assignments.value.filter((a: any) => a.shift_id === shift.id)
-  }))
+  console.log('Computing shiftsWithAssignments...')
+  // Get all assignments and consolidate them first
+  const allAssignments = consolidateAssignments(assignments.value)
+  
+  // Group assignments by employee to find their starting shift
+  const employeeStartingShifts = new Map()
+  
+  allAssignments.forEach(assignment => {
+    const employeeId = assignment.employee_id
+    if (!employeeStartingShifts.has(employeeId)) {
+      // Find the shift this assignment belongs to
+      const shift = shifts.value.find(s => s.id === assignment.shift_id)
+      if (shift) {
+        employeeStartingShifts.set(employeeId, {
+          shift,
+          assignments: []
+        })
+      }
+    }
+    
+    // Add this assignment to the employee's list
+    const employeeData = employeeStartingShifts.get(employeeId)
+    if (employeeData) {
+      employeeData.assignments.push(assignment)
+    }
+  })
+  
+  // Convert back to shift-based structure
+  const shiftMap = new Map()
+  
+  employeeStartingShifts.forEach((employeeData, employeeId) => {
+    const shiftId = employeeData.shift.id
+    if (!shiftMap.has(shiftId)) {
+      shiftMap.set(shiftId, {
+        ...employeeData.shift,
+        employees: []
+      })
+    }
+    
+    // Group assignments by job function for this employee
+    const assignmentsByJobFunction = new Map()
+    employeeData.assignments.forEach(assignment => {
+      const jobFunctionId = assignment.job_function_id
+      if (!assignmentsByJobFunction.has(jobFunctionId)) {
+        assignmentsByJobFunction.set(jobFunctionId, [])
+      }
+      assignmentsByJobFunction.get(jobFunctionId).push(assignment)
+    })
+    
+    // Create employee object with consolidated assignments
+    const employee = {
+      id: employeeId,
+      first_name: employeeData.assignments[0].employee.first_name,
+      last_name: employeeData.assignments[0].employee.last_name,
+      assignments: Array.from(assignmentsByJobFunction.values()).flat()
+    }
+    
+    shiftMap.get(shiftId).employees.push(employee)
+  })
+  
+  return Array.from(shiftMap.values())
 })
+
+// Function to consolidate consecutive assignments for the same employee and job function
+const consolidateAssignments = (assignments: any[]) => {
+  if (!assignments || assignments.length === 0) return []
+  
+  // Sort assignments by employee, job function, and start time
+  const sorted = [...assignments].sort((a, b) => {
+    if (a.employee_id !== b.employee_id) return a.employee_id.localeCompare(b.employee_id)
+    if (a.job_function_id !== b.job_function_id) return a.job_function_id.localeCompare(b.job_function_id)
+    return a.start_time.localeCompare(b.start_time)
+  })
+  
+  const consolidated: any[] = []
+  let currentBlock: any = null
+  
+  for (const assignment of sorted) {
+    if (!currentBlock) {
+      // Start a new block
+      currentBlock = { ...assignment }
+    } else if (
+      currentBlock.employee_id === assignment.employee_id &&
+      currentBlock.job_function_id === assignment.job_function_id &&
+      currentBlock.end_time === assignment.start_time
+    ) {
+      // Extend the current block
+      currentBlock.end_time = assignment.end_time
+    } else {
+      // Save the current block and start a new one
+      consolidated.push(currentBlock)
+      currentBlock = { ...assignment }
+    }
+  }
+  
+  // Don't forget the last block
+  if (currentBlock) {
+    consolidated.push(currentBlock)
+  }
+  
+  return consolidated
+}
 
 onMounted(() => {
   loadData()
   
-  // Set up auto-refresh every 30 seconds
+  // Set up auto-refresh every 2 minutes
   refreshInterval.value = setInterval(() => {
     loadData()
-  }, 30000)
+  }, 120000)
 })
 
 onUnmounted(() => {
@@ -136,9 +244,23 @@ onUnmounted(() => {
 })
 
 const loadData = async () => {
-  await fetchShifts()
-  await fetchScheduleForDate(today.value)
-  updateLastUpdated()
+  // Don't show loading state for background refreshes
+  const wasLoading = loading.value
+  if (!wasLoading) {
+    loading.value = true
+  }
+  
+  try {
+    console.log('Refreshing display data...')
+    await fetchShifts()
+    await fetchScheduleForDate(today.value)
+    updateLastUpdated()
+    console.log('Display data refreshed')
+  } finally {
+    if (!wasLoading) {
+      loading.value = false
+    }
+  }
 }
 
 const refreshData = () => {

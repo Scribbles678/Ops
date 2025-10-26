@@ -120,6 +120,31 @@ export const useEmployees = () => {
     }
   }
 
+  const getAllEmployeeTraining = async (employeeIds) => {
+    try {
+      const { data, error: fetchError } = await $supabase
+        .from('employee_training')
+        .select('employee_id, job_function_id')
+        .in('employee_id', employeeIds)
+      
+      if (fetchError) throw fetchError
+      
+      // Group by employee_id
+      const trainingMap = {}
+      data.forEach(t => {
+        if (!trainingMap[t.employee_id]) {
+          trainingMap[t.employee_id] = []
+        }
+        trainingMap[t.employee_id].push(t.job_function_id)
+      })
+      
+      return trainingMap
+    } catch (e) {
+      console.error('Error fetching all employee training:', e)
+      return {}
+    }
+  }
+
   const updateEmployeeTraining = async (employeeId, jobFunctionIds) => {
     loading.value = true
     error.value = null
@@ -164,6 +189,7 @@ export const useEmployees = () => {
     updateEmployee,
     deleteEmployee,
     getEmployeeTraining,
+    getAllEmployeeTraining,
     updateEmployeeTraining
   }
 }

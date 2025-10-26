@@ -21,7 +21,7 @@
 
       <!-- Loading State -->
       <div v-if="loading" class="card text-center py-8">
-        <p class="text-gray-600">Loading training data...</p>
+        <p class="text-gray-600">Loading job functions...</p>
       </div>
 
       <!-- Error State -->
@@ -46,18 +46,30 @@
 
       <!-- Training Matrix -->
       <div v-if="!loading && !error" class="card">
+        <!-- Debug info -->
+        <div v-if="employees.length === 0" class="text-center py-8 text-gray-500">
+          <p>No employees found. {{ employeesLoading ? 'Still loading employees...' : 'Try adding some employees.' }}</p>
+        </div>
         <div class="space-y-3">
           <div
             v-for="employee in filteredEmployees"
             :key="employee.id"
+            :data-employee-id="employee.id"
             class="border-b border-gray-200 pb-3 last:border-b-0"
           >
             <!-- Employee Header with Controls -->
             <div class="flex justify-between items-start mb-2">
               <div class="flex items-center space-x-4">
-                <h3 class="text-lg font-semibold text-gray-800">
-                  {{ employee.last_name }}, {{ employee.first_name }}
-                </h3>
+                <div class="flex items-center space-x-2">
+                  <h3 class="text-lg font-semibold text-gray-800">
+                    {{ employee.last_name }}, {{ employee.first_name }}
+                  </h3>
+                  
+                  <!-- Individual Save Status Indicators -->
+                  <div :data-status-indicator="employee.id" class="flex items-center space-x-1">
+                    <!-- Status will be dynamically inserted here via DOM manipulation -->
+                  </div>
+                </div>
                 
                 <!-- Shift Selection -->
                 <div class="flex items-center space-x-2">
@@ -78,6 +90,14 @@
               <!-- Employee Actions -->
               <div class="flex items-center space-x-2">
                 <button
+                  :data-save-button="employee.id"
+                  @click="saveEmployeeTraining(employee.id)"
+                  disabled
+                  class="px-3 py-1 bg-gray-300 text-gray-500 rounded cursor-not-allowed text-sm"
+                >
+                  No Changes
+                </button>
+                <button
                   @click="openEditEmployeeModal(employee)"
                   class="px-3 py-1 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition text-sm"
                 >
@@ -97,10 +117,12 @@
               <label
                 v-for="jobFunction in jobFunctions"
                 :key="jobFunction.id"
-                class="flex items-center space-x-1 cursor-pointer hover:bg-gray-50 p-1 rounded text-xs"
+                class="flex items-center space-x-1 cursor-pointer hover:bg-gray-50 p-1 rounded text-xs transition-colors"
               >
                 <input
                   type="checkbox"
+                  :data-employee-id="employee.id"
+                  :data-job-function-id="jobFunction.id"
                   :checked="isEmployeeTrained(employee.id, jobFunction.id)"
                   @change="toggleTraining(employee.id, jobFunction.id)"
                   class="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
@@ -117,20 +139,29 @@
           </div>
         </div>
 
-        <!-- Save Button -->
-        <div class="mt-4 pt-4 border-t border-gray-200 flex justify-end">
-          <button
-            @click="saveChanges"
-            :disabled="!hasChanges || saving"
-            class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {{ saving ? 'Saving...' : 'Save Changes' }}
-          </button>
-        </div>
-
-        <!-- Success Message -->
-        <div v-if="showSuccess" class="mt-3 bg-green-50 border border-green-200 rounded-lg p-3">
-          <p class="text-green-600 text-sm">✓ Training updates saved successfully!</p>
+        <!-- Save Instructions -->
+        <div class="mt-4 pt-4 border-t border-gray-200">
+          <div class="flex items-center justify-center">
+            <div class="text-sm text-gray-500">
+              <span class="inline-flex items-center">
+                <svg class="w-4 h-4 mr-1 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2H4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
+                </svg>
+                Click checkboxes to make changes, then click "Save Changes" for each employee
+              </span>
+            </div>
+          </div>
+          
+          <!-- Training Data Loading Indicator -->
+          <div v-if="trainingDataLoading" class="mt-2 text-center">
+            <div class="inline-flex items-center text-sm text-blue-500">
+              <svg class="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Loading training data...
+            </div>
+          </div>
         </div>
       </div>
 
@@ -197,6 +228,10 @@
 </template>
 
 <script setup lang="ts">
+import { onBeforeRouteLeave } from 'vue-router'
+
+// Get Supabase client
+const { $supabase } = useNuxtApp()
 const { 
   employees, 
   loading: employeesLoading, 
@@ -204,6 +239,7 @@ const {
   fetchEmployees, 
   updateEmployeeTraining, 
   getEmployeeTraining,
+  getAllEmployeeTraining,
   createEmployee,
   updateEmployee,
   deleteEmployee: deleteEmployeeApi
@@ -215,8 +251,11 @@ const searchQuery = ref('')
 const employeeTraining = ref<Record<string, string[]>>({})
 const originalTraining = ref<Record<string, string[]>>({})
 const employeeShifts = ref<Record<string, string>>({})
-const saving = ref(false)
-const showSuccess = ref(false)
+const trainingDataLoading = ref(false)
+
+// Non-reactive state for pending changes (no Vue reactivity)
+const pendingChanges = new Map<string, string[]>()
+const saveStates = new Map<string, 'idle' | 'saving' | 'saved' | 'error'>()
 
 // Employee modal state
 const showEmployeeModal = ref(false)
@@ -227,7 +266,7 @@ const employeeFormData = ref({
   is_active: true
 })
 
-const loading = computed(() => employeesLoading.value || functionsLoading.value)
+const loading = computed(() => functionsLoading.value)
 const error = computed(() => employeesError.value)
 
 const filteredEmployees = computed(() => {
@@ -240,69 +279,236 @@ const filteredEmployees = computed(() => {
   })
 })
 
-const hasChanges = computed(() => {
-  return JSON.stringify(employeeTraining.value) !== JSON.stringify(originalTraining.value)
-})
+// hasChanges computed property removed since we're auto-saving
 
 onMounted(async () => {
-  await fetchEmployees()
-  await fetchJobFunctions()
-  await fetchShifts()
-  await loadTrainingData()
+  try {
+    // Load core data in parallel for immediate UI display
+    const [employeesResult, jobFunctionsResult, shiftsResult] = await Promise.all([
+      fetchEmployees(),
+      fetchJobFunctions(),
+      fetchShifts()
+    ])
+    
+    console.log('Loaded employees:', employeesResult?.length || 0)
+    console.log('Loaded job functions:', jobFunctionsResult?.length || 0)
+    console.log('Loaded shifts:', shiftsResult?.length || 0)
+    
+    // Load training data and employee shifts in the background (non-blocking)
+    // This allows the UI to show immediately while data loads
+    Promise.all([
+      loadTrainingData().catch(error => {
+        console.error('Error loading training data:', error)
+      }),
+      loadEmployeeShifts().catch(error => {
+        console.error('Error loading employee shifts:', error)
+      })
+    ])
+  } catch (error) {
+    console.error('Error loading initial data:', error)
+  }
+})
+
+// Navigation warning (backup safety measure)
+onBeforeRouteLeave((to, from, next) => {
+  // Since we're auto-saving, this is just a backup warning
+  // In case auto-save fails, we can still warn the user
+  const hasUnsavedChanges = JSON.stringify(employeeTraining.value) !== JSON.stringify(originalTraining.value)
+  
+  if (hasUnsavedChanges) {
+    if (confirm('You have unsaved training changes. Are you sure you want to leave this page?')) {
+      next()
+    } else {
+      next(false)
+    }
+  } else {
+    next()
+  }
 })
 
 const loadTrainingData = async () => {
-  const training: Record<string, string[]> = {}
+  if (employees.value.length === 0) return
   
-  for (const employee of employees.value) {
-    training[employee.id] = await getEmployeeTraining(employee.id)
+  trainingDataLoading.value = true
+  
+  try {
+    // Use bulk fetch for much faster loading
+    const employeeIds = employees.value.map(emp => emp.id)
+    const training = await getAllEmployeeTraining(employeeIds)
+    
+    employeeTraining.value = training
+    originalTraining.value = JSON.parse(JSON.stringify(training))
+  } finally {
+    trainingDataLoading.value = false
   }
+}
+
+const loadEmployeeShifts = async () => {
+  if (employees.value.length === 0) return
   
-  employeeTraining.value = training
-  originalTraining.value = JSON.parse(JSON.stringify(training))
+  try {
+    // Load employee shifts from database using the composable
+    const { data, error } = await $supabase
+      .from('employees')
+      .select('id, shift_id')
+      .in('id', employees.value.map(emp => emp.id))
+    
+    if (error) {
+      console.error('Error loading employee shifts:', error)
+      return
+    }
+    
+    // Build employee shifts object
+    const shifts: Record<string, string> = {}
+    data.forEach(emp => {
+      if (emp.shift_id) {
+        shifts[emp.id] = emp.shift_id
+      }
+    })
+    
+    employeeShifts.value = shifts
+  } catch (error) {
+    console.error('Error loading employee shifts:', error)
+  }
 }
 
 const isEmployeeTrained = (employeeId: string, jobFunctionId: string): boolean => {
+  // Check pending changes first (for immediate UI updates)
+  if (pendingChanges.has(employeeId)) {
+    return pendingChanges.get(employeeId)!.includes(jobFunctionId)
+  }
+  // Fall back to reactive state
   return employeeTraining.value[employeeId]?.includes(jobFunctionId) || false
 }
 
+
+// Completely non-reactive checkbox handling
 const toggleTraining = (employeeId: string, jobFunctionId: string) => {
-  if (!employeeTraining.value[employeeId]) {
-    employeeTraining.value[employeeId] = []
+  // Get current state from DOM or initialize
+  if (!pendingChanges.has(employeeId)) {
+    pendingChanges.set(employeeId, [...(employeeTraining.value[employeeId] || [])])
   }
-
-  const index = employeeTraining.value[employeeId].indexOf(jobFunctionId)
+  
+  const currentTraining = pendingChanges.get(employeeId)!
+  const index = currentTraining.indexOf(jobFunctionId)
+  
   if (index > -1) {
-    employeeTraining.value[employeeId].splice(index, 1)
+    currentTraining.splice(index, 1)
   } else {
-    employeeTraining.value[employeeId].push(jobFunctionId)
+    currentTraining.push(jobFunctionId)
+  }
+  
+  // Update the checkbox state in DOM (no reactive state changes)
+  const checkbox = document.querySelector(`[data-employee-id="${employeeId}"][data-job-function-id="${jobFunctionId}"]`) as HTMLInputElement
+  if (checkbox) {
+    checkbox.checked = currentTraining.includes(jobFunctionId)
+  }
+  
+  // Update save button state
+  updateSaveButtonState(employeeId)
+}
+
+// Update save button appearance based on pending changes
+const updateSaveButtonState = (employeeId: string) => {
+  const saveButton = document.querySelector(`[data-save-button="${employeeId}"]`) as HTMLButtonElement
+  if (!saveButton) return
+  
+  const hasChanges = pendingChanges.has(employeeId) && 
+    JSON.stringify(pendingChanges.get(employeeId)) !== JSON.stringify(employeeTraining.value[employeeId] || [])
+  
+  if (hasChanges) {
+    saveButton.disabled = false
+    saveButton.textContent = 'Save Changes'
+    saveButton.className = 'px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm'
+  } else {
+    saveButton.disabled = true
+    saveButton.textContent = 'No Changes'
+    saveButton.className = 'px-3 py-1 bg-gray-300 text-gray-500 rounded cursor-not-allowed text-sm'
   }
 }
 
-const saveChanges = async () => {
-  saving.value = true
-  showSuccess.value = false
-
+// Save changes for a specific employee
+const saveEmployeeTraining = async (employeeId: string) => {
+  if (!pendingChanges.has(employeeId)) return
+  
+  const saveButton = document.querySelector(`[data-save-button="${employeeId}"]`) as HTMLButtonElement
+  const statusIndicator = document.querySelector(`[data-status-indicator="${employeeId}"]`)
+  
+  // Set saving state
+  saveStates.set(employeeId, 'saving')
+  saveButton.disabled = true
+  saveButton.textContent = 'Saving...'
+  saveButton.className = 'px-3 py-1 bg-yellow-600 text-white rounded cursor-not-allowed text-sm'
+  
+  if (statusIndicator) {
+    statusIndicator.innerHTML = `
+      <div class="flex items-center">
+        <svg class="animate-spin h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span class="text-xs text-blue-500 ml-1">Saving...</span>
+      </div>
+    `
+  }
+  
   try {
-    // Save training for each employee that has changes
-    for (const employeeId in employeeTraining.value) {
-      if (JSON.stringify(employeeTraining.value[employeeId]) !== JSON.stringify(originalTraining.value[employeeId])) {
-        await updateEmployeeTraining(employeeId, employeeTraining.value[employeeId])
-      }
+    const newTraining = pendingChanges.get(employeeId)!
+    await updateEmployeeTraining(employeeId, newTraining)
+    
+    // Update reactive state only after successful save
+    employeeTraining.value[employeeId] = [...newTraining]
+    originalTraining.value[employeeId] = [...newTraining]
+    
+    // Clear pending changes
+    pendingChanges.delete(employeeId)
+    saveStates.set(employeeId, 'saved')
+    
+    // Show success state
+    saveButton.textContent = 'Saved!'
+    saveButton.className = 'px-3 py-1 bg-green-600 text-white rounded text-sm'
+    
+    if (statusIndicator) {
+      statusIndicator.innerHTML = `
+        <div class="flex items-center animate-pulse">
+          <svg class="h-4 w-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+          </svg>
+          <span class="text-xs text-green-500 ml-1">Saved</span>
+        </div>
+      `
     }
-
-    originalTraining.value = JSON.parse(JSON.stringify(employeeTraining.value))
-    showSuccess.value = true
-
+    
+    // Reset button after 2 seconds
     setTimeout(() => {
-      showSuccess.value = false
-    }, 3000)
+      updateSaveButtonState(employeeId)
+      if (statusIndicator) {
+        statusIndicator.innerHTML = ''
+      }
+    }, 2000)
+    
   } catch (e) {
-    console.error('Error saving training changes:', e)
-  } finally {
-    saving.value = false
+    console.error('Error saving training:', e)
+    saveStates.set(employeeId, 'error')
+    
+    saveButton.textContent = 'Error - Try Again'
+    saveButton.className = 'px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition text-sm'
+    saveButton.disabled = false
+    
+    if (statusIndicator) {
+      statusIndicator.innerHTML = `
+        <div class="flex items-center">
+          <svg class="h-4 w-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+          </svg>
+          <span class="text-xs text-red-500 ml-1">Error</span>
+        </div>
+      `
+    }
   }
 }
+
+// Auto-save functionality is now handled in toggleTraining()
 
 // Employee management functions
 const openAddEmployeeModal = () => {
@@ -370,9 +576,38 @@ const updateEmployeeShift = async (employeeId: string, event: Event) => {
   const shiftId = (event.target as HTMLSelectElement).value
   employeeShifts.value[employeeId] = shiftId
   
-  // Here you would typically save the shift assignment to the database
-  // For now, we'll just store it in local state
-  console.log(`Employee ${employeeId} assigned to shift ${shiftId}`)
+  // Show loading state
+  const selectElement = event.target as HTMLSelectElement
+  const originalText = selectElement.selectedOptions[0]?.textContent || ''
+  selectElement.disabled = true
+  
+  try {
+    // Update the employee's shift in the database
+    const { error } = await $supabase
+      .from('employees')
+      .update({ shift_id: shiftId || null })
+      .eq('id', employeeId)
+    
+    if (error) {
+      console.error('Error updating employee shift:', error)
+      alert('Failed to save shift assignment. Please try again.')
+      return
+    }
+    
+    console.log(`Employee ${employeeId} assigned to shift ${shiftId}`)
+    
+    // Show success feedback
+    selectElement.style.backgroundColor = '#d4edda'
+    setTimeout(() => {
+      selectElement.style.backgroundColor = ''
+    }, 1000)
+    
+  } catch (error) {
+    console.error('Error updating employee shift:', error)
+    alert('Failed to save shift assignment. Please try again.')
+  } finally {
+    selectElement.disabled = false
+  }
 }
 </script>
 
