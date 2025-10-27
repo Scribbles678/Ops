@@ -4,16 +4,92 @@
       <!-- Header -->
       <div class="flex items-center justify-between mb-8">
         <div>
-          <h1 class="text-4xl font-bold text-gray-800">Edit Today's Schedule</h1>
+          <h1 class="text-4xl font-bold text-gray-800">View/Edit Schedule</h1>
           <p class="text-gray-600 mt-2">{{ formatDate(scheduleDate || '') }}</p>
         </div>
         <div class="flex space-x-4">
-          <button @click="saveSchedule" class="btn-primary">
-            Save Schedule
+          <button 
+            @click="saveSchedule" 
+            :disabled="isSaving"
+            class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+          >
+            <svg v-if="isSaving" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            {{ isSaving ? 'Saving...' : 'Save Schedule' }}
+          </button>
+          <button @click="handleLogout" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+            Logout
           </button>
           <NuxtLink to="/" class="btn-secondary">
             ← Back to Home
           </NuxtLink>
+        </div>
+      </div>
+
+      <!-- Date Selector -->
+      <div class="card mb-6">
+        <div class="p-6">
+          <h2 class="text-xl font-bold text-gray-800 mb-4">Select Schedule Date</h2>
+          <div class="flex items-center space-x-4">
+            <div class="flex-1">
+              <label for="schedule-date" class="block text-sm font-medium text-gray-700 mb-2">
+                Schedule Date
+              </label>
+              <input
+                id="schedule-date"
+                v-model="scheduleDate"
+                type="date"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div class="flex flex-col space-y-2">
+              <button 
+                @click="goToToday" 
+                class="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm"
+              >
+                Today
+              </button>
+              <button 
+                @click="goToYesterday" 
+                class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm"
+              >
+                Yesterday
+              </button>
+              <button 
+                @click="goToTomorrow" 
+                class="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm"
+              >
+                Tomorrow
+              </button>
+            </div>
+          </div>
+          <div class="mt-4 p-3 bg-blue-50 rounded-lg">
+            <p class="text-sm text-blue-800">
+              <strong>Selected:</strong> {{ formatDate(scheduleDate) }}
+              <span v-if="isWeekend" class="ml-2 text-orange-600 font-medium">(Weekend)</span>
+              <span v-if="isFuture" class="ml-2 text-green-600 font-medium">(Future)</span>
+              <span v-if="isPast" class="ml-2 text-gray-600 font-medium">(Past)</span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Save Progress Indicator -->
+      <div v-if="isSaving" class="card mb-6 bg-blue-50 border-blue-200">
+        <div class="flex items-center space-x-4">
+          <svg class="animate-spin h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <div class="flex-1">
+            <h3 class="text-lg font-semibold text-blue-800">Saving Schedule...</h3>
+            <p class="text-sm text-blue-700">{{ saveProgress }}</p>
+            <p class="text-xs text-blue-600 mt-1">
+              💡 You can navigate away from this page - the save will continue in the background
+            </p>
+          </div>
         </div>
       </div>
 
@@ -57,8 +133,13 @@
               ></div>
               <span class="text-sm font-semibold text-gray-800">{{ jobFunction.name }}</span>
             </div>
-            <div class="text-3xl font-bold text-gray-900 bg-white rounded-lg py-2 px-3 shadow-sm">
+            <div class="text-xs text-gray-600 mb-2">Actual Hours</div>
+            <div class="text-3xl font-bold text-gray-900 bg-white rounded-lg py-2 px-3 shadow-sm mb-2">
               {{ jobFunction.hours }}
+            </div>
+            <div class="text-xs text-gray-600 mb-1">Target Hours</div>
+            <div class="text-lg font-semibold text-blue-600 bg-blue-50 rounded-lg py-1 px-2">
+              {{ getTargetHours(jobFunction.id) }}
             </div>
           </div>
         </div>
@@ -155,6 +236,9 @@
 // Import the component explicitly
 import ShiftGroupedSchedule from '~/components/schedule/ShiftGroupedSchedule.vue'
 
+// Supabase client
+const { $supabase } = useNuxtApp()
+
 // Use real composables instead of mock data
 const { 
   employees, 
@@ -223,9 +307,158 @@ const selectedShift = ref<any>(null)
 const selectedJobFunction = ref('')
 const scheduleAssignmentsData = ref<Record<string, any>>({})
 
+// Save state
+const isSaving = ref(false)
+const saveProgress = ref('')
+
+// Target hours state
+const targetHours = ref({})
+
 // Get route params
 const route = useRoute()
 const scheduleDate = ref((route.params.date as string) || new Date().toISOString().split('T')[0])
+
+// Date navigation functions
+const goToToday = () => {
+  scheduleDate.value = new Date().toISOString().split('T')[0]
+  navigateTo(`/schedule/${scheduleDate.value}`)
+}
+
+const goToYesterday = () => {
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  scheduleDate.value = yesterday.toISOString().split('T')[0]
+  navigateTo(`/schedule/${scheduleDate.value}`)
+}
+
+const goToTomorrow = () => {
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  scheduleDate.value = tomorrow.toISOString().split('T')[0]
+  navigateTo(`/schedule/${scheduleDate.value}`)
+}
+
+// Date status computed properties
+const isWeekend = computed(() => {
+  const date = new Date(scheduleDate.value)
+  const day = date.getDay()
+  return day === 0 || day === 6 // Sunday or Saturday
+})
+
+const isFuture = computed(() => {
+  const selectedDate = new Date(scheduleDate.value)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return selectedDate > today
+})
+
+const isPast = computed(() => {
+  const selectedDate = new Date(scheduleDate.value)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return selectedDate < today
+})
+
+// Watch for date changes to reload schedule data
+watch(scheduleDate, async (newDate) => {
+  if (newDate) {
+    await fetchScheduleForDate(newDate)
+    await nextTick()
+    initializeScheduleData()
+  }
+})
+
+// Reload target hours when page becomes active (for SPA navigation)
+onActivated(() => {
+  loadTargetHours()
+})
+
+// Listen for localStorage changes (when target hours are updated in another tab/page)
+onMounted(() => {
+  // Also listen for focus events to refresh when returning to the page
+  const handleFocus = () => {
+    loadTargetHours()
+  }
+  
+  window.addEventListener('focus', handleFocus)
+  
+  // Cleanup on unmount
+  onUnmounted(() => {
+    window.removeEventListener('focus', handleFocus)
+  })
+})
+
+// Target hours functions
+const loadTargetHours = async () => {
+  try {
+    console.log('Loading target hours from database...')
+    console.log('Job functions available:', jobFunctions.value.length)
+    
+    // First, let's check if the table exists and has any data
+    const { data: allData, error: allError } = await $supabase
+      .from('target_hours')
+      .select('*')
+    
+    console.log('All target_hours table data:', allData)
+    console.log('Any errors:', allError)
+    
+    // Load from database
+    const { data, error } = await $supabase
+      .from('target_hours')
+      .select('job_function_id, target_hours')
+    
+    if (error) {
+      console.error('Database error:', error)
+      throw error
+    }
+    
+    console.log('Raw target hours data from database:', data)
+    
+    // Convert array to object format
+    const targetHoursData = {}
+    if (data && data.length > 0) {
+      data.forEach(item => {
+        targetHoursData[item.job_function_id] = item.target_hours
+        console.log(`Mapped ${item.job_function_id} -> ${item.target_hours}`)
+      })
+    } else {
+      console.log('No target hours data found in database')
+    }
+    
+    console.log('Converted target hours data:', targetHoursData)
+    
+    // Don't add default values - only use what's in the database
+    console.log('Using only database values, no defaults added')
+    
+    targetHours.value = targetHoursData
+    console.log('Final target hours loaded:', targetHours.value)
+    
+  } catch (error) {
+    console.error('Error loading target hours:', error)
+    // Don't use fallback - keep targetHours empty so we can see the issue
+    targetHours.value = {}
+    console.log('Error occurred, targetHours.value set to empty object')
+  }
+}
+
+const getTargetHours = (jobFunctionId: string) => {
+  console.log(`Getting target hours for job function ${jobFunctionId}`)
+  console.log('Current targetHours.value:', targetHours.value)
+  
+  if (!targetHours.value || Object.keys(targetHours.value).length === 0) {
+    console.log('targetHours.value is empty, returning 0')
+    return 0
+  }
+  
+  const hours = targetHours.value[jobFunctionId]
+  if (hours === undefined || hours === null) {
+    console.log(`No target hours found for ${jobFunctionId}, returning 0`)
+    return 0
+  }
+  
+  console.log(`Found target hours for ${jobFunctionId}: ${hours}`)
+  return hours
+}
 
 // Initialize schedule data from existing assignments
 const initializeScheduleData = () => {
@@ -273,6 +506,9 @@ onMounted(async () => {
       fetchShifts(),
       fetchScheduleForDate(scheduleDate.value)
     ])
+    
+    // Load target hours from database
+    await loadTargetHours()
     
     // Initialize schedule data from existing assignments
     // Use nextTick to ensure all reactive data is updated
@@ -332,6 +568,7 @@ const jobFunctionHours = computed(() => {
     const totalHours = jobFunctionTotals[job.name] || 0
     
     return {
+      id: job.id,  // Add the missing id field
       name: job.name,
       color: job.color_code,
       hours: Math.round(totalHours * 10) / 10, // Round to 1 decimal place
@@ -506,10 +743,15 @@ const clearAssignmentsForDate = async (date: string) => {
 
 const saveSchedule = async () => {
   try {
+    isSaving.value = true
+    saveProgress.value = 'Preparing to save schedule...'
+    
     // Clear existing assignments for this date first
+    saveProgress.value = 'Clearing existing assignments...'
     await clearAssignmentsForDate(scheduleDate.value)
     
     // Convert scheduleAssignmentsData to database format and save
+    saveProgress.value = 'Processing schedule data...'
     const assignmentsToSave = []
     
     Object.entries(scheduleAssignmentsData.value).forEach(([employeeId, employeeSchedule]) => {
@@ -549,17 +791,28 @@ const saveSchedule = async () => {
     
     // Save all assignments
     if (assignmentsToSave.length > 0) {
-      for (const assignment of assignmentsToSave) {
+      saveProgress.value = `Saving ${assignmentsToSave.length} assignments to database...`
+      
+      for (let i = 0; i < assignmentsToSave.length; i++) {
+        const assignment = assignmentsToSave[i]
+        saveProgress.value = `Saving assignment ${i + 1} of ${assignmentsToSave.length}...`
         await createAssignment(assignment)
       }
     }
     
     // Refresh the schedule data
+    saveProgress.value = 'Refreshing schedule data...'
     await fetchScheduleForDate(scheduleDate.value)
     
+    // Success!
+    isSaving.value = false
+    saveProgress.value = ''
     alert(`Schedule saved successfully! ${assignmentsToSave.length} assignments created.`)
+    
   } catch (error) {
     console.error('Error saving schedule:', error)
+    isSaving.value = false
+    saveProgress.value = ''
     alert(`Error saving schedule: ${error.message || 'Unknown error'}. Please try again.`)
   }
 }
@@ -591,10 +844,37 @@ const handleScheduleDataUpdated = (newScheduleData: Record<string, any>) => {
   scheduleAssignmentsData.value = newScheduleData
 }
 
+const { logout } = useAuth()
+
+const handleLogout = async () => {
+  if (confirm('Are you sure you want to logout?')) {
+    await logout()
+  }
+}
+
 // Watch for changes in schedule assignments and update schedule data
 watch(scheduleAssignments, () => {
   initializeScheduleData()
 }, { deep: true })
+
+// Prevent accidental navigation during save
+onMounted(() => {
+  window.addEventListener('beforeunload', (e) => {
+    if (isSaving.value) {
+      e.preventDefault()
+      e.returnValue = 'Schedule is currently saving. Are you sure you want to leave?'
+    }
+  })
+})
+
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', (e) => {
+    if (isSaving.value) {
+      e.preventDefault()
+      e.returnValue = 'Schedule is currently saving. Are you sure you want to leave?'
+    }
+  })
+})
 
 </script>
 

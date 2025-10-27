@@ -46,6 +46,28 @@
             >
               Productivity Rates
             </button>
+            <button
+              @click="activeTab = 'cleanup'"
+              :class="[
+                'py-4 px-1 border-b-2 font-medium text-sm transition',
+                activeTab === 'cleanup'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ]"
+            >
+              Database Cleanup
+            </button>
+            <button
+              @click="activeTab = 'target-hours'"
+              :class="[
+                'py-4 px-1 border-b-2 font-medium text-sm transition',
+                activeTab === 'target-hours'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ]"
+            >
+              Target Hours
+            </button>
           </nav>
         </div>
       </div>
@@ -272,6 +294,291 @@
             </div>
           </div>
         </div>
+
+        <!-- Database Cleanup Tab -->
+        <div v-else-if="activeTab === 'cleanup'">
+          <div class="p-6">
+            <div class="flex justify-between items-center mb-6">
+              <h2 class="text-2xl font-bold text-gray-800">Database Cleanup</h2>
+              <button 
+                @click="refreshCleanupStats" 
+                :disabled="cleanupLoading"
+                class="btn-secondary disabled:opacity-50"
+              >
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh Stats
+              </button>
+            </div>
+
+            <!-- Cleanup Statistics -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+              <div class="card">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-600">Current Schedules</p>
+                    <p class="text-2xl font-bold text-gray-900">{{ cleanupStats?.total_assignments || 0 }}</p>
+                  </div>
+                  <div class="bg-blue-100 rounded-full p-3">
+                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-600">Archived Schedules</p>
+                    <p class="text-2xl font-bold text-gray-900">{{ cleanupStats?.total_archived_assignments || 0 }}</p>
+                  </div>
+                  <div class="bg-yellow-100 rounded-full p-3">
+                    <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8l4 4-4 4m5-4h6" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-600">To Cleanup</p>
+                    <p class="text-2xl font-bold text-red-600">{{ cleanupStats?.assignments_to_cleanup || 0 }}</p>
+                  </div>
+                  <div class="bg-red-100 rounded-full p-3">
+                    <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-600">Date Range</p>
+                    <p class="text-sm font-bold text-gray-900">
+                      {{ formatDate(cleanupStats?.oldest_schedule_date) }} - {{ formatDate(cleanupStats?.newest_schedule_date) }}
+                    </p>
+                  </div>
+                  <div class="bg-green-100 rounded-full p-3">
+                    <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Cleanup Actions -->
+            <div class="card mb-8">
+              <h3 class="text-xl font-bold text-gray-800 mb-4">Cleanup Actions</h3>
+              <div class="space-y-4">
+                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                  <div class="flex items-center">
+                    <svg class="w-5 h-5 text-yellow-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                    <p class="text-sm text-yellow-800">
+                      <strong>Retention Policy:</strong> Schedules older than 1 month are automatically archived and deleted from the main table.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="flex space-x-4">
+                  <button 
+                    @click="runManualCleanup" 
+                    :disabled="cleanupLoading || !cleanupStats?.assignments_to_cleanup"
+                    class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                  >
+                    <svg v-if="cleanupLoading" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    {{ cleanupLoading ? 'Running Cleanup...' : 'Run Cleanup Now' }}
+                  </button>
+                </div>
+
+                <div v-if="cleanupResult" class="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <h4 class="font-semibold text-green-800 mb-2">Cleanup Completed Successfully!</h4>
+                  <div class="text-sm text-green-700">
+                    <p>Archived {{ cleanupResult.archived_assignments }} schedule assignments</p>
+                    <p>Archived {{ cleanupResult.archived_targets }} daily targets</p>
+                    <p>Cleanup date: {{ formatDateTime(cleanupResult.cleanup_date) }}</p>
+                  </div>
+                </div>
+
+                <div v-if="cleanupError" class="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <h4 class="font-semibold text-red-800 mb-2">Cleanup Error</h4>
+                  <p class="text-sm text-red-700">{{ cleanupError }}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Cleanup Status Table -->
+            <div class="card mb-8">
+              <h3 class="text-xl font-bold text-gray-800 mb-4">Database Status</h3>
+              <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                  <thead class="bg-gray-50">
+                    <tr>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Table</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Records</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Oldest Date</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Newest Date</th>
+                    </tr>
+                  </thead>
+                  <tbody class="bg-white divide-y divide-gray-200">
+                    <tr v-for="status in cleanupStatus" :key="status.table_name">
+                      <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                        {{ status.table_name }}
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {{ status.record_count }}
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {{ formatDate(status.oldest_date) }}
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {{ formatDate(status.newest_date) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Cleanup Log -->
+            <div class="card">
+              <h3 class="text-xl font-bold text-gray-800 mb-4">Recent Cleanup Operations</h3>
+              <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                  <thead class="bg-gray-50">
+                    <tr>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assignments</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Targets</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody class="bg-white divide-y divide-gray-200">
+                    <tr v-for="log in cleanupLog" :key="log.id">
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {{ formatDateTime(log.cleanup_date) }}
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {{ log.archived_assignments }}
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {{ log.archived_targets }}
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap">
+                        <span :class="log.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'" 
+                              class="inline-flex px-2 py-1 text-xs font-semibold rounded-full">
+                          {{ log.success ? 'Success' : 'Failed' }}
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Target Hours Tab -->
+        <div v-else-if="activeTab === 'target-hours'">
+          <div class="p-6">
+            <div class="flex justify-between items-center mb-6">
+              <h2 class="text-2xl font-bold text-gray-800">Target Hours</h2>
+              <button 
+                @click="saveTargetHours" 
+                :disabled="targetHoursLoading"
+                class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+              >
+                <svg v-if="targetHoursLoading" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                {{ targetHoursLoading ? 'Saving...' : 'Save Changes' }}
+              </button>
+            </div>
+
+            <!-- Loading State -->
+            <div v-if="loading" class="text-center py-8">
+              <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <p class="mt-2 text-gray-600">Loading target hours...</p>
+            </div>
+
+            <!-- Error State -->
+            <div v-else-if="error" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+              <p class="text-red-600">Error loading target hours: {{ error }}</p>
+            </div>
+
+            <!-- Target Hours Table -->
+            <div v-else class="overflow-x-auto">
+              <table class="w-full border-collapse">
+                <thead>
+                  <tr class="bg-gray-50">
+                    <th class="border border-gray-200 px-4 py-3 text-left text-sm font-medium text-gray-700">Job Function</th>
+                    <th class="border border-gray-200 px-4 py-3 text-left text-sm font-medium text-gray-700">Target Hours</th>
+                    <th class="border border-gray-200 px-4 py-3 text-left text-sm font-medium text-gray-700">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="jobFunction in jobFunctions" :key="jobFunction.id">
+                    <td class="border border-gray-200 px-4 py-3">
+                      <div class="flex items-center space-x-3">
+                        <div 
+                          class="w-4 h-4 rounded border border-gray-300" 
+                          :style="{ backgroundColor: jobFunction.color_code }"
+                        ></div>
+                        <span class="font-medium text-gray-800">{{ jobFunction.name }}</span>
+                      </div>
+                    </td>
+                    <td class="border border-gray-200 px-4 py-3">
+                      <input 
+                        type="number" 
+                        :value="getTargetHours(jobFunction.id)" 
+                        @change="updateTargetHours(jobFunction.id, $event.target.value)"
+                        min="0"
+                        step="0.25"
+                        class="w-20 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td class="border border-gray-200 px-4 py-3">
+                      <span class="text-sm text-gray-600">
+                        Daily target hours for {{ jobFunction.name.toLowerCase() }} operations
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Help Text -->
+            <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <h4 class="font-semibold text-blue-800 mb-2">About Target Hours</h4>
+              <p class="text-sm text-blue-700">
+                Target hours represent the ideal number of hours each job function should be staffed per day. 
+                These values are used to compare against actual scheduled hours in the schedule view.
+              </p>
+            </div>
+
+            <!-- Success Message -->
+            <div v-if="targetHoursSaved" class="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+              <div class="flex items-center">
+                <svg class="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                <p class="text-sm text-green-800 font-medium">Target hours saved successfully!</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -490,6 +797,9 @@
 <script setup lang="ts">
 const activeTab = ref('job-functions')
 
+// Supabase client
+const { $supabase } = useNuxtApp()
+
 // Composables
 const { 
   jobFunctions, 
@@ -510,6 +820,27 @@ const {
   updateShift, 
   deleteShift 
 } = useSchedule()
+
+// Cleanup composables
+const { 
+  runCleanup, 
+  getCleanupStats, 
+  getCleanupLog, 
+  getCleanupStatus 
+} = useSchedule()
+
+// Cleanup state
+const cleanupStats = ref(null)
+const cleanupStatus = ref([])
+const cleanupLog = ref([])
+const cleanupResult = ref(null)
+const cleanupError = ref('')
+const cleanupLoading = ref(false)
+
+// Target hours state
+const targetHours = ref({})
+const targetHoursLoading = ref(false)
+const targetHoursSaved = ref(false)
 
 // Modal states
 const showJobFunctionModal = ref(false)
@@ -670,12 +1001,184 @@ const updateCustomUnit = async (jobFunctionId, customUnit) => {
   await updateJobFunction(jobFunctionId, { custom_unit: customUnit })
 }
 
+// Target hours functions
+const getTargetHours = (jobFunctionId) => {
+  return targetHours.value[jobFunctionId] || 8.00
+}
+
+const updateTargetHours = async (jobFunctionId, hours) => {
+  try {
+    // Only update local state, don't save yet
+    targetHours.value[jobFunctionId] = parseFloat(hours) || 0
+    console.log(`Updated local target hours for job function ${jobFunctionId} to ${hours}`)
+  } catch (error) {
+    console.error('Error updating target hours:', error)
+  }
+}
+
+const fetchTargetHours = async () => {
+  try {
+    targetHoursLoading.value = true
+    
+    // Load from database
+    const { data, error } = await $supabase
+      .from('target_hours')
+      .select('job_function_id, target_hours')
+    
+    if (error) throw error
+    
+    // Convert array to object format
+    const targetHoursData = {}
+    if (data) {
+      data.forEach(item => {
+        targetHoursData[item.job_function_id] = item.target_hours
+      })
+    }
+    
+    // Initialize with default values for any missing job functions
+    jobFunctions.value.forEach(jf => {
+      if (!targetHoursData[jf.id]) {
+        targetHoursData[jf.id] = 8.00
+      }
+    })
+    
+    targetHours.value = targetHoursData
+    console.log('Loaded target hours from database:', targetHours.value)
+    
+  } catch (error) {
+    console.error('Error fetching target hours:', error)
+    // Fallback to defaults
+    const defaultTargetHours = {}
+    jobFunctions.value.forEach(jf => {
+      defaultTargetHours[jf.id] = 8.00
+    })
+    targetHours.value = defaultTargetHours
+  } finally {
+    targetHoursLoading.value = false
+  }
+}
+
+const saveTargetHours = async () => {
+  try {
+    targetHoursLoading.value = true
+    targetHoursSaved.value = false
+    
+    // Prepare data for upsert
+    const upsertData = Object.entries(targetHours.value).map(([jobFunctionId, hours]) => ({
+      job_function_id: jobFunctionId,
+      target_hours: parseFloat(hours) || 0
+    }))
+    
+    // Save to database using upsert
+    const { error } = await $supabase
+      .from('target_hours')
+      .upsert(upsertData, { 
+        onConflict: 'job_function_id',
+        ignoreDuplicates: false 
+      })
+    
+    if (error) throw error
+    
+    console.log('Saved target hours to database:', targetHours.value)
+    
+    // Show success message
+    targetHoursSaved.value = true
+    setTimeout(() => {
+      targetHoursSaved.value = false
+    }, 3000)
+    
+  } catch (error) {
+    console.error('Error saving target hours:', error)
+    alert('Error saving target hours. Please try again.')
+  } finally {
+    targetHoursLoading.value = false
+  }
+}
+
+// Cleanup functions
+const refreshCleanupStats = async () => {
+  try {
+    cleanupLoading.value = true
+    const [stats, status, log] = await Promise.all([
+      getCleanupStats(),
+      getCleanupStatus(),
+      getCleanupLog(10)
+    ])
+    
+    cleanupStats.value = stats
+    cleanupStatus.value = status
+    cleanupLog.value = log
+  } catch (error) {
+    console.error('Error refreshing cleanup stats:', error)
+    cleanupError.value = 'Failed to refresh cleanup statistics'
+  } finally {
+    cleanupLoading.value = false
+  }
+}
+
+const runManualCleanup = async () => {
+  try {
+    cleanupLoading.value = true
+    cleanupError.value = ''
+    cleanupResult.value = null
+    
+    const result = await runCleanup()
+    
+    if (result) {
+      cleanupResult.value = result
+      // Refresh stats after cleanup
+      await refreshCleanupStats()
+    } else {
+      cleanupError.value = 'Cleanup failed - no result returned'
+    }
+  } catch (error) {
+    console.error('Error running cleanup:', error)
+    cleanupError.value = `Cleanup failed: ${error.message || 'Unknown error'}`
+  } finally {
+    cleanupLoading.value = false
+  }
+}
+
+const formatDate = (dateString) => {
+  if (!dateString) return 'N/A'
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  })
+}
+
+const formatDateTime = (dateString) => {
+  if (!dateString) return 'N/A'
+  return new Date(dateString).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
 // Initialize data
 onMounted(async () => {
   await Promise.all([
     fetchJobFunctions(false), // Get all job functions including inactive
     fetchShifts()
   ])
+  
+  // Load cleanup data if cleanup tab is active
+  if (activeTab.value === 'cleanup') {
+    await refreshCleanupStats()
+  }
+})
+
+// Watch for tab changes to load cleanup data
+watch(activeTab, async (newTab) => {
+  if (newTab === 'cleanup') {
+    await refreshCleanupStats()
+  } else if (newTab === 'target-hours') {
+    await fetchTargetHours()
+  }
 })
 </script>
 

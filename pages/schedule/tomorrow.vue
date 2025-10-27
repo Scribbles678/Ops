@@ -4,13 +4,55 @@
       <!-- Header -->
       <div class="flex items-center justify-between mb-8">
         <div>
-          <h1 class="text-4xl font-bold text-gray-800">Make Tomorrow's Schedule</h1>
-          <p class="text-gray-600 mt-2">{{ formatDate(tomorrowDate) }}</p>
+          <h1 class="text-4xl font-bold text-gray-800">Create Schedule</h1>
+          <p class="text-gray-600 mt-2">Choose a date and create a schedule</p>
         </div>
         <div class="flex space-x-4">
+          <button @click="handleLogout" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+            Logout
+          </button>
           <NuxtLink to="/" class="btn-secondary">
             ← Back to Home
           </NuxtLink>
+        </div>
+      </div>
+
+      <!-- Date Selection -->
+      <div class="card mb-8">
+        <h2 class="text-xl font-bold text-gray-800 mb-4">Select Schedule Date</h2>
+        <div class="flex items-center space-x-4">
+          <div class="flex-1">
+            <label for="schedule-date" class="block text-sm font-medium text-gray-700 mb-2">
+              Schedule Date
+            </label>
+            <input
+              id="schedule-date"
+              v-model="selectedDate"
+              type="date"
+              :min="today"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+          <div class="flex flex-col space-y-2">
+            <button 
+              @click="setToTomorrow" 
+              class="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm"
+            >
+              Tomorrow
+            </button>
+            <button 
+              @click="setToNextMonday" 
+              class="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm"
+            >
+              Next Monday
+            </button>
+          </div>
+        </div>
+        <div class="mt-4 p-3 bg-blue-50 rounded-lg">
+          <p class="text-sm text-blue-800">
+            <strong>Selected:</strong> {{ formatDate(selectedDate) }}
+            <span v-if="isWeekend" class="ml-2 text-orange-600 font-medium">(Weekend)</span>
+          </p>
         </div>
       </div>
 
@@ -25,7 +67,7 @@
               </svg>
             </div>
             <h3 class="text-xl font-bold text-gray-800 mb-2">Copy Today's Schedule</h3>
-            <p class="text-gray-600">Copy the current schedule to tomorrow</p>
+            <p class="text-gray-600">Copy the current schedule to {{ formatDate(selectedDate) }}</p>
           </div>
         </div>
 
@@ -51,7 +93,7 @@
               </svg>
             </div>
             <h3 class="text-xl font-bold text-gray-800 mb-2">Manual Schedule</h3>
-            <p class="text-gray-600">Create tomorrow's schedule manually from scratch</p>
+            <p class="text-gray-600">Create {{ formatDate(selectedDate) }} schedule manually from scratch</p>
           </div>
         </div>
       </div>
@@ -177,11 +219,31 @@
 </template>
 
 <script setup lang="ts">
+// Import composables
+const { copySchedule, createAssignment } = useSchedule()
+const { logout } = useAuth()
+const { jobFunctions, fetchJobFunctions } = useJobFunctions()
+
 // Tomorrow's date
 const tomorrowDate = computed(() => {
   const tomorrow = new Date()
   tomorrow.setDate(tomorrow.getDate() + 1)
   return tomorrow.toISOString().split('T')[0]
+})
+
+// Today's date
+const today = computed(() => {
+  return new Date().toISOString().split('T')[0]
+})
+
+// Selected date for schedule creation
+const selectedDate = ref(tomorrowDate.value)
+
+// Check if selected date is weekend
+const isWeekend = computed(() => {
+  const date = new Date(selectedDate.value)
+  const day = date.getDay()
+  return day === 0 || day === 6 // Sunday or Saturday
 })
 
 // AI Modal state
@@ -231,9 +293,24 @@ const formatDate = (dateString) => {
   })
 }
 
-const copyTodaySchedule = () => {
-  // Navigate to tomorrow's schedule page
-  navigateTo(`/schedule/${tomorrowDate.value}`)
+const copyTodaySchedule = async () => {
+  try {
+    const today = new Date().toISOString().split('T')[0]
+    
+    // Copy today's schedule to selected date
+    const success = await copySchedule(today, selectedDate.value)
+    
+    if (success) {
+      alert(`Today's schedule copied to ${formatDate(selectedDate.value)} successfully!`)
+      // Navigate to the selected date's schedule page to see/edit the copied schedule
+      navigateTo(`/schedule/${selectedDate.value}`)
+    } else {
+      alert('Error copying schedule. Please try again.')
+    }
+  } catch (error) {
+    console.error('Error copying schedule:', error)
+    alert('Error copying schedule. Please try again.')
+  }
 }
 
 const generateAISchedule = () => {
@@ -241,8 +318,27 @@ const generateAISchedule = () => {
 }
 
 const goToManualSchedule = () => {
-  // Navigate to tomorrow's schedule page
-  navigateTo(`/schedule/${tomorrowDate.value}`)
+  // Navigate to the selected date's schedule page for manual editing
+  navigateTo(`/schedule/${selectedDate.value}`)
+}
+
+const handleLogout = async () => {
+  if (confirm('Are you sure you want to logout?')) {
+    await logout()
+  }
+}
+
+// Date helper functions
+const setToTomorrow = () => {
+  selectedDate.value = tomorrowDate.value
+}
+
+const setToNextMonday = () => {
+  const today = new Date()
+  const daysUntilMonday = (1 - today.getDay() + 7) % 7
+  const nextMonday = new Date(today)
+  nextMonday.setDate(today.getDate() + (daysUntilMonday === 0 ? 7 : daysUntilMonday))
+  selectedDate.value = nextMonday.toISOString().split('T')[0]
 }
 
 const closeAIModal = () => {
@@ -311,13 +407,37 @@ const generateAIScheduleLogic = () => {
   return schedule
 }
 
-const applyAISchedule = () => {
-  // This would save the AI-generated schedule to the database
-  console.log('Applying AI schedule:', aiGeneratedSchedule.value)
-  alert('AI schedule applied successfully!')
-  closeAIModal()
-  
-  // Navigate to tomorrow's schedule page to see the results
-  navigateTo(`/schedule/${tomorrowDate.value}`)
+const applyAISchedule = async () => {
+  try {
+    // Save AI-generated schedule to database
+    for (const assignment of aiGeneratedSchedule.value) {
+      // Find the job function ID
+      const jobFunction = jobFunctions.value.find(jf => jf.name === assignment.job_function)
+      if (jobFunction) {
+        await createAssignment({
+          employee_id: assignment.employee_id,
+          job_function_id: jobFunction.id,
+          shift_id: assignment.shift_id,
+          start_time: '06:00:00', // Default start time
+          end_time: '18:00:00',   // Default end time
+          schedule_date: selectedDate.value
+        })
+      }
+    }
+    
+    alert(`AI schedule applied successfully for ${formatDate(selectedDate.value)}!`)
+    closeAIModal()
+    
+    // Navigate to the selected date's schedule page to see the results
+    navigateTo(`/schedule/${selectedDate.value}`)
+  } catch (error) {
+    console.error('Error applying AI schedule:', error)
+    alert('Error applying AI schedule. Please try again.')
+  }
 }
+
+// Load job functions on mount
+onMounted(async () => {
+  await fetchJobFunctions()
+})
 </script>

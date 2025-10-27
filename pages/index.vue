@@ -2,7 +2,20 @@
   <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
     <div class="container mx-auto px-4 py-8">
       <!-- Header -->
-      <div class="text-center mb-12">
+      <div class="text-center mb-12 relative">
+        <!-- Logout Button -->
+        <div class="absolute top-0 right-0">
+          <button
+            @click="handleLogout"
+            class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center"
+          >
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Logout
+          </button>
+        </div>
+        
         <h1 class="text-5xl font-bold text-gray-800 mb-3">
           Operations Scheduling Tool
         </h1>
@@ -50,7 +63,7 @@
           </div>
         </NuxtLink>
 
-        <!-- Edit Today's Schedule Button -->
+        <!-- View/Edit Schedule Button -->
         <NuxtLink
           :to="`/schedule/${today}`"
           class="card hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer"
@@ -58,12 +71,12 @@
           <div class="flex flex-col items-center justify-center py-8">
             <div class="bg-green-100 rounded-full p-6 mb-4">
               <svg class="w-16 h-16 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
               </svg>
             </div>
-            <h2 class="text-2xl font-bold text-gray-800 mb-2">Edit Today's Schedule</h2>
+            <h2 class="text-2xl font-bold text-gray-800 mb-2">View/Edit Schedule</h2>
             <p class="text-gray-600 text-center">
-              Modify the current day's assignments
+              View and edit any schedule (today's, yesterday's, or archived)
             </p>
           </div>
         </NuxtLink>
@@ -79,7 +92,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             </div>
-            <h2 class="text-2xl font-bold text-gray-800 mb-2">Make Tomorrow's Schedule</h2>
+            <h2 class="text-2xl font-bold text-gray-800 mb-2">Create Schedule</h2>
             <p class="text-gray-600 text-center">
               Create next day's schedule from scratch or copy
             </p>
@@ -104,9 +117,17 @@
 </template>
 
 <script setup lang="ts">
+const { logout } = useAuth()
+
 const today = computed(() => {
   const date = new Date()
   return date.toISOString().split('T')[0]
 })
+
+const handleLogout = async () => {
+  if (confirm('Are you sure you want to logout?')) {
+    await logout()
+  }
+}
 </script>
 

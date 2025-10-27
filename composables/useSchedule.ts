@@ -278,6 +278,73 @@ export const useSchedule = () => {
     }
   }
 
+  // Cleanup functions
+  const runCleanup = async () => {
+    loading.value = true
+    error.value = null
+    
+    try {
+      const { data, error: cleanupError } = await $supabase
+        .rpc('cleanup_old_schedules_with_logging')
+      
+      if (cleanupError) throw cleanupError
+      
+      return data[0]
+    } catch (e) {
+      error.value = e.message
+      console.error('Error running cleanup:', e)
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const getCleanupStats = async () => {
+    try {
+      const { data, error: statsError } = await $supabase
+        .rpc('get_cleanup_stats')
+      
+      if (statsError) throw statsError
+      
+      return data[0]
+    } catch (e) {
+      console.error('Error getting cleanup stats:', e)
+      return null
+    }
+  }
+
+  const getCleanupLog = async (limit = 10) => {
+    try {
+      const { data, error: logError } = await $supabase
+        .from('cleanup_log')
+        .select('*')
+        .order('cleanup_date', { ascending: false })
+        .limit(limit)
+      
+      if (logError) throw logError
+      
+      return data
+    } catch (e) {
+      console.error('Error getting cleanup log:', e)
+      return []
+    }
+  }
+
+  const getCleanupStatus = async () => {
+    try {
+      const { data, error: statusError } = await $supabase
+        .from('cleanup_status')
+        .select('*')
+      
+      if (statusError) throw statusError
+      
+      return data
+    } catch (e) {
+      console.error('Error getting cleanup status:', e)
+      return []
+    }
+  }
+
   return {
     scheduleAssignments,
     shifts,
@@ -294,7 +361,11 @@ export const useSchedule = () => {
     deleteAssignment,
     copySchedule,
     fetchDailyTargets,
-    upsertDailyTarget
+    upsertDailyTarget,
+    runCleanup,
+    getCleanupStats,
+    getCleanupLog,
+    getCleanupStatus
   }
 }
 
