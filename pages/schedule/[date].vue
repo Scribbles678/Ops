@@ -1,8 +1,8 @@
 <template>
   <div class="min-h-screen bg-gray-50">
-    <div class="container mx-auto px-4 py-8">
+    <div class="px-4 py-6">
       <!-- Header -->
-      <div class="flex items-center justify-between mb-8">
+      <div class="flex items-center justify-between mb-6">
         <div>
           <h1 class="text-4xl font-bold text-gray-800">View/Edit Schedule</h1>
           <p class="text-gray-600 mt-2">{{ formatDate(scheduleDate || '') }}</p>
@@ -28,50 +28,81 @@
         </div>
       </div>
 
-      <!-- Date Selector -->
-      <div class="card mb-6">
-        <div class="p-6">
-          <h2 class="text-xl font-bold text-gray-800 mb-4">Select Schedule Date</h2>
-          <div class="flex items-center space-x-4">
-            <div class="flex-1">
-              <label for="schedule-date" class="block text-sm font-medium text-gray-700 mb-2">
-                Schedule Date
-              </label>
-              <input
-                id="schedule-date"
-                v-model="scheduleDate"
-                type="date"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
+      <!-- Date Selector and Stats Row -->
+      <div class="flex gap-4 mb-4">
+        <!-- Date Selector (Left Side) -->
+        <div class="card flex-shrink-0" style="width: 400px;">
+          <div class="p-4">
+            <h2 class="text-lg font-bold text-gray-800 mb-3">Select Schedule Date</h2>
+            <div class="flex items-center space-x-4">
+              <div class="flex-1">
+                <label for="schedule-date" class="block text-sm font-medium text-gray-700 mb-2">
+                  Schedule Date
+                </label>
+                <input
+                  id="schedule-date"
+                  v-model="scheduleDate"
+                  type="date"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div class="flex flex-col space-y-2">
+                <button 
+                  @click="goToToday" 
+                  class="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm"
+                >
+                  Today
+                </button>
+                <button 
+                  @click="goToYesterday" 
+                  class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm"
+                >
+                  Yesterday
+                </button>
+                <button 
+                  @click="goToTomorrow" 
+                  class="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm"
+                >
+                  Tomorrow
+                </button>
+              </div>
             </div>
-            <div class="flex flex-col space-y-2">
-              <button 
-                @click="goToToday" 
-                class="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm"
-              >
-                Today
-              </button>
-              <button 
-                @click="goToYesterday" 
-                class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm"
-              >
-                Yesterday
-              </button>
-              <button 
-                @click="goToTomorrow" 
-                class="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm"
-              >
-                Tomorrow
-              </button>
+            <div class="mt-4 p-3 bg-blue-50 rounded-lg">
+              <p class="text-sm text-blue-800">
+                <strong>Selected:</strong> {{ formatDate(scheduleDate) }}
+                <span v-if="isWeekend" class="ml-2 text-orange-600 font-medium">(Weekend)</span>
+                <span v-if="isFuture" class="ml-2 text-green-600 font-medium">(Future)</span>
+                <span v-if="isPast" class="ml-2 text-gray-600 font-medium">(Past)</span>
+              </p>
             </div>
           </div>
-          <div class="mt-4 p-3 bg-blue-50 rounded-lg">
-            <p class="text-sm text-blue-800">
-              <strong>Selected:</strong> {{ formatDate(scheduleDate) }}
-              <span v-if="isWeekend" class="ml-2 text-orange-600 font-medium">(Weekend)</span>
-              <span v-if="isFuture" class="ml-2 text-green-600 font-medium">(Future)</span>
-              <span v-if="isPast" class="ml-2 text-gray-600 font-medium">(Past)</span>
-            </p>
+        </div>
+
+        <!-- Labor Hours Summary (Right Side) -->
+        <div class="flex-1 grid grid-cols-2 md:grid-cols-4 gap-1">
+          <div class="card p-1">
+            <div class="text-center">
+              <div class="text-base font-bold text-blue-600">{{ totalEmployees }}</div>
+              <div class="text-xs text-gray-600">Total Employees</div>
+            </div>
+          </div>
+          <div class="card p-1">
+            <div class="text-center">
+              <div class="text-base font-bold text-green-600">{{ totalLaborHours }}h</div>
+              <div class="text-xs text-gray-600">Total Labor Hours</div>
+            </div>
+          </div>
+          <div class="card p-1">
+            <div class="text-center">
+              <div class="text-base font-bold text-purple-600">{{ totalShifts }}</div>
+              <div class="text-xs text-gray-600">Active Shifts</div>
+            </div>
+          </div>
+          <div class="card p-1">
+            <div class="text-center">
+              <div class="text-base font-bold text-orange-600">{{ unassignedEmployees }}</div>
+              <div class="text-xs text-gray-600">Unassigned</div>
+            </div>
           </div>
         </div>
       </div>
@@ -93,53 +124,98 @@
         </div>
       </div>
 
-      <!-- Labor Hours Summary -->
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div class="card">
-          <div class="text-center">
-            <div class="text-2xl font-bold text-blue-600">{{ totalEmployees }}</div>
-            <div class="text-sm text-gray-600">Total Employees</div>
+      <!-- Job Function Hours Breakdown / Meter Dashboard -->
+      <div class="card mb-6">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-lg font-bold text-gray-800">
+            {{ showMeterDashboard ? 'Meter Staffing Dashboard' : 'Job Function Hours Breakdown' }}
+          </h3>
+          <div class="flex space-x-2">
+            <button 
+              @click="showMeterDashboard = false"
+              class="px-3 py-1 text-sm rounded border transition-colors"
+              :class="!showMeterDashboard ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+            >
+              Job Functions
+            </button>
+            <button 
+              @click="showMeterDashboard = true"
+              class="px-3 py-1 text-sm rounded border transition-colors"
+              :class="showMeterDashboard ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+            >
+              Meter Dashboard
+            </button>
           </div>
         </div>
-        <div class="card">
-          <div class="text-center">
-            <div class="text-2xl font-bold text-green-600">{{ totalLaborHours }}h</div>
-            <div class="text-sm text-gray-600">Total Labor Hours</div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="text-center">
-            <div class="text-2xl font-bold text-purple-600">{{ totalShifts }}</div>
-            <div class="text-sm text-gray-600">Active Shifts</div>
-          </div>
-        </div>
-        <div class="card">
-          <div class="text-center">
-            <div class="text-2xl font-bold text-orange-600">{{ unassignedEmployees }}</div>
-            <div class="text-sm text-gray-600">Unassigned</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Job Function Hours Breakdown -->
-      <div class="card mb-8">
-        <h3 class="text-xl font-bold text-gray-800 mb-4">Job Function Hours Breakdown</h3>
-        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-6">
-          <div v-for="jobFunction in jobFunctionHours" :key="jobFunction.name" class="text-center bg-gray-50 rounded-lg p-4 border border-gray-200 hover:shadow-sm transition-shadow">
-            <div class="flex items-center justify-center mb-3">
+        <!-- Job Function Hours Breakdown -->
+        <div v-if="!showMeterDashboard" class="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-3">
+          <div v-for="jobFunction in jobFunctionHours" :key="jobFunction.name" class="text-center bg-gray-50 rounded-lg p-3 border border-gray-200 hover:shadow-sm transition-shadow">
+            <div class="flex items-center justify-center mb-2">
               <div 
-                class="w-5 h-5 rounded border-2 border-gray-400 mr-3 shadow-sm" 
+                class="w-4 h-4 rounded border-2 border-gray-400 mr-2 shadow-sm" 
                 :style="{ backgroundColor: jobFunction.color }"
               ></div>
-              <span class="text-sm font-semibold text-gray-800">{{ jobFunction.name }}</span>
+              <span class="text-xs font-semibold text-gray-800">{{ jobFunction.name }}</span>
             </div>
-            <div class="text-xs text-gray-600 mb-2">Actual Hours</div>
-            <div class="text-3xl font-bold text-gray-900 bg-white rounded-lg py-2 px-3 shadow-sm mb-2">
+            <div class="text-xs text-gray-600 mb-1">Actual Hours</div>
+            <div class="text-xl font-bold text-gray-900 bg-white rounded-lg py-1 px-2 shadow-sm mb-1">
               {{ jobFunction.hours }}
             </div>
             <div class="text-xs text-gray-600 mb-1">Target Hours</div>
             <div class="text-lg font-semibold text-blue-600 bg-blue-50 rounded-lg py-1 px-2">
               {{ getTargetHours(jobFunction.id) }}
+            </div>
+          </div>
+        </div>
+
+        <!-- Meter Staffing Dashboard -->
+        <div v-else class="overflow-x-auto">
+          <div class="min-w-max">
+            <!-- Time Header -->
+            <div class="flex border-b-2 border-gray-300 mb-2">
+              <div class="w-20 px-2 py-1 text-xs font-medium text-gray-700 bg-gray-50 border-r border-gray-300 sticky left-0 z-10">
+                Meter
+              </div>
+              <div
+                v-for="timeSlot in meterTimeSlots"
+                :key="timeSlot.time"
+                class="px-1 py-1 text-center text-xs font-medium border-r border-gray-200"
+                :class="{ 'hourly-marker': isHourlyMarker(timeSlot.time) }"
+                :style="{ minWidth: '40px' }"
+              >
+                {{ formatTimeForMeterDashboard(timeSlot.time) }}
+              </div>
+            </div>
+
+            <!-- Meter Rows -->
+            <div
+              v-for="meterNumber in 20"
+              :key="meterNumber"
+              class="flex border-b border-gray-200 hover:bg-gray-50"
+            >
+              <!-- Meter Label -->
+              <div class="w-20 px-2 py-1 text-xs font-medium text-gray-800 bg-white border-r border-gray-300 sticky left-0 z-10">
+                Meter {{ meterNumber }}
+              </div>
+
+              <!-- Time Slots for this Meter -->
+              <div
+                v-for="timeSlot in meterTimeSlots"
+                :key="`meter-${meterNumber}-${timeSlot.time}`"
+                class="px-1 py-1 text-center text-xs border-r border-gray-200 relative"
+                :class="{ 'hourly-marker-content': isHourlyMarker(timeSlot.time) }"
+                :style="{ minWidth: '40px' }"
+              >
+                <div
+                  class="w-full h-full flex items-center justify-center rounded cursor-pointer transition"
+                  :class="getMeterSlotClasses(meterNumber, timeSlot.time)"
+                  :style="getMeterSlotStyle(meterNumber, timeSlot.time)"
+                  @click="toggleMeterSlot(meterNumber, timeSlot.time)"
+                >
+                  <span v-if="isMeterBooked(meterNumber, timeSlot.time)" class="text-white text-xs">●</span>
+                  <span v-else class="text-gray-300 text-xs">○</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -314,6 +390,10 @@ const saveProgress = ref('')
 // Target hours state
 const targetHours = ref({})
 
+// Meter dashboard state
+const showMeterDashboard = ref(false)
+const meterBookings = ref<Record<string, boolean>>({})
+
 // Get route params
 const route = useRoute()
 const scheduleDate = ref((route.params.date as string) || new Date().toISOString().split('T')[0])
@@ -450,6 +530,22 @@ const getTargetHours = (jobFunctionId: string) => {
     return 0
   }
   
+  // Special handling for meter group
+  if (jobFunctionId === 'meter-group') {
+    // Sum up target hours for all meters
+    let totalMeterHours = 0
+    jobFunctions.value.forEach((job: any) => {
+      if (job.name.startsWith('Meter ')) {
+        const hours = targetHours.value[job.id]
+        if (hours !== undefined && hours !== null) {
+          totalMeterHours += hours
+        }
+      }
+    })
+    console.log(`Found total meter target hours: ${totalMeterHours}`)
+    return totalMeterHours
+  }
+  
   const hours = targetHours.value[jobFunctionId]
   if (hours === undefined || hours === null) {
     console.log(`No target hours found for ${jobFunctionId}, returning 0`)
@@ -515,6 +611,9 @@ onMounted(async () => {
     await nextTick()
     initializeScheduleData()
     
+    // Sync meter bookings after schedule data is initialized
+    syncMeterBookings()
+    
   } catch (error) {
     console.error('Error loading schedule data:', error)
   }
@@ -551,30 +650,60 @@ const jobFunctionHours = computed(() => {
     jobFunctionTotals[job.name] = 0
   })
   
+  // Always initialize Meter entry for grouping
+  jobFunctionTotals['Meter'] = 0
+  
   // Calculate hours for each employee's schedule
   Object.entries(scheduleAssignmentsData.value).forEach(([employeeId, employeeSchedule]: [string, any]) => {
     Object.entries(employeeSchedule).forEach(([timeSlot, data]: [string, any]) => {
       if (data.assignment && data.assignment.trim() !== '') {
         // Each 15-minute slot = 0.25 hours
         const jobName = data.assignment
-        if (jobFunctionTotals.hasOwnProperty(jobName)) {
+        
+        // If it's a meter assignment, count it under 'Meter'
+        if (jobName.startsWith('Meter ')) {
+          jobFunctionTotals['Meter'] = (jobFunctionTotals['Meter'] || 0) + 0.25
+        } else if (jobFunctionTotals.hasOwnProperty(jobName)) {
           jobFunctionTotals[jobName] += 0.25
         }
       }
     })
   })
   
-  return jobFunctions.value.map((job: any) => {
-    const totalHours = jobFunctionTotals[job.name] || 0
-    
-    return {
-      id: job.id,  // Add the missing id field
-      name: job.name,
-      color: job.color_code,
-      hours: Math.round(totalHours * 10) / 10, // Round to 1 decimal place
-      employees: 0 // We'll calculate this separately if needed
+  // Group meter hours together
+  const groupedJobFunctions: Record<string, any> = {}
+  let meterColor = '#87CEEB' // Default meter color
+  
+  // Find the actual meter color from any existing meter job function
+  const firstMeterJobFunction = jobFunctions.value.find((job: any) => job.name && job.name.startsWith('Meter '))
+  if (firstMeterJobFunction) {
+    meterColor = firstMeterJobFunction.color_code
+  }
+  
+  jobFunctions.value.forEach((job: any) => {
+    if (!job.name.startsWith('Meter ')) { // Exclude individual meters from direct display
+      groupedJobFunctions[job.name] = {
+        id: job.id,
+        name: job.name,
+        color: job.color_code,
+        hours: Math.round((jobFunctionTotals[job.name] || 0) * 10) / 10,
+        employees: 0
+      }
     }
   })
+  
+  // Add grouped meter entry if there are any meter assignments
+  if (jobFunctionTotals['Meter'] > 0) {
+    groupedJobFunctions['Meter'] = {
+      id: 'meter-group',
+      name: 'Meter',
+      color: meterColor, // This will now use the reliably found meter color
+      hours: Math.round(jobFunctionTotals['Meter'] * 10) / 10,
+      employees: 0
+    }
+  }
+  
+  return Object.values(groupedJobFunctions)
 })
 
 // Functions
@@ -842,7 +971,123 @@ const handleBreakCoverage = (employeeId: string, timeSlot: any) => {
 
 const handleScheduleDataUpdated = (newScheduleData: Record<string, any>) => {
   scheduleAssignmentsData.value = newScheduleData
+  // Sync meter bookings when schedule data is updated
+  syncMeterBookings()
 }
+
+// Meter dashboard functions
+const meterTimeSlots = computed(() => {
+  const slots = []
+  // Generate time slots from 6 AM to 8:30 PM (6:00 to 20:30)
+  for (let hour = 6; hour <= 20; hour++) {
+    for (let quarter = 0; quarter < 4; quarter++) {
+      const minutes = quarter * 15
+      const timeString = `${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
+      
+      // Stop at 8:30 PM (20:30)
+      if (hour === 20 && minutes > 30) break
+      
+      slots.push({
+        time: timeString,
+        hour,
+        minutes
+      })
+    }
+  }
+  return slots
+})
+
+const formatTimeForMeterDashboard = (time: string): string => {
+  const [hours, minutes] = time.split(':').map(Number)
+  
+  // Only show time labels for hourly slots (when minutes === 0)
+  if (minutes === 0) {
+    const period = hours >= 12 ? 'PM' : 'AM'
+    const displayHours = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours)
+    return `${displayHours} ${period}`
+  }
+  
+  // Return empty string for non-hourly slots
+  return ''
+}
+
+const isHourlyMarker = (time: string): boolean => {
+  const [hours, minutes] = time.split(':').map(Number)
+  return minutes === 0
+}
+
+const isMeterBooked = (meterNumber: number, timeSlot: string): boolean => {
+  const key = `meter-${meterNumber}-${timeSlot}`
+  return meterBookings.value[key] || false
+}
+
+const getMeterSlotClasses = (meterNumber: number, timeSlot: string): string => {
+  const isBooked = isMeterBooked(meterNumber, timeSlot)
+  return isBooked 
+    ? 'hover:opacity-80' 
+    : 'bg-gray-100 hover:bg-gray-200'
+}
+
+const getMeterSlotStyle = (meterNumber: number, timeSlot: string): Record<string, string> => {
+  const isBooked = isMeterBooked(meterNumber, timeSlot)
+  if (!isBooked) return {}
+  
+  // Get the meter color from job functions
+  const meterJobFunction = jobFunctions.value?.find(jf => jf.name === `Meter ${meterNumber}`)
+  const meterColor = meterJobFunction?.color_code || '#87CEEB' // Default meter color
+  
+  return {
+    backgroundColor: meterColor,
+    color: '#ffffff'
+  }
+}
+
+const toggleMeterSlot = (meterNumber: number, timeSlot: string) => {
+  const key = `meter-${meterNumber}-${timeSlot}`
+  meterBookings.value[key] = !meterBookings.value[key]
+}
+
+// Sync meter bookings with actual schedule assignments
+const syncMeterBookings = () => {
+  console.log('🔄 Syncing meter bookings...')
+  console.log('Schedule assignments data:', scheduleAssignmentsData.value)
+  
+  // Clear existing bookings
+  meterBookings.value = {}
+  
+  // Get all meter assignments from schedule data
+  if (scheduleAssignmentsData.value) {
+    Object.entries(scheduleAssignmentsData.value).forEach(([employeeId, employeeSchedule]: [string, any]) => {
+      Object.entries(employeeSchedule).forEach(([timeSlot, data]: [string, any]) => {
+        if (data && data.assignment && data.assignment.startsWith('Meter ')) {
+          const meterNumber = parseInt(data.assignment.split(' ')[1])
+          console.log(`📊 Found meter assignment: Meter ${meterNumber} at ${timeSlot} until ${data.until}`)
+          
+          if (meterNumber >= 1 && meterNumber <= 20) {
+            // Mark all time slots for this assignment as booked
+            const startTime = timeSlot
+            const endTime = data.until
+            
+            // Generate all 15-minute slots between start and end time
+            const startMinutes = timeToMinutes(startTime)
+            const endMinutes = timeToMinutes(endTime)
+            
+            let currentMinutes = startMinutes
+            while (currentMinutes < endMinutes) {
+              const timeString = minutesToTime(currentMinutes)
+              const key = `meter-${meterNumber}-${timeString}`
+              meterBookings.value[key] = true
+              currentMinutes += 15
+            }
+          }
+        }
+      })
+    })
+  }
+  
+  console.log('📋 Final meter bookings:', meterBookings.value)
+}
+
 
 const { logout } = useAuth()
 
@@ -855,6 +1100,11 @@ const handleLogout = async () => {
 // Watch for changes in schedule assignments and update schedule data
 watch(scheduleAssignments, () => {
   initializeScheduleData()
+}, { deep: true })
+
+// Watch for changes in schedule data and sync meter bookings
+watch(scheduleAssignmentsData, () => {
+  syncMeterBookings()
 }, { deep: true })
 
 // Prevent accidental navigation during save

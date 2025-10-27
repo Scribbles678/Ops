@@ -35,11 +35,27 @@
           <select
             v-model="formData.job_function_id"
             required
+            @change="onJobFunctionChange"
             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">Select job function...</option>
-            <option v-for="jf in jobFunctions" :key="jf.id" :value="jf.id">
+            <option v-for="jf in getGroupedJobFunctions()" :key="jf.id" :value="jf.id">
               {{ jf.name }}
+            </option>
+          </select>
+        </div>
+
+        <!-- Meter Number Selection (only show when Meter is selected) -->
+        <div v-if="formData.job_function_id === 'meter-group'">
+          <label class="block text-sm font-medium text-gray-700 mb-1">Meter Number</label>
+          <select
+            v-model="formData.meter_number"
+            required
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">Select meter...</option>
+            <option v-for="meter in getAllMeterJobFunctions()" :key="meter.id" :value="meter.id">
+              {{ meter.name }}
             </option>
           </select>
         </div>
@@ -129,10 +145,12 @@ const props = defineProps<{
 const emit = defineEmits(['close', 'save', 'delete'])
 
 const { getEmployeeTraining } = useEmployees()
+const { getGroupedJobFunctions, getAllMeterJobFunctions, getMeterJobFunctionByNumber, isMeterJobFunction } = useJobFunctions()
 
 const formData = ref({
   employee_id: '',
   job_function_id: '',
+  meter_number: '',
   shift_id: '',
   start_time: '',
   end_time: '',
@@ -145,9 +163,12 @@ const validationErrors = ref<string[]>([])
 watch(() => props.show, (newVal) => {
   if (newVal) {
     if (props.assignment) {
+      // Check if this is a meter assignment
+      const isMeter = isMeterJobFunction(props.assignment.job_function?.name)
       formData.value = {
         employee_id: props.assignment.employee_id,
-        job_function_id: props.assignment.job_function_id,
+        job_function_id: isMeter ? 'meter-group' : props.assignment.job_function_id,
+        meter_number: isMeter ? props.assignment.job_function_id : '',
         shift_id: props.assignment.shift_id,
         start_time: props.assignment.start_time.substring(0, 5),
         end_time: props.assignment.end_time.substring(0, 5),
@@ -158,6 +179,7 @@ watch(() => props.show, (newVal) => {
       formData.value = {
         employee_id: '',
         job_function_id: '',
+        meter_number: '',
         shift_id: '',
         start_time: '',
         end_time: '',
@@ -177,22 +199,41 @@ const updateTimeRange = () => {
   }
 }
 
+const onJobFunctionChange = () => {
+  // Clear meter number when job function changes
+  if (formData.value.job_function_id !== 'meter-group') {
+    formData.value.meter_number = ''
+  }
+}
+
 const handleSubmit = async () => {
   validationErrors.value = []
 
   // Get employee training
   const training = await getEmployeeTraining(formData.value.employee_id)
 
+  // Determine the actual job function ID to use
+  let actualJobFunctionId = formData.value.job_function_id
+  if (formData.value.job_function_id === 'meter-group') {
+    if (!formData.value.meter_number) {
+      validationErrors.value = ['Please select a meter number']
+      return
+    }
+    actualJobFunctionId = formData.value.meter_number
+  }
+
   // Validate assignment
   const validation = validateAssignment(
     {
       ...formData.value,
+      job_function_id: actualJobFunctionId,
       id: props.assignment?.id,
       start_time: formData.value.start_time + ':00',
       end_time: formData.value.end_time + ':00'
     },
     props.existingAssignments,
-    training
+    training,
+    props.jobFunctions
   )
 
   if (!validation.valid) {
@@ -202,6 +243,7 @@ const handleSubmit = async () => {
 
   emit('save', {
     ...formData.value,
+    job_function_id: actualJobFunctionId,
     start_time: formData.value.start_time + ':00',
     end_time: formData.value.end_time + ':00'
   })

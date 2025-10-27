@@ -104,6 +104,59 @@ export const useJobFunctions = () => {
     }
   }
 
+  // Helper functions for meter management
+  const isMeterJobFunction = (jobFunctionName) => {
+    return jobFunctionName && jobFunctionName.startsWith('Meter ')
+  }
+
+  const getMeterNumber = (jobFunctionName) => {
+    if (!isMeterJobFunction(jobFunctionName)) return null
+    const match = jobFunctionName.match(/Meter (\d+)/)
+    return match ? parseInt(match[1]) : null
+  }
+
+  const getGroupedJobFunctions = () => {
+    if (!jobFunctions.value) return []
+    
+    const grouped = []
+    const meters = []
+    
+    jobFunctions.value.forEach(jf => {
+      if (isMeterJobFunction(jf.name)) {
+        meters.push(jf)
+      } else {
+        grouped.push(jf)
+      }
+    })
+    
+    // Add a single "Meter" entry representing all meters
+    if (meters.length > 0) {
+      grouped.push({
+        id: 'meter-group',
+        name: 'Meter',
+        color_code: meters[0].color_code,
+        productivity_rate: meters[0].productivity_rate,
+        unit_of_measure: meters[0].unit_of_measure,
+        is_active: meters[0].is_active,
+        sort_order: meters[0].sort_order,
+        isGroup: true,
+        individualMeters: meters
+      })
+    }
+    
+    return grouped.sort((a, b) => a.sort_order - b.sort_order)
+  }
+
+  const getAllMeterJobFunctions = () => {
+    if (!jobFunctions.value) return []
+    return jobFunctions.value.filter(jf => isMeterJobFunction(jf.name))
+  }
+
+  const getMeterJobFunctionByNumber = (meterNumber) => {
+    if (!jobFunctions.value) return null
+    return jobFunctions.value.find(jf => jf.name === `Meter ${meterNumber}`)
+  }
+
   return {
     jobFunctions,
     loading,
@@ -111,7 +164,13 @@ export const useJobFunctions = () => {
     fetchJobFunctions,
     createJobFunction,
     updateJobFunction,
-    deleteJobFunction
+    deleteJobFunction,
+    // Meter helper functions
+    isMeterJobFunction,
+    getMeterNumber,
+    getGroupedJobFunctions,
+    getAllMeterJobFunctions,
+    getMeterJobFunctionByNumber
   }
 }
 

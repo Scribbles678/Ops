@@ -20,8 +20,11 @@
           v-for="timeBlock in getShiftTimeBlocks(shift)" 
           :key="timeBlock.time"
           class="time-block"
+          :class="{ 'hourly-marker': isHourlyMarker(timeBlock.time) }"
         >
-          <div class="time-header">{{ timeBlock.display }}</div>
+          <div class="time-header" :class="{ 'hourly-header': isHourlyMarker(timeBlock.time) }">
+            {{ timeBlock.display }}
+          </div>
         </div>
       </div>
 
@@ -42,6 +45,7 @@
             v-for="timeBlock in getShiftTimeBlocks(shift)" 
             :key="timeBlock.time"
             class="time-block-content"
+            :class="{ 'hourly-marker-content': isHourlyMarker(timeBlock.time) }"
           >
            <div class="assignment-cell-full">
              <div 
@@ -86,6 +90,7 @@
             v-for="timeBlock in getShiftTimeBlocks(shift)" 
             :key="timeBlock.time"
             class="time-block-content"
+            :class="{ 'hourly-marker-content': isHourlyMarker(timeBlock.time) }"
           >
             <div class="assignment-cell-full">
               <div 
@@ -140,6 +145,38 @@
           </div>
         </div>
 
+        <!-- Meter Number Selection (only show when Meter is selected) -->
+        <div v-if="selectedJobFunction?.id === 'meter-group' || selectedJobFunction?.name === 'Meter'" class="space-y-3 mb-6">
+          <label class="block text-sm font-medium text-gray-700">Select Meter Number:</label>
+          <div v-if="allIndividualMeters.length > 0" class="grid grid-cols-4 gap-2">
+            <button
+              v-for="meter in allIndividualMeters"
+              :key="meter.id"
+              @click="selectMeterNumber(meter)"
+              class="p-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-center"
+              :class="{ 'bg-blue-100 border-blue-500': selectedMeterNumber === meter.id }"
+            >
+              <span class="text-sm font-medium">{{ meter.name }}</span>
+            </button>
+          </div>
+          <div v-else class="text-center py-4 text-gray-500">
+            <p class="text-sm">No individual meter entries found in database.</p>
+            <p class="text-xs mt-1">Please run the database migration to create Meter 1-20 entries.</p>
+            <div class="mt-3 grid grid-cols-4 gap-2">
+              <button
+                v-for="meter in placeholderMeters"
+                :key="meter.id"
+                @click="selectMeterNumber(meter)"
+                class="p-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-center"
+                :class="{ 'bg-blue-100 border-blue-500': selectedMeterNumber === meter.id }"
+              >
+                <span class="text-sm font-medium">{{ meter.name }}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        
+
         <!-- Time Range Selection -->
         <div class="space-y-3 mb-6">
           <div class="grid grid-cols-2 gap-4">
@@ -178,7 +215,7 @@
             Remove Assignment
           </button>
           <button
-            v-if="selectedJobFunction && assignmentStartTime && assignmentEndTime"
+            v-if="selectedJobFunction && assignmentStartTime && assignmentEndTime && (selectedJobFunction.id !== 'meter-group' || selectedMeterNumber || selectedJobFunction.name === 'Meter')"
             @click="saveAssignment"
             class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
@@ -192,6 +229,23 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+
+const { getEmployeeTraining } = useEmployees()
+const { getGroupedJobFunctions, isMeterJobFunction } = useJobFunctions()
+
+// Optimize meter job functions with computed property to avoid repeated filtering
+const allIndividualMeters = computed(() => {
+  return props.jobFunctions.filter(jf => jf.name && jf.name.startsWith('Meter '))
+})
+
+// Create placeholder meters for when database doesn't have individual meters
+const placeholderMeters = computed(() => {
+  return Array.from({ length: 20 }, (_, i) => ({
+    id: `meter-${i + 1}`,
+    name: `Meter ${i + 1}`,
+    color_code: '#87CEEB'
+  }))
+})
 
 // Props
 const props = defineProps<{
@@ -224,6 +278,7 @@ const selectedShift = ref<any>(null)
 const selectedJobFunction = ref<any>(null)
 const assignmentStartTime = ref('')
 const assignmentEndTime = ref('')
+const selectedMeterNumber = ref('')
 
 // Group employees by their assigned shifts
 const shiftsWithEmployees = computed(() => {
@@ -237,12 +292,28 @@ const shiftsWithEmployees = computed(() => {
   })
 })
 
-// Available job functions for the selected employee
+// Available job functions for the selected employee - optimized for performance
 const availableJobFunctions = computed(() => {
   if (!selectedEmployee.value) return []
   
-  // For now, return all job functions. In a real app, you'd check employee training
-  return props.jobFunctions.filter(jf => jf.is_active)
+  // Simple approach: just filter out individual meters and add a grouped meter entry
+  const nonMeterFunctions = props.jobFunctions.filter(jf => 
+    jf.is_active && !jf.name.startsWith('Meter ') && jf.name !== 'Meter'
+  )
+  
+  // Add grouped meter entry
+  const meterEntry = {
+    id: 'meter-group',
+    name: 'Meter',
+    color_code: '#87CEEB',
+    productivity_rate: 150,
+    unit_of_measure: 'boxes/hour',
+    is_active: true,
+    sort_order: 3,
+    isGroup: true
+  }
+  
+  return [...nonMeterFunctions, meterEntry].sort((a, b) => a.sort_order - b.sort_order)
 })
 
 // Initialize schedule data for each employee
@@ -438,12 +509,25 @@ const minutesToTime = (minutes: number): string => {
   return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
 }
 
-// Format time for display
+// Format time for display - only show hourly labels with enhanced visual distinction
 const formatTimeForDisplay = (time: string): string => {
   const [hours, minutes] = time.split(':').map(Number)
-  const period = hours >= 12 ? 'PM' : 'AM'
-  const displayHours = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours)
-  return `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`
+  
+  // Only show time labels for hourly slots (when minutes === 0)
+  if (minutes === 0) {
+    const period = hours >= 12 ? 'PM' : 'AM'
+    const displayHours = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours)
+    return `${displayHours} ${period}`
+  }
+  
+  // Return empty string for non-hourly slots
+  return ''
+}
+
+// Check if a time block is an hourly marker for enhanced styling
+const isHourlyMarker = (time: string): boolean => {
+  const [hours, minutes] = time.split(':').map(Number)
+  return minutes === 0
 }
 
 // Check if a time slot should be blocked out as break time
@@ -584,14 +668,29 @@ const closeAssignmentModal = () => {
   selectedJobFunction.value = null
   assignmentStartTime.value = ''
   assignmentEndTime.value = ''
+  selectedMeterNumber.value = ''
 }
 
 const selectJobFunction = (jobFunction: any) => {
   selectedJobFunction.value = jobFunction
+  // Clear meter number when selecting a non-meter job function
+  if (jobFunction.id !== 'meter-group') {
+    selectedMeterNumber.value = ''
+  }
+}
+
+const selectMeterNumber = (meter: any) => {
+  selectedMeterNumber.value = meter.id
 }
 
 const saveAssignment = () => {
   if (!selectedEmployee.value || !selectedTimeBlock.value || !selectedJobFunction.value || !assignmentStartTime.value || !assignmentEndTime.value) return
+  
+  // For meter assignments, require meter number selection
+  if ((selectedJobFunction.value.id === 'meter-group' || selectedJobFunction.value.name === 'Meter') && !selectedMeterNumber.value) {
+    alert('Please select a meter number')
+    return
+  }
   
   const startMinutes = timeToMinutes(assignmentStartTime.value)
   const endMinutes = timeToMinutes(assignmentEndTime.value)
@@ -599,11 +698,27 @@ const saveAssignment = () => {
   // Clear any existing assignments for this employee in this time range
   clearAssignmentsInRange(selectedEmployee.value.id, startMinutes, endMinutes)
   
+  // Determine the job function name to use
+  let jobFunctionName = selectedJobFunction.value.name
+  if (selectedJobFunction.value.id === 'meter-group' || selectedJobFunction.value.name === 'Meter') {
+    // Find the specific meter job function
+    const meterJobFunction = props.jobFunctions.find(m => m.id === selectedMeterNumber.value)
+    if (meterJobFunction) {
+      jobFunctionName = meterJobFunction.name
+    } else if (selectedMeterNumber.value && selectedMeterNumber.value.startsWith('meter-')) {
+      // Handle placeholder meter IDs (meter-1, meter-2, etc.)
+      const meterNumber = selectedMeterNumber.value.replace('meter-', '')
+      jobFunctionName = `Meter ${meterNumber}`
+    } else {
+      jobFunctionName = 'Meter'
+    }
+  }
+  
   // Create assignments for each 15-minute block in the time range
   let currentMinutes = startMinutes
   while (currentMinutes < endMinutes) {
     const timeSlot = minutesToTime(currentMinutes)
-    updateAssignment(selectedEmployee.value.id, timeSlot, selectedJobFunction.value.name)
+    updateAssignment(selectedEmployee.value.id, timeSlot, jobFunctionName)
     updateUntil(selectedEmployee.value.id, timeSlot, assignmentEndTime.value)
     currentMinutes += 15
   }
@@ -718,6 +833,15 @@ initializeScheduleData()
   @apply bg-gray-200 px-0 py-1 text-sm font-semibold text-center border-b border-gray-300;
 }
 
+/* Enhanced styling for hourly markers */
+.hourly-marker {
+  @apply border-l-4 border-blue-500 bg-blue-50;
+}
+
+.hourly-header {
+  @apply bg-blue-100 text-blue-800 font-bold text-base border-b-2 border-blue-400;
+}
+
 .shift-employees {
   @apply divide-y divide-gray-200 min-w-max;
 }
@@ -732,6 +856,10 @@ initializeScheduleData()
 
 .time-block-content {
   @apply border-r border-gray-300 min-w-[60px];
+}
+
+.hourly-marker-content {
+  @apply border-l-4 border-blue-500 bg-blue-50;
 }
 
 .assignment-cell-full {
@@ -836,14 +964,31 @@ initializeScheduleData()
   @apply bg-red-100;
 }
 
-/* Responsive design */
+/* Responsive design - optimized for full-width layout */
+@media (max-width: 1400px) {
+  .shift-grouped-schedule {
+    @apply text-xs;
+  }
+  
+  .employee-name {
+    @apply w-28 px-2;
+  }
+  
+  .assignment-input,
+  .until-input,
+  .break-input,
+  .break-until-input {
+    @apply px-1 py-0.5 text-xs;
+  }
+}
+
 @media (max-width: 1200px) {
   .shift-grouped-schedule {
     @apply text-xs;
   }
   
   .employee-name {
-    @apply w-32 px-2;
+    @apply w-24 px-1;
   }
   
   .assignment-input,

@@ -1,13 +1,32 @@
 export const validateAssignment = (
   assignment: any,
   existingAssignments: any[],
-  employeeTraining: string[]
+  employeeTraining: string[],
+  jobFunctions?: any[]
 ): { valid: boolean; errors: string[] } => {
   const errors: string[] = []
 
   // Rule 1: Employee must be trained in the job function
-  if (!employeeTraining.includes(assignment.job_function_id)) {
-    errors.push('Employee is not trained in this job function')
+  // Special handling for meter job functions
+  const isMeterJobFunction = (jobFunctionId: string) => {
+    if (!jobFunctions) return false
+    const jobFunction = jobFunctions.find(jf => jf.id === jobFunctionId)
+    return jobFunction && jobFunction.name && jobFunction.name.startsWith('Meter ')
+  }
+
+  if (isMeterJobFunction(assignment.job_function_id)) {
+    // For meter assignments, check if employee is trained on ANY meter
+    const isTrainedOnAnyMeter = jobFunctions?.some(jf => 
+      jf.name.startsWith('Meter ') && employeeTraining.includes(jf.id)
+    )
+    if (!isTrainedOnAnyMeter) {
+      errors.push('Employee is not trained on any meter')
+    }
+  } else {
+    // For non-meter assignments, check specific training
+    if (!employeeTraining.includes(assignment.job_function_id)) {
+      errors.push('Employee is not trained in this job function')
+    }
   }
 
   // Rule 2: Assignment duration must be at least 30 minutes

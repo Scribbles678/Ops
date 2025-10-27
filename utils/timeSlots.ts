@@ -204,17 +204,19 @@ const getBreakType = (hour: number, minutes: number): 'break1' | 'break2' | 'lun
   return undefined
 }
 
-// Format time for display in schedule headers
+// Format time for display in schedule headers - only show hourly labels to reduce clutter
 export const formatTimeForHeader = (time: string): string => {
   const [hours, minutes] = time.split(':').map(Number)
-  const displayHour = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours
-  const ampm = hours >= 12 ? 'PM' : 'AM'
   
+  // Only show time labels for hourly slots (when minutes === 0)
   if (minutes === 0) {
+    const displayHour = hours === 0 ? 12 : hours > 12 ? hours - 12 : hours
+    const ampm = hours >= 12 ? 'PM' : 'AM'
     return `${displayHour} ${ampm}`
-  } else {
-    return `${displayHour}:${minutes.toString().padStart(2, '0')} ${ampm}`
   }
+  
+  // Return empty string for non-hourly slots
+  return ''
 }
 
 // Get time slot width for CSS (15-minute slots)

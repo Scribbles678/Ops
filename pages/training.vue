@@ -115,7 +115,7 @@
             <!-- Training Matrix -->
             <div class="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-9 gap-2">
               <label
-                v-for="jobFunction in jobFunctions"
+                v-for="jobFunction in getGroupedJobFunctions()"
                 :key="jobFunction.id"
                 class="flex items-center space-x-1 cursor-pointer hover:bg-gray-50 p-1 rounded text-xs transition-colors"
               >
@@ -244,7 +244,7 @@ const {
   updateEmployee,
   deleteEmployee: deleteEmployeeApi
 } = useEmployees()
-const { jobFunctions, loading: functionsLoading, fetchJobFunctions } = useJobFunctions()
+const { jobFunctions, loading: functionsLoading, fetchJobFunctions, getGroupedJobFunctions, getAllMeterJobFunctions, isMeterJobFunction } = useJobFunctions()
 const { shifts, fetchShifts } = useSchedule()
 
 const searchQuery = ref('')
@@ -373,6 +373,18 @@ const loadEmployeeShifts = async () => {
 }
 
 const isEmployeeTrained = (employeeId: string, jobFunctionId: string): boolean => {
+  // Special handling for meter group
+  if (jobFunctionId === 'meter-group') {
+    // Check if employee is trained on ANY meter
+    const allMeters = getAllMeterJobFunctions()
+    return allMeters.some(meter => {
+      if (pendingChanges.has(employeeId)) {
+        return pendingChanges.get(employeeId)!.includes(meter.id)
+      }
+      return employeeTraining.value[employeeId]?.includes(meter.id) || false
+    })
+  }
+  
   // Check pending changes first (for immediate UI updates)
   if (pendingChanges.has(employeeId)) {
     return pendingChanges.get(employeeId)!.includes(jobFunctionId)
@@ -390,18 +402,43 @@ const toggleTraining = (employeeId: string, jobFunctionId: string) => {
   }
   
   const currentTraining = pendingChanges.get(employeeId)!
-  const index = currentTraining.indexOf(jobFunctionId)
   
-  if (index > -1) {
-    currentTraining.splice(index, 1)
+  // Special handling for meter group
+  if (jobFunctionId === 'meter-group') {
+    const allMeters = getAllMeterJobFunctions()
+    const isCurrentlyTrained = allMeters.some(meter => currentTraining.includes(meter.id))
+    
+    if (isCurrentlyTrained) {
+      // Remove training from all meters
+      allMeters.forEach(meter => {
+        const index = currentTraining.indexOf(meter.id)
+        if (index > -1) {
+          currentTraining.splice(index, 1)
+        }
+      })
+    } else {
+      // Add training to all meters
+      allMeters.forEach(meter => {
+        if (!currentTraining.includes(meter.id)) {
+          currentTraining.push(meter.id)
+        }
+      })
+    }
   } else {
-    currentTraining.push(jobFunctionId)
+    // Regular job function handling
+    const index = currentTraining.indexOf(jobFunctionId)
+    
+    if (index > -1) {
+      currentTraining.splice(index, 1)
+    } else {
+      currentTraining.push(jobFunctionId)
+    }
   }
   
   // Update the checkbox state in DOM (no reactive state changes)
   const checkbox = document.querySelector(`[data-employee-id="${employeeId}"][data-job-function-id="${jobFunctionId}"]`) as HTMLInputElement
   if (checkbox) {
-    checkbox.checked = currentTraining.includes(jobFunctionId)
+    checkbox.checked = isEmployeeTrained(employeeId, jobFunctionId)
   }
   
   // Update save button state
