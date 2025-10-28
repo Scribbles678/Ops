@@ -5,6 +5,9 @@ export default defineNuxtConfig({
   
   modules: ['@nuxtjs/tailwindcss'],
   
+  // Fix hydration issues
+  ssr: true,
+  
   tailwindcss: {
     cssPath: '~/assets/css/main.css',
     configPath: 'tailwind.config.js'
@@ -25,6 +28,13 @@ export default defineNuxtConfig({
       supabaseUrl: process.env.SUPABASE_URL || '',
       supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
       appPassword: process.env.APP_PASSWORD || 'operations2024'
+    }
+  },
+  
+  // Fix hydration mismatches
+  nitro: {
+    experimental: {
+      wasm: true
     }
   }
 })

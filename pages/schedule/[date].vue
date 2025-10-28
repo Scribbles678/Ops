@@ -5,7 +5,11 @@
       <div class="flex items-center justify-between mb-6">
         <div>
           <h1 class="text-4xl font-bold text-gray-800">View/Edit Schedule</h1>
-          <p class="text-gray-600 mt-2">{{ formatDate(scheduleDate || '') }}</p>
+          <p class="text-gray-600 mt-2">
+            <ClientOnly>
+              {{ formatDate(scheduleDate || '') }}
+            </ClientOnly>
+          </p>
         </div>
         <div class="flex space-x-4">
           <button 
@@ -69,10 +73,13 @@
             </div>
             <div class="mt-4 p-3 bg-blue-50 rounded-lg">
               <p class="text-sm text-blue-800">
-                <strong>Selected:</strong> {{ formatDate(scheduleDate) }}
-                <span v-if="isWeekend" class="ml-2 text-orange-600 font-medium">(Weekend)</span>
-                <span v-if="isFuture" class="ml-2 text-green-600 font-medium">(Future)</span>
-                <span v-if="isPast" class="ml-2 text-gray-600 font-medium">(Past)</span>
+                <strong>Selected:</strong> 
+                <ClientOnly>
+                  {{ formatDate(scheduleDate) }}
+                  <span v-if="isWeekend" class="ml-2 text-orange-600 font-medium">(Weekend)</span>
+                  <span v-if="isFuture" class="ml-2 text-green-600 font-medium">(Future)</span>
+                  <span v-if="isPast" class="ml-2 text-gray-600 font-medium">(Past)</span>
+                </ClientOnly>
               </p>
             </div>
           </div>
@@ -394,9 +401,16 @@ const targetHours = ref({})
 const showMeterDashboard = ref(false)
 const meterBookings = ref<Record<string, boolean>>({})
 
-// Get route params
+// Get route params - use client-only for date to avoid hydration mismatch
 const route = useRoute()
-const scheduleDate = ref((route.params.date as string) || new Date().toISOString().split('T')[0])
+const scheduleDate = ref('')
+
+// Initialize date on client side to avoid hydration mismatch
+onMounted(() => {
+  if (!scheduleDate.value) {
+    scheduleDate.value = (route.params.date as string) || new Date().toISOString().split('T')[0]
+  }
+})
 
 // Date navigation functions
 const goToToday = () => {
@@ -418,14 +432,16 @@ const goToTomorrow = () => {
   navigateTo(`/schedule/${scheduleDate.value}`)
 }
 
-// Date status computed properties
+// Date status computed properties - make them hydration-safe
 const isWeekend = computed(() => {
+  if (!scheduleDate.value) return false
   const date = new Date(scheduleDate.value)
   const day = date.getDay()
   return day === 0 || day === 6 // Sunday or Saturday
 })
 
 const isFuture = computed(() => {
+  if (!scheduleDate.value) return false
   const selectedDate = new Date(scheduleDate.value)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -433,6 +449,7 @@ const isFuture = computed(() => {
 })
 
 const isPast = computed(() => {
+  if (!scheduleDate.value) return false
   const selectedDate = new Date(scheduleDate.value)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
@@ -708,13 +725,18 @@ const jobFunctionHours = computed(() => {
 
 // Functions
 const formatDate = (dateString: string) => {
-  const date = new Date(dateString)
-  return date.toLocaleDateString('en-US', { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
-  })
+  if (!dateString) return ''
+  try {
+    const date = new Date(dateString)
+    return date.toLocaleDateString('en-US', {
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric'
+    })
+  } catch (error) {
+    return dateString
+  }
 }
 
 const getEmployeeAssignment = (employeeId: string, timeBlock: string) => {
