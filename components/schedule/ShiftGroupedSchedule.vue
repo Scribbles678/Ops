@@ -28,56 +28,87 @@
         </div>
       </div>
 
+      <!-- Break Overlay Row (aligns once per shift) -->
+      <div class="relative mb-2 min-w-max">
+        <div 
+          class="grid w-full"
+          :style="{ gridTemplateColumns: getGridTemplateColumns(shift) }"
+        >
+          <div
+            v-for="timeBlock in getShiftTimeBlocks(shift)"
+            :key="`break-${shift.id}-${timeBlock.time}`"
+            class="min-h-[14px] border-r border-gray-200"
+            :class="{
+              'bg-gray-100': !timeBlock.isBreakTime,
+              'bg-black text-white': timeBlock.isBreakTime
+            }"
+          >
+            <span v-if="timeBlock.isBreakTime" class="sr-only">{{ getBreakType(timeBlock.time, shift) }}</span>
+          </div>
+        </div>
+      </div>
+
       <!-- Employee Rows for this Shift -->
       <div class="shift-employees">
         <div 
           v-for="employee in shift.employees" 
           :key="employee.id" 
-          class="employee-row"
+          class="employee-row odd:bg-white even:bg-gray-50/40"
         >
           <!-- Employee name -->
           <div class="employee-name">
             {{ employee.last_name }}, {{ employee.first_name }}
           </div>
 
-          <!-- Dynamic Time Blocks -->
-          <div 
-            v-for="timeBlock in getShiftTimeBlocks(shift)" 
-            :key="timeBlock.time"
-            class="time-block-content"
-            :class="{ 'hourly-marker-content': isHourlyMarker(timeBlock.time) }"
-          >
-           <div class="assignment-cell-full">
-             <div 
-               v-if="!isBreakTime(timeBlock.time, shift)"
-               @click="openAssignmentModal(employee, timeBlock, shift)"
-               class="assignment-clickable-full"
-               :class="{
-                 'assignment-start': isAssignmentStart(employee.id, timeBlock.time),
-                 'assignment-middle': isAssignmentMiddle(employee.id, timeBlock.time),
-                 'assignment-end': isAssignmentEnd(employee.id, timeBlock.time),
-                 'assignment-single': isAssignmentSingle(employee.id, timeBlock.time)
-               }"
-               :style="{ 
-                 backgroundColor: getJobFunctionColor(getAssignment(employee.id, timeBlock.time)),
-                 color: getAssignment(employee.id, timeBlock.time) ? '#000' : '#666'
-               }"
-             >
-               <span v-if="isAssignmentStart(employee.id, timeBlock.time) || isAssignmentSingle(employee.id, timeBlock.time)">
-                 {{ getAssignment(employee.id, timeBlock.time) || 'Click to assign' }}
-               </span>
-               <span v-else-if="isAssignmentMiddle(employee.id, timeBlock.time) || isAssignmentEnd(employee.id, timeBlock.time)">
-                 {{ getAssignment(employee.id, timeBlock.time) }}
-               </span>
-             </div>
-             <div 
-               v-else
-               class="break-cell-full"
-               :style="{ backgroundColor: '#000000' }"
-             >
-               {{ getBreakType(timeBlock.time, shift) }}
-             </div>
-           </div>
+          <!-- Grid row background cells for alignment and interaction -->
+          <div class="relative w-full">
+            <div
+              class="grid"
+              :style="{ gridTemplateColumns: getGridTemplateColumns(shift) }"
+            >
+              <div 
+                v-for="timeBlock in getShiftTimeBlocks(shift)" 
+                :key="`cell-${employee.id}-${shift.id}-${timeBlock.time}`"
+                class="time-block-content"
+                :class="{ 'hourly-marker-content': isHourlyMarker(timeBlock.time) }"
+              >
+                <div class="assignment-cell-full">
+                  <div 
+                    v-if="!isBreakTime(timeBlock.time, shift)"
+                    @click="openAssignmentModal(employee, timeBlock, shift)"
+                    class="assignment-clickable-full bg-white hover:bg-blue-50"
+                  >
+                    <!-- Empty background cell; assignments are rendered as overlay spans -->
+                  </div>
+                  <div 
+                    v-else
+                    class="break-cell-full"
+                    :style="{ backgroundColor: '#000000' }"
+                  >
+                    {{ getBreakType(timeBlock.time, shift) }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Assignment overlay spans (single element per contiguous range) -->
+            <div 
+              class="pointer-events-none absolute inset-0 grid"
+              :style="{ gridTemplateColumns: getGridTemplateColumns(shift) }"
+            >
+              <div
+                v-for="range in getEmployeeAssignmentRanges(employee.id, shift)"
+                :key="`range-${employee.id}-${shift.id}-${range.start}-${range.end}-${range.label}`"
+                class="rounded-lg border border-gray-300 flex items-center justify-start px-2 text-xs font-medium shadow-sm overflow-hidden"
+                :style="{
+                  gridColumn: `${range.start} / ${range.end}`,
+                  backgroundColor: getJobFunctionColor(range.label),
+                  color: '#000'
+                }"
+              >
+                <span class="truncate">{{ range.label }}</span>
+              </div>
+            </div>
           </div>
         </div>
         
@@ -459,6 +490,57 @@ const getJobFunctionColor = (jobFunctionName: string) => {
   return jobFunction?.color_code || '#ffffff'
 }
 
+// Grid helpers
+const getGridTemplateColumns = (shift: any) => {
+  const cols = getShiftTimeBlocks(shift).length
+  // Fixed column width for crisp alignment and predictable wrapping
+  return `repeat(${cols}, 60px)`
+}
+
+const timeToColumnIndex = (time: string, shift: any) => {
+  const blocks = getShiftTimeBlocks(shift)
+  const index = blocks.findIndex(b => b.time === time)
+  return index >= 0 ? index + 1 : 1 // CSS grid columns are 1-based
+}
+
+// Build contiguous assignment ranges to render a single span per block
+const getEmployeeAssignmentRanges = (employeeId: string, shift: any) => {
+  const blocks = getShiftTimeBlocks(shift)
+  const ranges: Array<{ start: number; end: number; label: string }> = []
+
+  let currentLabel = ''
+  let currentStart = -1
+
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]
+    const label = getAssignment(employeeId, b.time) || ''
+
+    if (!b.isBreakTime && label) {
+      if (currentLabel === '') {
+        currentLabel = label
+        currentStart = i + 1 // 1-based start
+      } else if (label !== currentLabel) {
+        // close previous and start new
+        ranges.push({ start: currentStart, end: i + 1, label: currentLabel })
+        currentLabel = label
+        currentStart = i + 1
+      }
+    } else {
+      if (currentLabel !== '') {
+        ranges.push({ start: currentStart, end: i + 1, label: currentLabel })
+        currentLabel = ''
+        currentStart = -1
+      }
+    }
+  }
+
+  if (currentLabel !== '') {
+    ranges.push({ start: currentStart, end: blocks.length + 1, label: currentLabel })
+  }
+
+  return ranges
+}
+
 // Generate time blocks for a specific shift
 const getShiftTimeBlocks = (shift: any) => {
   const startTime = shift.start_time || '06:00'
@@ -692,8 +774,10 @@ const saveAssignment = () => {
     return
   }
   
-  const startMinutes = timeToMinutes(assignmentStartTime.value)
-  const endMinutes = timeToMinutes(assignmentEndTime.value)
+  // Snap to 15-minute increments to ensure perfect alignment
+  const roundToQuarter = (mins: number) => Math.round(mins / 15) * 15
+  const startMinutes = roundToQuarter(timeToMinutes(assignmentStartTime.value))
+  const endMinutes = roundToQuarter(timeToMinutes(assignmentEndTime.value))
   
   // Clear any existing assignments for this employee in this time range
   clearAssignmentsInRange(selectedEmployee.value.id, startMinutes, endMinutes)
