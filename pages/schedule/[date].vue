@@ -2,14 +2,33 @@
   <div class="min-h-screen bg-gray-50">
     <div class="px-4 py-6">
       <!-- Header -->
-      <div class="flex items-center justify-between mb-6">
-        <div>
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex flex-col">
           <h1 class="text-4xl font-bold text-gray-800">View/Edit Schedule</h1>
           <p class="text-gray-600 mt-2">
             <ClientOnly>
               {{ formatDate(scheduleDate || '') }}
             </ClientOnly>
           </p>
+          <!-- KPI strip under title -->
+          <div class="hidden md:flex gap-2 mt-2">
+            <div class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-center">
+              <div class="text-sm font-bold text-blue-600">{{ totalEmployees }}</div>
+              <div class="text-[11px] text-gray-600">Employees</div>
+            </div>
+            <div class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-center">
+              <div class="text-sm font-bold text-green-600">{{ totalLaborHours }}h</div>
+              <div class="text-[11px] text-gray-600">Labor Hours</div>
+            </div>
+            <div class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-center">
+              <div class="text-sm font-bold text-purple-600">{{ totalShifts }}</div>
+              <div class="text-[11px] text-gray-600">Active Shifts</div>
+            </div>
+            <div class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-center">
+              <div class="text-sm font-bold text-orange-600">{{ unassignedEmployees }}</div>
+              <div class="text-[11px] text-gray-600">Unassigned</div>
+            </div>
+          </div>
         </div>
         <div class="flex space-x-4">
           <button 
@@ -85,25 +104,8 @@
           </div>
         </div>
 
-        <!-- KPI Strip (Right Side) -->
-        <div class="flex-1 flex items-stretch justify-between gap-2">
-          <div class="flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-center min-w-[140px]">
-            <div class="text-sm font-bold text-blue-600">{{ totalEmployees }}</div>
-            <div class="text-[11px] text-gray-600">Total Employees</div>
-          </div>
-          <div class="flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-center min-w-[140px]">
-            <div class="text-sm font-bold text-green-600">{{ totalLaborHours }}h</div>
-            <div class="text-[11px] text-gray-600">Total Labor Hours</div>
-          </div>
-          <div class="flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-center min-w-[140px]">
-            <div class="text-sm font-bold text-purple-600">{{ totalShifts }}</div>
-            <div class="text-[11px] text-gray-600">Active Shifts</div>
-          </div>
-          <div class="flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-center min-w-[140px]">
-            <div class="text-sm font-bold text-orange-600">{{ unassignedEmployees }}</div>
-            <div class="text-[11px] text-gray-600">Unassigned</div>
-          </div>
-        </div>
+        <!-- KPI strip on right hidden to avoid duplicate; header strip is primary -->
+        <div class="flex-1 hidden"></div>
       </div>
 
       <!-- Save Progress Indicator -->
