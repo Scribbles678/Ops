@@ -204,3 +204,24 @@ INSERT INTO employees (first_name, last_name) VALUES
 -- Enable Realtime for schedule_assignments table
 ALTER PUBLICATION supabase_realtime ADD TABLE schedule_assignments;
 
+-- 7. PTO Days Table
+CREATE TABLE IF NOT EXISTS pto_days (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    pto_date DATE NOT NULL,
+    start_time TIME,
+    end_time TIME,
+    pto_type TEXT,
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pto_date ON pto_days(pto_date);
+CREATE INDEX IF NOT EXISTS idx_pto_employee ON pto_days(employee_id);
+
+ALTER TABLE pto_days ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable read access for all users" ON pto_days FOR SELECT USING (true);
+CREATE POLICY "Enable insert for all users" ON pto_days FOR INSERT WITH CHECK (true);
+CREATE POLICY "Enable update for all users" ON pto_days FOR UPDATE USING (true);
+CREATE POLICY "Enable delete for all users" ON pto_days FOR DELETE USING (true);
+

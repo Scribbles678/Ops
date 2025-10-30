@@ -105,6 +105,9 @@ const {
   fetchScheduleForDate
 } = useSchedule()
 
+// PTO
+const { ptoByEmployeeId, fetchPTOForDate } = usePTO()
+
 const {
   employees,
   loading: employeesLoading,
@@ -163,12 +166,33 @@ const shiftsWithAssignments = computed(() => {
     })
   })
   
+  // Helper to check if an assignment overlaps PTO
+  const overlapsPTO = (empId: string, startTime: string, endTime: string) => {
+    const ptoRecs = (ptoByEmployeeId.value && ptoByEmployeeId.value[empId]) ? ptoByEmployeeId.value[empId] : []
+    if (!ptoRecs || ptoRecs.length === 0) return false
+    const aS = parseInt(startTime.substring(0,2)) * 60 + parseInt(startTime.substring(3,5))
+    const aE = parseInt(endTime.substring(0,2)) * 60 + parseInt(endTime.substring(3,5))
+    for (const r of ptoRecs) {
+      if (!r.start_time && !r.end_time) return true // full day PTO
+      const rStart = r.start_time ? String(r.start_time).substring(0,5) : '00:00'
+      const rEnd = r.end_time ? String(r.end_time).substring(0,5) : '23:59'
+      const rS = parseInt(rStart.substring(0,2)) * 60 + parseInt(rStart.substring(3,5))
+      const rE = parseInt(rEnd.substring(0,2)) * 60 + parseInt(rEnd.substring(3,5))
+      if (!(aE <= rS || aS >= rE)) return true
+    }
+    return false
+  }
+  
   // Group employees by their shift_id
   employees.value.forEach(employee => {
     const shiftId = employee.shift_id
     if (shiftMap.has(shiftId)) {
-      // Get assignments for this employee
-      const employeeAssignmentsList = employeeAssignments.get(employee.id) || []
+      // If employee has any PTO record for today, skip entirely to save space
+      const hasAnyPTO = !!(ptoByEmployeeId.value && ptoByEmployeeId.value[employee.id] && ptoByEmployeeId.value[employee.id].length > 0)
+      if (hasAnyPTO) return
+
+      // Get assignments for this employee and filter out those overlapping PTO
+      const employeeAssignmentsList = (employeeAssignments.get(employee.id) || []).filter(a => !overlapsPTO(employee.id, String(a.start_time), String(a.end_time)))
       
       // Create employee object with assignments
       const employeeWithAssignments = {
@@ -266,7 +290,8 @@ const loadData = async () => {
     await Promise.all([
       fetchShifts(),
       fetchEmployees(),
-      fetchScheduleForDate(today.value)
+      fetchScheduleForDate(today.value),
+      fetchPTOForDate(today.value)
     ])
     updateLastUpdated()
     console.log('Display data refreshed')

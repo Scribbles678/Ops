@@ -51,10 +51,10 @@
         </div>
       </div>
 
-      <!-- Date Selector and Stats Row -->
-      <div class="flex gap-4 mb-4">
+      <!-- Date Selector and Job Function Breakdown Row -->
+      <div class="flex gap-4 mb-4 items-stretch">
         <!-- Date Selector (Left Side) -->
-        <div class="card flex-shrink-0" style="width: 400px;">
+        <div class="card flex-shrink-0 h-full" style="width: 400px;">
           <div class="p-4">
             <h2 class="text-lg font-bold text-gray-800 mb-3">Select Schedule Date</h2>
             <div class="flex items-center space-x-4">
@@ -104,8 +104,98 @@
           </div>
         </div>
 
-        <!-- KPI strip on right hidden to avoid duplicate; header strip is primary -->
-        <div class="flex-1 hidden"></div>
+        <!-- Job Function Hours Breakdown / Meter Dashboard (Right Side) -->
+        <div class="flex-1">
+          <div class="card mb-0 h-full">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-lg font-bold text-gray-800">
+                {{ showMeterDashboard ? 'Meter Staffing Dashboard' : 'Job Function Hours Breakdown' }}
+              </h3>
+              <div class="flex space-x-2">
+                <button 
+                  @click="showMeterDashboard = false"
+                  class="px-3 py-1 text-sm rounded border transition-colors"
+                  :class="!showMeterDashboard ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  Job Functions
+                </button>
+                <button 
+                  @click="showMeterDashboard = true"
+                  class="px-3 py-1 text-sm rounded border transition-colors"
+                  :class="showMeterDashboard ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  Meter Dashboard
+                </button>
+              </div>
+            </div>
+            <!-- Job Function Hours Breakdown -->
+            <div v-if="!showMeterDashboard" class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+              <div v-for="jobFunction in jobFunctionHours" :key="jobFunction.name" class="text-center bg-gray-50 rounded-lg p-2 border border-gray-200 hover:shadow-sm transition-shadow">
+                <div class="flex items-center justify-center mb-1">
+                  <div 
+                    class="w-3 h-3 rounded border-2 border-gray-400 mr-2 shadow-sm" 
+                    :style="{ backgroundColor: jobFunction.color }"
+                  ></div>
+                  <span class="text-xs font-semibold text-gray-800">{{ jobFunction.name }}</span>
+                </div>
+                <div class="text-[11px] text-gray-600 mb-0.5">Actual Hours</div>
+                <div class="text-base font-bold text-gray-900 bg-white rounded py-0.5 px-2 shadow-sm mb-0.5">
+                  {{ jobFunction.hours }}
+                </div>
+                <div class="text-[11px] text-gray-600 mb-0.5">Target Hours</div>
+                <div class="text-sm font-semibold text-blue-600 bg-blue-50 rounded py-0.5 px-2">
+                  {{ getTargetHours(jobFunction.id) }}
+                </div>
+              </div>
+            </div>
+            <!-- Meter Dashboard (compact within top row) -->
+            <div v-else class="overflow-x-auto">
+              <div class="min-w-max">
+                <div class="flex border-b-2 border-gray-300 mb-2">
+                  <div class="w-20 px-2 py-1 text-xs font-medium text-gray-700 bg-gray-50 border-r border-gray-300 sticky left-0 z-10">
+                    Meter
+                  </div>
+                  <div v-for="timeSlot in meterTimeSlots" :key="timeSlot.time" class="px-1 py-1 text-center text-xs font-medium border-r border-gray-200" :class="{ 'hourly-marker': isHourlyMarker(timeSlot.time) }" :style="{ minWidth: '40px' }">
+                    {{ formatTimeForMeterDashboard(timeSlot.time) }}
+                  </div>
+                </div>
+
+                <!-- Meter Rows (restored) -->
+                <div class="min-w-max">
+                  <div
+                    v-for="meterNumber in 20"
+                    :key="meterNumber"
+                    class="flex border-b border-gray-200 hover:bg-gray-50"
+                  >
+                    <!-- Meter Label -->
+                    <div class="w-20 px-2 py-1 text-xs font-medium text-gray-800 bg-white border-r border-gray-300 sticky left-0 z-10">
+                      Meter {{ meterNumber }}
+                    </div>
+
+                    <!-- Time Slots for this Meter -->
+                    <div
+                      v-for="timeSlot in meterTimeSlots"
+                      :key="`meter-${meterNumber}-${timeSlot.time}`"
+                      class="px-1 py-1 text-center text-xs border-r border-gray-200 relative"
+                      :class="{ 'hourly-marker-content': isHourlyMarker(timeSlot.time) }"
+                      :style="{ minWidth: '40px' }"
+                    >
+                      <div
+                        class="w-full h-full flex items-center justify-center rounded cursor-pointer transition"
+                        :class="getMeterSlotClasses(meterNumber, timeSlot.time)"
+                        :style="getMeterSlotStyle(meterNumber, timeSlot.time)"
+                        @click="toggleMeterSlot(meterNumber, timeSlot.time)"
+                      >
+                        <span v-if="isMeterBooked(meterNumber, timeSlot.time)" class="text-white text-xs">●</span>
+                        <span v-else class="text-gray-300 text-xs">○</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Save Progress Indicator -->
@@ -125,102 +215,6 @@
         </div>
       </div>
 
-      <!-- Job Function Hours Breakdown / Meter Dashboard -->
-      <div class="card mb-6">
-        <div class="flex items-center justify-between mb-3">
-          <h3 class="text-lg font-bold text-gray-800">
-            {{ showMeterDashboard ? 'Meter Staffing Dashboard' : 'Job Function Hours Breakdown' }}
-          </h3>
-          <div class="flex space-x-2">
-            <button 
-              @click="showMeterDashboard = false"
-              class="px-3 py-1 text-sm rounded border transition-colors"
-              :class="!showMeterDashboard ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-            >
-              Job Functions
-            </button>
-            <button 
-              @click="showMeterDashboard = true"
-              class="px-3 py-1 text-sm rounded border transition-colors"
-              :class="showMeterDashboard ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-            >
-              Meter Dashboard
-            </button>
-          </div>
-        </div>
-        <!-- Job Function Hours Breakdown -->
-        <div v-if="!showMeterDashboard" class="grid grid-cols-3 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-3">
-          <div v-for="jobFunction in jobFunctionHours" :key="jobFunction.name" class="text-center bg-gray-50 rounded-lg p-3 border border-gray-200 hover:shadow-sm transition-shadow">
-            <div class="flex items-center justify-center mb-2">
-              <div 
-                class="w-4 h-4 rounded border-2 border-gray-400 mr-2 shadow-sm" 
-                :style="{ backgroundColor: jobFunction.color }"
-              ></div>
-              <span class="text-xs font-semibold text-gray-800">{{ jobFunction.name }}</span>
-            </div>
-            <div class="text-xs text-gray-600 mb-1">Actual Hours</div>
-            <div class="text-xl font-bold text-gray-900 bg-white rounded-lg py-1 px-2 shadow-sm mb-1">
-              {{ jobFunction.hours }}
-            </div>
-            <div class="text-xs text-gray-600 mb-1">Target Hours</div>
-            <div class="text-lg font-semibold text-blue-600 bg-blue-50 rounded-lg py-1 px-2">
-              {{ getTargetHours(jobFunction.id) }}
-            </div>
-          </div>
-        </div>
-
-        <!-- Meter Staffing Dashboard -->
-        <div v-else class="overflow-x-auto">
-          <div class="min-w-max">
-            <!-- Time Header -->
-            <div class="flex border-b-2 border-gray-300 mb-2">
-              <div class="w-20 px-2 py-1 text-xs font-medium text-gray-700 bg-gray-50 border-r border-gray-300 sticky left-0 z-10">
-                Meter
-              </div>
-              <div
-                v-for="timeSlot in meterTimeSlots"
-                :key="timeSlot.time"
-                class="px-1 py-1 text-center text-xs font-medium border-r border-gray-200"
-                :class="{ 'hourly-marker': isHourlyMarker(timeSlot.time) }"
-                :style="{ minWidth: '40px' }"
-              >
-                {{ formatTimeForMeterDashboard(timeSlot.time) }}
-              </div>
-            </div>
-
-            <!-- Meter Rows -->
-            <div
-              v-for="meterNumber in 20"
-              :key="meterNumber"
-              class="flex border-b border-gray-200 hover:bg-gray-50"
-            >
-              <!-- Meter Label -->
-              <div class="w-20 px-2 py-1 text-xs font-medium text-gray-800 bg-white border-r border-gray-300 sticky left-0 z-10">
-                Meter {{ meterNumber }}
-              </div>
-
-              <!-- Time Slots for this Meter -->
-              <div
-                v-for="timeSlot in meterTimeSlots"
-                :key="`meter-${meterNumber}-${timeSlot.time}`"
-                class="px-1 py-1 text-center text-xs border-r border-gray-200 relative"
-                :class="{ 'hourly-marker-content': isHourlyMarker(timeSlot.time) }"
-                :style="{ minWidth: '40px' }"
-              >
-                <div
-                  class="w-full h-full flex items-center justify-center rounded cursor-pointer transition"
-                  :class="getMeterSlotClasses(meterNumber, timeSlot.time)"
-                  :style="getMeterSlotStyle(meterNumber, timeSlot.time)"
-                  @click="toggleMeterSlot(meterNumber, timeSlot.time)"
-                >
-                  <span v-if="isMeterBooked(meterNumber, timeSlot.time)" class="text-white text-xs">●</span>
-                  <span v-else class="text-gray-300 text-xs">○</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <!-- Shift-Based Schedule Layout -->
       <div v-if="loading" class="card text-center py-8">
@@ -244,17 +238,19 @@
             :job-functions="jobFunctions"
             :shifts="scheduleData"
             :schedule-assignments-data="scheduleAssignmentsData"
+            :pto-by-employee-id="ptoByEmployeeId"
             @add-assignment="handleAddAssignment"
             @edit-assignment="handleEditAssignment"
             @assign-break-coverage="handleBreakCoverage"
             @schedule-data-updated="handleScheduleDataUpdated"
+            @addPTO="openPTOModal"
           />
         </div>
       </div>
 
       <!-- Job Function Assignment Modal -->
       <div v-if="showEmployeeModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
+        <div class="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
           <h3 class="text-xl font-bold mb-4">
             Assign Job Function to {{ selectedEmployee?.last_name || '' }}, {{ selectedEmployee?.first_name || '' }}
             <span v-if="selectedShift"> - {{ selectedShift.name }}</span>
@@ -305,6 +301,49 @@
           </div>
         </div>
       </div>
+
+      <!-- PTO Modal -->
+      <div v-if="showPTOModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <h3 class="text-xl font-bold mb-4">Add PTO</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+              <input v-model="ptoForm.pto_date" type="date" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+            </div>
+            <div class="flex items-center gap-2">
+              <input id="full_day" v-model="ptoForm.full_day" type="checkbox" class="h-4 w-4 text-blue-600 border-gray-300 rounded" />
+              <label for="full_day" class="text-sm text-gray-700">Full day</label>
+            </div>
+            <div class="grid grid-cols-2 gap-3" v-if="!ptoForm.full_day">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Start</label>
+                <input v-model="ptoForm.start_time" type="time" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">End</label>
+                <input v-model="ptoForm.end_time" type="time" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+              <select v-model="ptoForm.pto_type" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                <option value="vacation">Vacation</option>
+                <option value="sick">Sick</option>
+                <option value="leave">Leave</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+              <input v-model="ptoForm.notes" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+              <button @click="closePTOModal" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button @click="savePTO" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save PTO</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -346,6 +385,14 @@ const {
   createAssignment,
   deleteAssignment
 } = useSchedule()
+
+// PTO composable
+const {
+  pto,
+  ptoByEmployeeId,
+  fetchPTOForDate,
+  createPTO
+} = usePTO()
 
 // Ensure scheduleAssignments is always an array
 const scheduleAssignments = computed(() => (scheduleAssignmentsRef.value || []) as any[])
@@ -471,6 +518,7 @@ const isPast = computed(() => {
 watch(scheduleDate, async (newDate) => {
   if (newDate) {
     await fetchScheduleForDate(newDate)
+    await fetchPTOForDate(newDate)
     await nextTick()
     initializeScheduleData()
   }
@@ -630,7 +678,7 @@ onMounted(async () => {
       fetchShifts(),
       fetchScheduleForDate(scheduleDate.value)
     ])
-    
+    await fetchPTOForDate(scheduleDate.value)
     // Load target hours from database
     await loadTargetHours()
     
@@ -1072,6 +1120,57 @@ const handleScheduleDataUpdated = (newScheduleData: Record<string, any>) => {
   scheduleAssignmentsData.value = newScheduleData
   // Sync meter bookings when schedule data is updated
   syncMeterBookings()
+}
+
+// PTO Modal state and actions
+const showPTOModal = ref(false)
+const ptoForm = ref({
+  employee_id: '',
+  pto_date: '',
+  full_day: true,
+  start_time: '08:00',
+  end_time: '17:00',
+  pto_type: 'vacation',
+  notes: ''
+})
+
+const openPTOModal = (employee: any) => {
+  ptoForm.value.employee_id = employee?.id || ''
+  ptoForm.value.pto_date = scheduleDate.value
+  ptoForm.value.full_day = true
+  ptoForm.value.start_time = '08:00'
+  ptoForm.value.end_time = '17:00'
+  ptoForm.value.pto_type = 'vacation'
+  ptoForm.value.notes = ''
+  showPTOModal.value = true
+}
+
+const savePTO = async () => {
+  if (!ptoForm.value.employee_id || !ptoForm.value.pto_date) return
+  const record: any = {
+    employee_id: ptoForm.value.employee_id,
+    pto_date: ptoForm.value.pto_date,
+    pto_type: ptoForm.value.pto_type,
+    notes: ptoForm.value.notes || null
+  }
+  if (!ptoForm.value.full_day) {
+    record.start_time = ptoForm.value.start_time + ':00'
+    record.end_time = ptoForm.value.end_time + ':00'
+  } else {
+    record.start_time = null
+    record.end_time = null
+  }
+  const ok = await createPTO(record)
+  if (ok) {
+    await fetchPTOForDate(scheduleDate.value)
+    showPTOModal.value = false
+  } else {
+    alert('Failed to create PTO. Please try again.')
+  }
+}
+
+const closePTOModal = () => {
+  showPTOModal.value = false
 }
 
 // Meter dashboard functions

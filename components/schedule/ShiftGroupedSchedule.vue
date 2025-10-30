@@ -56,8 +56,10 @@
           class="employee-row odd:bg-white even:bg-gray-50/40"
         >
           <!-- Employee name -->
-          <div class="employee-name">
-            {{ employee.last_name }}, {{ employee.first_name }}
+          <div class="employee-name flex items-center gap-2">
+            <span class="whitespace-nowrap truncate max-w-[160px]" :title="`${employee.last_name}, ${employee.first_name}`">{{ employee.last_name }}, {{ employee.first_name }}</span>
+            <span v-if="hasPTO(employee.id)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-700 border border-red-200">PTO</span>
+            <button @click="emit('addPTO', employee)" class="px-1.5 py-0.5 text-[10px] rounded border border-gray-300 text-gray-700 hover:bg-gray-100">PTO</button>
           </div>
 
           <!-- Grid row background cells for alignment and interaction -->
@@ -155,7 +157,7 @@
 
     <!-- Assignment Modal -->
     <div v-if="showAssignmentModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+      <div class="bg-white rounded-lg p-6 w-full mx-4 max-w-2xl max-h-[90vh] overflow-y-auto">
         <h3 class="text-xl font-bold mb-4">
           Assign Task to {{ selectedEmployee?.last_name }}, {{ selectedEmployee?.first_name }}
         </h3>
@@ -294,6 +296,7 @@ const props = defineProps<{
   jobFunctions: any[]
   shifts: any[]
   scheduleAssignmentsData?: Record<string, any>
+  ptoByEmployeeId?: Record<string, any[]>
 }>()
 
 // Emits
@@ -570,6 +573,24 @@ const getEmployeeAssignmentRanges = (employeeId: string, shift: any) => {
   return ranges
 }
 
+// PTO helpers
+const hasPTO = (employeeId: string) => {
+  return !!props.ptoByEmployeeId && Array.isArray(props.ptoByEmployeeId[employeeId]) && props.ptoByEmployeeId[employeeId].length > 0
+}
+
+const isOverlappingPTO = (employeeId: string, startMinutes: number, endMinutes: number) => {
+  if (!props.ptoByEmployeeId) return false
+  const records = props.ptoByEmployeeId[employeeId] || []
+  for (const r of records) {
+    // Full day
+    if (!r.start_time && !r.end_time) return true
+    const s = r.start_time ? timeToMinutes(String(r.start_time).substring(0,5)) : 0
+    const e = r.end_time ? timeToMinutes(String(r.end_time).substring(0,5)) : 24 * 60
+    if (!(endMinutes <= s || startMinutes >= e)) return true
+  }
+  return false
+}
+
 // Generate time blocks for a specific shift
 const getShiftTimeBlocks = (shift: any) => {
   const startTime = shift.start_time || '06:00'
@@ -843,6 +864,11 @@ const saveAssignment = () => {
   const roundToQuarter = (mins: number) => Math.round(mins / 15) * 15
   const startMinutes = roundToQuarter(timeToMinutes(assignmentStartTime.value))
   const endMinutes = roundToQuarter(timeToMinutes(assignmentEndTime.value))
+  // PTO overlap check
+  if (props.ptoByEmployeeId && isOverlappingPTO(selectedEmployee.value.id, startMinutes, endMinutes)) {
+    alert('This employee has PTO during the selected time. Adjust the range or remove PTO.')
+    return
+  }
   
   // Clear any existing assignments for this employee in this time range
   clearAssignmentsInRange(selectedEmployee.value.id, startMinutes, endMinutes)
@@ -971,7 +997,7 @@ initializeScheduleData()
 }
 
 .employee-name-header {
-  @apply w-40 px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
+  @apply w-48 px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
 }
 
 .time-block {
@@ -1000,7 +1026,7 @@ initializeScheduleData()
 }
 
 .employee-name {
-  @apply w-40 px-3 py-2 font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
+  @apply w-48 px-3 py-2 font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
 }
 
 .time-block-content {
