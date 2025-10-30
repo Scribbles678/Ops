@@ -18,7 +18,7 @@ Execute the `database-cleanup.sql` file in your Supabase SQL Editor to create:
 - Monitoring views
 - Logging system
 
-### 2. Verify Setup
+### 2. Verify Setup.
 Check that these functions exist in your database:
 - `cleanup_old_schedules_with_logging()`
 - `get_cleanup_stats()`
