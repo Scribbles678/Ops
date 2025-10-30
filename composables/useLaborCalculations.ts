@@ -98,12 +98,23 @@ export const useLaborCalculations = () => {
   }
 
   const formatDate = (date: string | Date): string => {
-    const d = new Date(date)
-    return d.toLocaleDateString('en-US', { 
-      weekday: 'long', 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
+    let d: Date
+    if (typeof date === 'string') {
+      // If incoming is an ISO date-only string (YYYY-MM-DD), construct as local date
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        const [y, m, day] = date.split('-').map(Number)
+        d = new Date(y, (m || 1) - 1, day || 1)
+      } else {
+        d = new Date(date)
+      }
+    } else {
+      d = date
+    }
+    return d.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
     })
   }
 

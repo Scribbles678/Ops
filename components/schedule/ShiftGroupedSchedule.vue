@@ -37,10 +37,10 @@
           <div
             v-for="timeBlock in getShiftTimeBlocks(shift)"
             :key="`break-${shift.id}-${timeBlock.time}`"
-            class="min-h-[14px] border-r border-gray-200"
+            class="min-h-[10px] border-r border-gray-100"
             :class="{
-              'bg-gray-100': !timeBlock.isBreakTime,
-              'bg-black text-white': timeBlock.isBreakTime
+              'bg-gray-50': !timeBlock.isBreakTime,
+              'bg-gray-300': timeBlock.isBreakTime
             }"
           >
             <span v-if="timeBlock.isBreakTime" class="sr-only">{{ getBreakType(timeBlock.time, shift) }}</span>
@@ -69,8 +69,11 @@
               <div 
                 v-for="timeBlock in getShiftTimeBlocks(shift)" 
                 :key="`cell-${employee.id}-${shift.id}-${timeBlock.time}`"
-                class="time-block-content"
+                class="time-block-content select-none"
                 :class="{ 'hourly-marker-content': isHourlyMarker(timeBlock.time) }"
+                @mousedown.prevent="onSelectStart(employee, shift, timeBlock)"
+                @mouseenter="onSelectMove(shift, timeBlock)"
+                @mouseup="onSelectEnd()"
               >
                 <div class="assignment-cell-full">
                   <div 
@@ -82,8 +85,7 @@
                   </div>
                   <div 
                     v-else
-                    class="break-cell-full"
-                    :style="{ backgroundColor: '#000000' }"
+                    class="break-cell-full rounded-lg border border-gray-300 bg-gray-800 text-white"
                   >
                     {{ getBreakType(timeBlock.time, shift) }}
                   </div>
@@ -99,7 +101,7 @@
               <div
                 v-for="range in getEmployeeAssignmentRanges(employee.id, shift)"
                 :key="`range-${employee.id}-${shift.id}-${range.start}-${range.end}-${range.label}`"
-                class="rounded-lg border border-gray-300 flex items-center justify-start px-2 text-xs font-medium shadow-sm overflow-hidden"
+                class="rounded-md border border-gray-300 flex items-center justify-start px-1.5 text-[11px] font-medium shadow-sm overflow-hidden"
                 :style="{
                   gridColumn: `${range.start} / ${range.end}`,
                   backgroundColor: getJobFunctionColor(range.label),
@@ -108,6 +110,13 @@
               >
                 <span class="truncate">{{ range.label }}</span>
               </div>
+
+              <!-- Selection overlay while dragging -->
+              <div
+                v-if="isSelecting && selectedEmployee?.id === employee.id && selectedShift?.id === shift.id && selectionRange"
+                class="rounded-lg border-2 border-blue-400 bg-blue-200/40"
+                :style="{ gridColumn: `${selectionRange.start} / ${selectionRange.end}` }"
+              ></div>
             </div>
           </div>
         </div>
@@ -311,6 +320,26 @@ const assignmentStartTime = ref('')
 const assignmentEndTime = ref('')
 const selectedMeterNumber = ref('')
 
+// Drag-to-select state
+const isSelecting = ref(false)
+const selectionStartTime = ref('')
+const selectionEndTime = ref('')
+const selectionRange = computed(() => {
+  if (!isSelecting.value || !selectionStartTime.value || !selectionEndTime.value || !selectedShift.value) return null
+  const blocks = getShiftTimeBlocks(selectedShift.value)
+  const startIdx = Math.min(
+    Math.max(blocks.findIndex(b => b.time === selectionStartTime.value), 0),
+    blocks.length - 1
+  )
+  const endIdx = Math.min(
+    Math.max(blocks.findIndex(b => b.time === selectionEndTime.value), 0),
+    blocks.length - 1
+  )
+  const start = Math.min(startIdx, endIdx) + 1
+  const end = Math.max(startIdx, endIdx) + 2 // end is exclusive
+  return { start, end }
+})
+
 // Group employees by their assigned shifts
 const shiftsWithEmployees = computed(() => {
   return props.shifts.map(shift => {
@@ -494,7 +523,7 @@ const getJobFunctionColor = (jobFunctionName: string) => {
 const getGridTemplateColumns = (shift: any) => {
   const cols = getShiftTimeBlocks(shift).length
   // Fixed column width for crisp alignment and predictable wrapping
-  return `repeat(${cols}, 60px)`
+  return `repeat(${cols}, 48px)`
 }
 
 const timeToColumnIndex = (time: string, shift: any) => {
@@ -753,6 +782,42 @@ const closeAssignmentModal = () => {
   selectedMeterNumber.value = ''
 }
 
+// Drag-to-select handlers
+const onSelectStart = (employee: any, shift: any, timeBlock: any) => {
+  if (isBreakTime(timeBlock.time, shift)) return
+  isSelecting.value = true
+  selectedEmployee.value = employee
+  selectedShift.value = shift
+  selectionStartTime.value = timeBlock.time
+  selectionEndTime.value = timeBlock.time
+}
+
+const onSelectMove = (shift: any, timeBlock: any) => {
+  if (!isSelecting.value) return
+  if (!selectedShift.value || selectedShift.value.id !== shift.id) return
+  if (isBreakTime(timeBlock.time, shift)) return
+  selectionEndTime.value = timeBlock.time
+}
+
+const onSelectEnd = () => {
+  if (!isSelecting.value) return
+  isSelecting.value = false
+  // Open modal with prefilled start/end based on selection
+  if (!selectedEmployee.value || !selectedShift.value || !selectionRange.value) return
+  const blocks = getShiftTimeBlocks(selectedShift.value)
+  const startIdx = selectionRange.value.start - 1
+  const endIdxExclusive = selectionRange.value.end - 1
+  const startTime = blocks[startIdx]?.time
+  const endTime = blocks[Math.min(endIdxExclusive, blocks.length - 1)]
+    ? minutesToTime(timeToMinutes(blocks[Math.min(endIdxExclusive - 1, blocks.length - 1)].time) + 15)
+    : ''
+  
+  selectedTimeBlock.value = { time: startTime }
+  assignmentStartTime.value = startTime
+  assignmentEndTime.value = endTime
+  showAssignmentModal.value = true
+}
+
 const selectJobFunction = (jobFunction: any) => {
   selectedJobFunction.value = jobFunction
   // Clear meter number when selecting a non-meter job function
@@ -906,11 +971,11 @@ initializeScheduleData()
 }
 
 .employee-name-header {
-  @apply w-48 px-4 py-3 font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
+  @apply w-40 px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
 }
 
 .time-block {
-  @apply border-r border-gray-300 min-w-[60px];
+  @apply border-r border-gray-300 min-w-[48px];
 }
 
 .time-header {
@@ -935,11 +1000,11 @@ initializeScheduleData()
 }
 
 .employee-name {
-  @apply w-48 px-4 py-3 font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
+  @apply w-40 px-3 py-2 font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
 }
 
 .time-block-content {
-  @apply border-r border-gray-300 min-w-[60px];
+  @apply border-r border-gray-300 min-w-[48px];
 }
 
 .hourly-marker-content {
@@ -960,7 +1025,7 @@ initializeScheduleData()
 }
 
 .assignment-clickable-full {
-  @apply w-full h-full px-0 py-1 text-sm border border-gray-300 cursor-pointer hover:bg-opacity-80 transition-all min-h-[40px] flex items-center justify-center;
+  @apply w-full h-full px-0 py-0.5 text-xs border border-gray-300 cursor-pointer hover:bg-opacity-80 transition-all min-h-[28px] flex items-center justify-center;
 }
 
 .assignment-start {
@@ -984,11 +1049,11 @@ initializeScheduleData()
 }
 
 .break-cell-full {
-  @apply w-full h-full px-0 py-1 text-xs font-bold text-center border-0 cursor-not-allowed min-h-[40px] flex items-center justify-center text-white;
+  @apply w-full h-full px-0 py-0.5 text-[10px] font-bold text-center cursor-not-allowed min-h-[28px] flex items-center justify-center;
 }
 
 .empty-cell-full {
-  @apply w-full h-full px-0 py-1 text-xs text-center border border-gray-200 min-h-[40px] flex items-center justify-center;
+  @apply w-full h-full px-0 py-0.5 text-[10px] text-center border border-gray-200 min-h-[28px] flex items-center justify-center;
 }
 
 .break-blocked {

@@ -719,30 +719,62 @@ const applyAISchedule = async (schedule: any[]) => {
     // Get shifts data
     const shiftsData = await fetchShifts()
     
-    // Save AI-generated schedule to database
-    for (const assignment of schedule) {
-      // Find the job function ID
-      const jobFunction = jobFunctions.value.find((jf: any) => jf.name === assignment.job_function) as any
-      if (jobFunction && jobFunction.id) {
-        // Find the shift ID for this time slot
-        const shift = shiftsData?.find((s: any) => {
-          const timeSlotMinutes = timeToMinutes(assignment.start_time)
-          const shiftStartMinutes = timeToMinutes(s.start_time)
-          const shiftEndMinutes = timeToMinutes(s.end_time)
-          return timeSlotMinutes >= shiftStartMinutes && timeSlotMinutes < shiftEndMinutes
+    // Merge contiguous per-slot assignments into ranges by employee/job/shift
+    const timeAsc = (a: string, b: string) => timeToMinutes(a) - timeToMinutes(b)
+    const keyFor = (empId: string, jobId: string, shiftId: string) => `${empId}|${jobId}|${shiftId}`
+
+    // Pre-resolve job function ids and shift ids for each slot
+    const enriched = schedule
+      .map(a => {
+        const jf = jobFunctions.value.find((jf: any) => jf.name === a.job_function) as any
+        if (!jf) return null
+        const shift = (shiftsData || []).find((s: any) => {
+          const t = timeToMinutes(a.start_time)
+          return t >= timeToMinutes(s.start_time) && t < timeToMinutes(s.end_time)
         }) as any
-        
-        if (shift && shift.id) {
-        await createAssignment({
-          employee_id: assignment.employee_id,
-          job_function_id: jobFunction.id,
-            shift_id: shift.id,
-            start_time: assignment.start_time,
-            end_time: assignment.end_time,
-          schedule_date: selectedDate.value
-        })
+        if (!shift) return null
+        return { ...a, job_function_id: jf.id, shift_id: shift.id }
+      })
+      .filter(Boolean) as any[]
+
+    const grouped: Record<string, any[]> = {}
+    for (const a of enriched) {
+      const k = keyFor(a.employee_id, a.job_function_id, a.shift_id)
+      if (!grouped[k]) grouped[k] = []
+      grouped[k].push(a)
+    }
+
+    const ranges: any[] = []
+    Object.entries(grouped).forEach(([k, items]) => {
+      items.sort((a, b) => timeAsc(a.start_time, b.start_time))
+      let curStart = ''
+      let curEnd = ''
+      for (const it of items) {
+        if (!curStart) {
+          curStart = it.start_time
+          curEnd = it.end_time
+        } else if (it.start_time === curEnd) {
+          // extend contiguous
+          curEnd = it.end_time
+        } else {
+          const [empId, jobId, shiftId] = k.split('|')
+          ranges.push({ employee_id: empId, job_function_id: jobId, shift_id: shiftId, start_time: curStart, end_time: curEnd, schedule_date: selectedDate.value })
+          curStart = it.start_time
+          curEnd = it.end_time
         }
       }
+      if (curStart) {
+        const [empId, jobId, shiftId] = k.split('|')
+        ranges.push({ employee_id: empId, job_function_id: jobId, shift_id: shiftId, start_time: curStart, end_time: curEnd, schedule_date: selectedDate.value })
+      }
+    })
+
+    // Bulk insert ranges in batches for performance
+    const batchSize = 200
+    for (let i = 0; i < ranges.length; i += batchSize) {
+      const batch = ranges.slice(i, i + batchSize)
+      const { error } = await useNuxtApp().$supabase.from('schedule_assignments').insert(batch)
+      if (error) throw error
     }
   } catch (error) {
     console.error('Error applying AI schedule:', error)

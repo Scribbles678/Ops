@@ -1,22 +1,22 @@
 <template>
   <div class="min-h-screen bg-gray-900 text-white">
     <!-- Header -->
-    <div class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+    <div class="bg-gray-800 border-b border-gray-700 px-3 py-2">
       <div class="flex justify-between items-center">
         <div>
-          <h1 class="text-3xl font-bold">OPERATIONS SCHEDULE</h1>
-          <p class="text-gray-400 text-lg">{{ formattedDate }}</p>
+          <h1 class="text-lg font-bold">OPERATIONS SCHEDULE</h1>
+          <p class="text-gray-400 text-sm">{{ formattedDate }}</p>
         </div>
-        <div class="flex items-center space-x-4">
+        <div class="flex items-center space-x-3">
           <div class="text-right">
-            <p class="text-sm text-gray-400">Last Updated</p>
-            <p class="text-lg font-semibold">{{ lastUpdated }}</p>
+            <p class="text-xs text-gray-400">Last Updated</p>
+            <p class="text-sm font-semibold">{{ lastUpdated }}</p>
           </div>
           <button
             @click="refreshData"
-            class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg transition flex items-center"
+            class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded-md transition flex items-center text-xs"
           >
-            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             Refresh
@@ -31,58 +31,50 @@
     </div>
 
     <!-- Schedule Content -->
-    <div v-else class="p-6 space-y-6">
+    <div v-else class="p-2 space-y-2">
       <!-- Each Shift -->
       <div
         v-for="shift in shiftsWithAssignments"
         :key="shift.id"
-        class="bg-gray-800 rounded-lg border border-gray-700 p-6"
+        class="bg-gray-800 rounded-md border border-gray-700 p-2"
       >
-        <h2 class="text-2xl font-bold mb-4 pb-3 border-b border-gray-700">
+        <h2 class="text-sm font-semibold mb-1 pb-1 border-b border-gray-700">
           {{ shift.name }}
         </h2>
 
         <!-- Employees Grid -->
-        <div v-if="shift.employees && shift.employees.length > 0" class="space-y-4">
+        <div v-if="shift.employees && shift.employees.length > 0" class="divide-y divide-gray-700">
           <div
             v-for="employee in shift.employees"
             :key="employee.id"
-            class="bg-gray-700 rounded-lg p-4"
+            class="flex items-center gap-2 py-1"
           >
-            <!-- Employee Header -->
-            <div class="text-lg font-semibold mb-3 text-white">
+            <!-- Employee name -->
+            <div class="w-40 text-white text-xs font-medium truncate">
               {{ employee.last_name }}, {{ employee.first_name }}
             </div>
             
-            <!-- Employee Assignments -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            <!-- Inline assignment pills -->
+            <div class="flex flex-wrap gap-1">
               <div
                 v-for="assignment in employee.assignments"
                 :key="assignment.id"
-                class="rounded-lg p-3 text-white font-medium border-2 border-opacity-50"
+                class="rounded-sm px-1 py-0.5 text-[9px] border border-opacity-50"
                 :style="{
                   backgroundColor: assignment.job_function.color_code,
-                  borderColor: darkenColor(assignment.job_function.color_code)
+                  borderColor: darkenColor(assignment.job_function.color_code),
+                  color: getTextColor(assignment.job_function.color_code)
                 }"
               >
-                <div class="flex flex-col">
-                  <div class="text-sm font-semibold mb-1">
-                    {{ assignment.job_function.name }}
-                  </div>
-                  <div class="text-xs opacity-90 flex items-center">
-                    <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    {{ formatTime(assignment.start_time) }} - {{ formatTime(assignment.end_time) }}
-                  </div>
-                </div>
+                <span class="font-semibold mr-1">{{ assignment.job_function.name }}</span>
+                <span class="opacity-90">{{ formatTime(assignment.start_time) }}-{{ formatTime(assignment.end_time) }}</span>
               </div>
             </div>
           </div>
         </div>
 
         <!-- No employees message -->
-        <div v-else class="text-center py-8 text-gray-500">
+        <div v-else class="text-center py-4 text-gray-500 text-sm">
           No staff scheduled for this shift
         </div>
       </div>
@@ -97,7 +89,7 @@
     </div>
 
     <!-- Auto-refresh indicator -->
-    <div class="fixed bottom-4 right-4 bg-gray-800 px-4 py-2 rounded-lg text-sm text-gray-400 border border-gray-700">
+    <div class="fixed bottom-2 right-2 bg-gray-800 px-2 py-1 rounded text-xs text-gray-400 border border-gray-700">
       Auto-refreshing every 2 minutes
     </div>
   </div>
@@ -113,12 +105,30 @@ const {
   fetchScheduleForDate
 } = useSchedule()
 
+const {
+  employees,
+  loading: employeesLoading,
+  fetchEmployees
+} = useEmployees()
+
 const lastUpdated = ref('')
 const refreshInterval = ref<NodeJS.Timeout | null>(null)
+const rolloverInterval = ref<NodeJS.Timeout | null>(null)
 
-const today = computed(() => {
-  return new Date().toISOString().split('T')[0]
-})
+// Timezone-aware date helper (America/Chicago) to avoid UTC off-by-one
+const getTZISODate = (tz: string): string => {
+  // en-CA yields YYYY-MM-DD format
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date())
+}
+
+// Today as a reactive ref in America/Chicago timezone
+const TIMEZONE = 'America/Chicago'
+const today = ref(getTZISODate(TIMEZONE))
 
 const formattedDate = computed(() => {
   return formatDate(today.value)
@@ -129,63 +139,49 @@ const shiftsWithAssignments = computed(() => {
   // Get all assignments and consolidate them first
   const allAssignments = consolidateAssignments(assignments.value)
   
-  // Group assignments by employee to find their starting shift
-  const employeeStartingShifts = new Map()
+  // Sort shifts by start time for consistent ordering
+  const orderedShifts = [...(shifts.value || [])].sort((a: any, b: any) => String(a.start_time).localeCompare(String(b.start_time)))
   
+  // Group assignments by employee for easy lookup
+  const employeeAssignments = new Map()
   allAssignments.forEach(assignment => {
     const employeeId = assignment.employee_id
-    if (!employeeStartingShifts.has(employeeId)) {
-      // Find the shift this assignment belongs to
-      const shift = shifts.value.find(s => s.id === assignment.shift_id)
-      if (shift) {
-        employeeStartingShifts.set(employeeId, {
-          shift,
-          assignments: []
-        })
-      }
+    if (!employeeAssignments.has(employeeId)) {
+      employeeAssignments.set(employeeId, [])
     }
-    
-    // Add this assignment to the employee's list
-    const employeeData = employeeStartingShifts.get(employeeId)
-    if (employeeData) {
-      employeeData.assignments.push(assignment)
-    }
+    employeeAssignments.get(employeeId).push(assignment)
   })
   
-  // Convert back to shift-based structure
+  // Group employees by their actual shift_id (like the schedule page does)
   const shiftMap = new Map()
   
-  employeeStartingShifts.forEach((employeeData, employeeId) => {
-    const shiftId = employeeData.shift.id
-    if (!shiftMap.has(shiftId)) {
-      shiftMap.set(shiftId, {
-        ...employeeData.shift,
-        employees: []
-      })
-    }
-    
-    // Group assignments by job function for this employee
-    const assignmentsByJobFunction = new Map()
-    employeeData.assignments.forEach(assignment => {
-      const jobFunctionId = assignment.job_function_id
-      if (!assignmentsByJobFunction.has(jobFunctionId)) {
-        assignmentsByJobFunction.set(jobFunctionId, [])
-      }
-      assignmentsByJobFunction.get(jobFunctionId).push(assignment)
+  // Initialize all shifts (even empty ones)
+  orderedShifts.forEach(shift => {
+    shiftMap.set(shift.id, {
+      ...shift,
+      employees: []
     })
-    
-    // Create employee object with consolidated assignments
-    const employee = {
-      id: employeeId,
-      first_name: employeeData.assignments[0].employee.first_name,
-      last_name: employeeData.assignments[0].employee.last_name,
-      assignments: Array.from(assignmentsByJobFunction.values()).flat()
-    }
-    
-    shiftMap.get(shiftId).employees.push(employee)
   })
   
-  return Array.from(shiftMap.values())
+  // Group employees by their shift_id
+  employees.value.forEach(employee => {
+    const shiftId = employee.shift_id
+    if (shiftMap.has(shiftId)) {
+      // Get assignments for this employee
+      const employeeAssignmentsList = employeeAssignments.get(employee.id) || []
+      
+      // Create employee object with assignments
+      const employeeWithAssignments = {
+        ...employee,
+        assignments: employeeAssignmentsList
+      }
+      
+      shiftMap.get(shiftId).employees.push(employeeWithAssignments)
+    }
+  })
+  
+  // Return all shifts in start-time order (including empty ones)
+  return orderedShifts.map(s => shiftMap.get(s.id))
 })
 
 // Function to consolidate consecutive assignments for the same employee and job function
@@ -229,17 +225,32 @@ const consolidateAssignments = (assignments: any[]) => {
 }
 
 onMounted(() => {
+  // Ensure client-side date in CST/CDT before first load
+  today.value = getTZISODate(TIMEZONE)
   loadData()
   
   // Set up auto-refresh every 2 minutes
   refreshInterval.value = setInterval(() => {
     loadData()
   }, 120000)
+
+  // Update today's date every minute to catch midnight rollover, and reload when it changes
+  const tick = () => {
+    const current = getTZISODate(TIMEZONE)
+    if (today.value !== current) {
+      today.value = current
+      loadData()
+    }
+  }
+  rolloverInterval.value = setInterval(tick, 60000)
 })
 
 onUnmounted(() => {
   if (refreshInterval.value) {
     clearInterval(refreshInterval.value)
+  }
+  if (rolloverInterval.value) {
+    clearInterval(rolloverInterval.value)
   }
 })
 
@@ -252,8 +263,11 @@ const loadData = async () => {
   
   try {
     console.log('Refreshing display data...')
-    await fetchShifts()
-    await fetchScheduleForDate(today.value)
+    await Promise.all([
+      fetchShifts(),
+      fetchEmployees(),
+      fetchScheduleForDate(today.value)
+    ])
     updateLastUpdated()
     console.log('Display data refreshed')
   } finally {
@@ -295,6 +309,22 @@ const darkenColor = (hex: string): string => {
   }
   
   return `#${toHex(darken(r))}${toHex(darken(g))}${toHex(darken(b))}`
+}
+
+const getTextColor = (hex: string): string => {
+  // Remove # if present
+  hex = hex.replace('#', '')
+  
+  // Convert to RGB
+  const r = parseInt(hex.substring(0, 2), 16)
+  const g = parseInt(hex.substring(2, 4), 16)
+  const b = parseInt(hex.substring(4, 6), 16)
+  
+  // Calculate relative luminance
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  
+  // Return white text for dark backgrounds, black text for light backgrounds
+  return luminance > 0.5 ? '#000000' : '#ffffff'
 }
 </script>
 

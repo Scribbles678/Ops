@@ -85,31 +85,23 @@
           </div>
         </div>
 
-        <!-- Labor Hours Summary (Right Side) -->
-        <div class="flex-1 grid grid-cols-2 md:grid-cols-4 gap-1">
-          <div class="card p-1">
-            <div class="text-center">
-              <div class="text-base font-bold text-blue-600">{{ totalEmployees }}</div>
-              <div class="text-xs text-gray-600">Total Employees</div>
-            </div>
+        <!-- KPI Strip (Right Side) -->
+        <div class="flex-1 flex items-stretch justify-between gap-2">
+          <div class="flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-center min-w-[140px]">
+            <div class="text-sm font-bold text-blue-600">{{ totalEmployees }}</div>
+            <div class="text-[11px] text-gray-600">Total Employees</div>
           </div>
-          <div class="card p-1">
-            <div class="text-center">
-              <div class="text-base font-bold text-green-600">{{ totalLaborHours }}h</div>
-              <div class="text-xs text-gray-600">Total Labor Hours</div>
-            </div>
+          <div class="flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-center min-w-[140px]">
+            <div class="text-sm font-bold text-green-600">{{ totalLaborHours }}h</div>
+            <div class="text-[11px] text-gray-600">Total Labor Hours</div>
           </div>
-          <div class="card p-1">
-            <div class="text-center">
-              <div class="text-base font-bold text-purple-600">{{ totalShifts }}</div>
-              <div class="text-xs text-gray-600">Active Shifts</div>
-            </div>
+          <div class="flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-center min-w-[140px]">
+            <div class="text-sm font-bold text-purple-600">{{ totalShifts }}</div>
+            <div class="text-[11px] text-gray-600">Active Shifts</div>
           </div>
-          <div class="card p-1">
-            <div class="text-center">
-              <div class="text-base font-bold text-orange-600">{{ unassignedEmployees }}</div>
-              <div class="text-xs text-gray-600">Unassigned</div>
-            </div>
+          <div class="flex-1 rounded-md border border-gray-200 bg-white px-3 py-2 text-center min-w-[140px]">
+            <div class="text-sm font-bold text-orange-600">{{ unassignedEmployees }}</div>
+            <div class="text-[11px] text-gray-600">Unassigned</div>
           </div>
         </div>
       </div>
@@ -408,27 +400,44 @@ const scheduleDate = ref('')
 // Initialize date on client side to avoid hydration mismatch
 onMounted(() => {
   if (!scheduleDate.value) {
-    scheduleDate.value = (route.params.date as string) || new Date().toISOString().split('T')[0]
+    scheduleDate.value = (route.params.date as string) || getTZISODate('America/Chicago')
   }
 })
 
+// Helpers for local/TZ-safe ISO dates
+const toLocalISO = (d: Date): string => {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+const getTZISODate = (tz: string): string => {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date())
+}
+
 // Date navigation functions
 const goToToday = () => {
-  scheduleDate.value = new Date().toISOString().split('T')[0]
+  scheduleDate.value = getTZISODate('America/Chicago')
   navigateTo(`/schedule/${scheduleDate.value}`)
 }
 
 const goToYesterday = () => {
-  const yesterday = new Date()
-  yesterday.setDate(yesterday.getDate() - 1)
-  scheduleDate.value = yesterday.toISOString().split('T')[0]
+  const d = new Date()
+  d.setDate(d.getDate() - 1)
+  scheduleDate.value = toLocalISO(d)
   navigateTo(`/schedule/${scheduleDate.value}`)
 }
 
 const goToTomorrow = () => {
-  const tomorrow = new Date()
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  scheduleDate.value = tomorrow.toISOString().split('T')[0]
+  const d = new Date()
+  d.setDate(d.getDate() + 1)
+  scheduleDate.value = toLocalISO(d)
   navigateTo(`/schedule/${scheduleDate.value}`)
 }
 
@@ -727,11 +736,22 @@ const jobFunctionHours = computed(() => {
 const formatDate = (dateString: string) => {
   if (!dateString) return ''
   try {
+    // Handle YYYY-MM-DD safely as a local date (avoid UTC shift)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+      const [y, m, d] = dateString.split('-').map(Number)
+      const localDate = new Date(y, (m || 1) - 1, d || 1)
+      return localDate.toLocaleDateString('en-US', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      })
+    }
     const date = new Date(dateString)
     return date.toLocaleDateString('en-US', {
-      weekday: 'long', 
-      year: 'numeric', 
-      month: 'long', 
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
       day: 'numeric'
     })
   } catch (error) {
@@ -901,53 +921,108 @@ const saveSchedule = async () => {
     saveProgress.value = 'Clearing existing assignments...'
     await clearAssignmentsForDate(scheduleDate.value)
     
-    // Convert scheduleAssignmentsData to database format and save
-    saveProgress.value = 'Processing schedule data...'
-    const assignmentsToSave = []
-    
+    // Convert scheduleAssignmentsData into contiguous ranges and save (batch-save improvement)
+    saveProgress.value = 'Processing schedule data (merging ranges)...'
+    const assignmentsToSave: any[] = []
+
+    // Build a unified ordered list of 15-minute time slots across all active shifts
+    const allSlots: string[] = (() => {
+      if (!shifts.value || shifts.value.length === 0) return []
+      const minStart = shifts.value
+        .map((s: any) => timeToMinutes(s.start_time.substring(0, 5)))
+        .reduce((a: number, b: number) => Math.min(a, b))
+      const maxEnd = shifts.value
+        .map((s: any) => timeToMinutes(s.end_time.substring(0, 5)))
+        .reduce((a: number, b: number) => Math.max(a, b))
+      const slots: string[] = []
+      for (let m = minStart; m < maxEnd; m += 15) {
+        slots.push(minutesToTime(m))
+      }
+      return slots
+    })()
+
     Object.entries(scheduleAssignmentsData.value).forEach(([employeeId, employeeSchedule]) => {
-      Object.entries(employeeSchedule).forEach(([timeSlot, data]) => {
-        if (data.assignment && data.assignment.trim() !== '') {
-          // Find the job function ID
-          const jobFunction = jobFunctions.value.find(jf => jf.name === data.assignment)
-          if (jobFunction) {
-            // Find the shift ID for this time slot
-            const shift = shifts.value.find(s => {
-              // Check if this time slot falls within the shift hours
-              const timeSlotMinutes = timeToMinutes(timeSlot)
-              const shiftStartMinutes = timeToMinutes(s.start_time)
-              const shiftEndMinutes = timeToMinutes(s.end_time)
-              return timeSlotMinutes >= shiftStartMinutes && timeSlotMinutes < shiftEndMinutes
-            })
-            
-            if (shift) {
-              // Calculate end time (15 minutes later)
-              const startTimeMinutes = timeToMinutes(timeSlot)
-              const endTimeMinutes = startTimeMinutes + 15
-              const endTime = minutesToTime(endTimeMinutes)
-              
-              assignmentsToSave.push({
-                employee_id: employeeId,
-                job_function_id: jobFunction.id,
-                shift_id: shift.id,
-                start_time: timeSlot,
-                end_time: endTime,
-                schedule_date: scheduleDate.value
-              })
-            }
+      let currentLabel = ''
+      let currentStartTime = ''
+      let currentShift: any = null
+      let currentJobFunctionId: string | null = null
+
+      const flushRange = (endSlot: string) => {
+        if (!currentLabel || !currentShift || !currentJobFunctionId || !currentStartTime) return
+        assignmentsToSave.push({
+          employee_id: employeeId,
+          job_function_id: currentJobFunctionId,
+          shift_id: currentShift.id,
+          start_time: currentStartTime,
+          end_time: endSlot,
+          schedule_date: scheduleDate.value
+        })
+        currentLabel = ''
+        currentStartTime = ''
+        currentShift = null
+        currentJobFunctionId = null
+      }
+
+      for (let i = 0; i < allSlots.length; i++) {
+        const slot = allSlots[i]
+        const data = (employeeSchedule as any)[slot]
+        const label = data && data.assignment ? String(data.assignment).trim() : ''
+
+        if (label) {
+          const jobFunction = jobFunctions.value.find((jf: any) => jf.name === label)
+          const shift = shifts.value.find((s: any) => {
+            const t = timeToMinutes(slot)
+            return t >= timeToMinutes(s.start_time) && t < timeToMinutes(s.end_time)
+          })
+
+          if (!jobFunction || !shift) {
+            // Cannot place this slot — end any current range and skip
+            if (currentLabel) flushRange(slot)
+            continue
           }
+
+          if (
+            currentLabel === label &&
+            currentShift && currentShift.id === shift.id &&
+            currentJobFunctionId === jobFunction.id
+          ) {
+            // Continue the current range
+            continue
+          } else {
+            // Start a new range, close previous
+            if (currentLabel) flushRange(slot)
+            currentLabel = label
+            currentStartTime = slot
+            currentShift = shift
+            currentJobFunctionId = jobFunction.id
+          }
+        } else {
+          // Empty slot — close current range if any
+          if (currentLabel) flushRange(slot)
         }
-      })
+      }
+
+      // Close any trailing range at the end of the day
+      if (currentLabel) {
+        const lastEnd = minutesToTime(timeToMinutes(allSlots[allSlots.length - 1]) + 15)
+        flushRange(lastEnd)
+      }
     })
     
     // Save all assignments
     if (assignmentsToSave.length > 0) {
       saveProgress.value = `Saving ${assignmentsToSave.length} assignments to database...`
-      
-      for (let i = 0; i < assignmentsToSave.length; i++) {
-        const assignment = assignmentsToSave[i]
-        saveProgress.value = `Saving assignment ${i + 1} of ${assignmentsToSave.length}...`
-        await createAssignment(assignment)
+      // Faster: insert in batches of 200 for large schedules
+      const batchSize = 200
+      for (let i = 0; i < assignmentsToSave.length; i += batchSize) {
+        const batch = assignmentsToSave.slice(i, i + batchSize)
+        saveProgress.value = `Saving assignments ${i + 1}-${Math.min(i + batchSize, assignmentsToSave.length)} of ${assignmentsToSave.length}...`
+        // useSchedule.createAssignment currently inserts a single row.
+        // Use Supabase client directly for bulk insert to avoid N calls.
+        const { error: insertError } = await $supabase
+          .from('schedule_assignments')
+          .insert(batch)
+        if (insertError) throw insertError
       }
     }
     
