@@ -108,6 +108,20 @@
         </div>
       </div>
 
+      <!-- Manage Business Rules Button -->
+      <div class="text-center mt-6">
+        <NuxtLink
+          to="/admin/business-rules"
+          class="inline-flex items-center px-6 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+        >
+          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          Manage Business Rules
+        </NuxtLink>
+      </div>
+
     </div>
   </div>
 </template>
@@ -118,6 +132,7 @@ const { copySchedule, createAssignment, fetchShifts } = useSchedule()
 const { logout } = useAuth()
 const { jobFunctions, fetchJobFunctions } = useJobFunctions()
 const { fetchEmployees, getAllEmployeeTraining } = useEmployees()
+const { fetchBusinessRules, rulesByJobFunction } = useBusinessRules()
 
 // Tomorrow's date
 const tomorrowDate = computed(() => {
@@ -252,21 +267,24 @@ const setToNextMonday = () => {
 
 const generateAIScheduleLogic = async () => {
   try {
-    // Load real data
-    const [employeesData, jobFunctionsData, shiftsData] = await Promise.all([
+    // Load real data including business rules
+    const [employeesData, jobFunctionsData, shiftsData, businessRulesData] = await Promise.all([
       fetchEmployees(),
       fetchJobFunctions(),
-      fetchShifts()
+      fetchShifts(),
+      fetchBusinessRules()
     ])
     
     const employees = employeesData || []
     const jobFunctions = jobFunctionsData || []
     const shifts = shiftsData || []
+    const businessRules = businessRulesData || []
     
     console.log('Loaded data:', { 
       employees: employees.length, 
       jobFunctions: jobFunctions.length, 
-      shifts: shifts.length 
+      shifts: shifts.length,
+      businessRules: businessRules.length
     })
     
     // Get training data for all employees
@@ -275,8 +293,8 @@ const generateAIScheduleLogic = async () => {
     
     console.log('Training data:', trainingData)
     
-    // Build the schedule
-    const schedule = await buildOptimalSchedule(employees, jobFunctions, shifts, trainingData)
+    // Build the schedule using database rules
+    const schedule = await buildOptimalSchedule(employees, jobFunctions, shifts, trainingData, businessRules)
     
     console.log('✅ Generated schedule:', schedule.length, 'assignments')
     console.log('📊 Schedule Summary:')
@@ -293,51 +311,73 @@ const generateAIScheduleLogic = async () => {
 }
 
 // Core algorithm with 15-minute increments and 2-4 hour blocks
-const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shifts: any[], trainingData: any) => {
+const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shifts: any[], trainingData: any, dbRules: any[]) => {
   const assignments = []
   const employeeAssignments = new Map() // Track what each employee is doing
   const employeeHours = new Map() // Track hours per employee
   
-  // Business rules with 15-minute precision - using actual job functions from database
-  // Based on your shifts: 06:00-14:30, 07:00-15:30, 08:00-16:30, 10:00-18:30, 12:00-20:30, 16:00-20:30
-  const businessRules = [
-    { 
-      jobFunction: 'X4', 
-      timeSlots: [
-        { start: '08:00', end: '14:30', minStaff: 2, blockSize: 390 }, // 6.5 hours
-        { start: '10:00', end: '18:30', minStaff: 2, blockSize: 510 }, // 8.5 hours
-        { start: '12:00', end: '20:30', minStaff: 2, blockSize: 510 }, // 8.5 hours
-        { start: '16:00', end: '20:30', minStaff: 1, blockSize: 270 }  // 4.5 hours
-      ] 
-    },
-    { 
-      jobFunction: 'EM9', 
-      timeSlots: [
-        { start: '08:00', end: '14:30', minStaff: 1, blockSize: 390 }, // 6.5 hours
-        { start: '10:00', end: '18:30', minStaff: 2, blockSize: 510 }, // 8.5 hours
-        { start: '12:00', end: '20:30', minStaff: 2, blockSize: 510 }, // 8.5 hours
-        { start: '16:00', end: '20:30', minStaff: 1, blockSize: 270 }  // 4.5 hours
-      ] 
-    },
-    { 
-      jobFunction: 'Locus', 
-      timeSlots: [
-        { start: '08:00', end: '14:30', minStaff: 2, blockSize: 390 }, // 6.5 hours
-        { start: '10:00', end: '18:30', minStaff: 3, blockSize: 510 }, // 8.5 hours
-        { start: '12:00', end: '20:30', minStaff: 3, blockSize: 510 }, // 8.5 hours
-        { start: '16:00', end: '20:30', minStaff: 2, blockSize: 270 }, // 4.5 hours
-        { start: '08:00', end: '20:30', maxStaff: 6 } // Global max
-      ] 
-    }
-  ]
+  // Convert database rules to processing format
+  // Group by job function and process max staff limits separately
+  const globalMaxLimits = new Map<string, number>() // jobFunction -> maxStaff
+  const timeSlotRules: Record<string, any[]> = {} // jobFunction -> array of time slot rules
   
-  // Process each business rule
-  console.log('🔄 Building optimal schedule...')
-  for (const rule of businessRules) {
-    console.log(`📋 Processing ${rule.jobFunction} assignments...`)
-    for (const timeSlot of rule.timeSlots) {
+  for (const dbRule of dbRules) {
+    const jfName = dbRule.job_function_name
+    
+    // Handle global max limits (where min_staff is null)
+    if (!dbRule.min_staff && dbRule.max_staff) {
+      globalMaxLimits.set(jfName, dbRule.max_staff)
+      continue
+    }
+    
+    // Regular time slot rules
+    if (!timeSlotRules[jfName]) {
+      timeSlotRules[jfName] = []
+    }
+    
+    timeSlotRules[jfName].push({
+      start: dbRule.time_slot_start,
+      end: dbRule.time_slot_end,
+      minStaff: dbRule.min_staff,
+      maxStaff: dbRule.max_staff,
+      blockSize: dbRule.block_size_minutes,
+      priority: dbRule.priority || 0
+    })
+  }
+  
+  // Sort time slots by priority, then by start time
+  Object.keys(timeSlotRules).forEach(jfName => {
+    timeSlotRules[jfName].sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority
+      return a.start.localeCompare(b.start)
+    })
+  })
+  
+  // Process each job function's rules
+  console.log('🔄 Building optimal schedule from database rules...')
+  for (const [jobFunction, timeSlots] of Object.entries(timeSlotRules)) {
+    console.log(`📋 Processing ${jobFunction} assignments...`)
+    
+    // Check global max limit for this function
+    const globalMax = globalMaxLimits.get(jobFunction)
+    let currentStaffCount = 0
+    
+    for (const timeSlot of timeSlots) {
       const requiredStaff = timeSlot.minStaff
       const maxStaff = timeSlot.maxStaff || requiredStaff
+      
+      // Apply global max limit if exists
+      if (globalMax !== undefined && currentStaffCount >= globalMax) {
+        console.log(`Reached global max of ${globalMax} for ${jobFunction}`)
+        continue
+      }
+      
+      // Calculate how many staff we can assign (respecting global and slot max limits)
+      let effectiveMaxStaff = maxStaff || 0
+      if (globalMax !== undefined) {
+        const remainingGlobal = globalMax - currentStaffCount
+        effectiveMaxStaff = Math.min(effectiveMaxStaff || 999, remainingGlobal)
+      }
       
       // Find available employees for this time slot
       const availableEmployees = findAvailableEmployees(
@@ -345,15 +385,15 @@ const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shift
         shifts, 
         trainingData, 
         jobFunctions,
-        rule.jobFunction, 
+        jobFunction, 
         timeSlot.start, 
         timeSlot.end
       )
       
       // Assign staff (respecting max limits)
-      const staffToAssign = Math.min(requiredStaff || 0, availableEmployees.length, maxStaff || 0)
+      const staffToAssign = Math.min(requiredStaff || 0, availableEmployees.length, effectiveMaxStaff)
       
-      console.log(`Assigning ${staffToAssign} staff for ${rule.jobFunction} at ${timeSlot.start}-${timeSlot.end}`)
+      console.log(`Assigning ${staffToAssign} staff for ${jobFunction} at ${timeSlot.start}-${timeSlot.end} (available: ${availableEmployees.length}, required: ${requiredStaff}, max: ${effectiveMaxStaff})`)
       
       for (let i = 0; i < staffToAssign; i++) {
         const employee = availableEmployees[i]
@@ -361,7 +401,7 @@ const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shift
           // Create 15-minute assignments for this block
           const blockAssignments = createBlockAssignments(
             employee, 
-            rule.jobFunction, 
+            jobFunction, 
             timeSlot.start, 
             timeSlot.end, 
             timeSlot.blockSize || 0
@@ -373,17 +413,20 @@ const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shift
           if (!employeeAssignments.has(employee.id)) {
             employeeAssignments.set(employee.id, [])
           }
-          employeeAssignments.get(employee.id).push(rule.jobFunction)
+          employeeAssignments.get(employee.id).push(jobFunction)
           
           // Track hours
           const hours = (timeSlot.blockSize || 0) / 60
           employeeHours.set(employee.id, (employeeHours.get(employee.id) || 0) + hours)
+          
+          // Increment current staff count for global max tracking
+          currentStaffCount++
         }
       }
       
       // If we couldn't meet the minimum requirement, try to find any available employee
-      if (staffToAssign < (requiredStaff || 0)) {
-        console.log(`Warning: Only found ${staffToAssign} employees for ${rule.jobFunction}, need ${requiredStaff}`)
+      if (staffToAssign < (requiredStaff || 0) && globalMax === undefined) {
+        console.log(`Warning: Only found ${staffToAssign} employees for ${jobFunction}, need ${requiredStaff}`)
         
         // Try to find employees trained in any function and assign them
         const anyTrainedEmployees = employees.filter((emp: any) => {
@@ -395,11 +438,11 @@ const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shift
           return timeSlot.start >= shiftStart && timeSlot.end <= shiftEnd
         })
         
-        for (let i = staffToAssign; i < (requiredStaff || 0) && i < anyTrainedEmployees.length; i++) {
+        for (let i = staffToAssign; i < (requiredStaff || 0) && i < anyTrainedEmployees.length && currentStaffCount < (globalMax || 999); i++) {
           const employee = anyTrainedEmployees[i]
           const blockAssignments = createBlockAssignments(
             employee, 
-            rule.jobFunction, 
+            jobFunction, 
             timeSlot.start, 
             timeSlot.end, 
             timeSlot.blockSize || 0
@@ -410,7 +453,8 @@ const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shift
           if (!employeeAssignments.has(employee.id)) {
             employeeAssignments.set(employee.id, [])
           }
-          employeeAssignments.get(employee.id).push(rule.jobFunction)
+          employeeAssignments.get(employee.id).push(jobFunction)
+          currentStaffCount++
         }
       }
     }

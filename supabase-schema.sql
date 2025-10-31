@@ -225,3 +225,73 @@ CREATE POLICY "Enable insert for all users" ON pto_days FOR INSERT WITH CHECK (t
 CREATE POLICY "Enable update for all users" ON pto_days FOR UPDATE USING (true);
 CREATE POLICY "Enable delete for all users" ON pto_days FOR DELETE USING (true);
 
+-- 8. Business Rules Table (for AI Schedule Generation)
+CREATE TABLE IF NOT EXISTS business_rules (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    job_function_name TEXT NOT NULL,
+    time_slot_start TIME NOT NULL,
+    time_slot_end TIME NOT NULL,
+    min_staff INTEGER,  -- NULL for global max limits only
+    max_staff INTEGER,
+    block_size_minutes INTEGER NOT NULL DEFAULT 0,
+    priority INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- If table already exists, alter the columns to allow NULL for min_staff
+DO $$ 
+BEGIN
+    ALTER TABLE business_rules ALTER COLUMN min_staff DROP NOT NULL;
+EXCEPTION WHEN OTHERS THEN
+    -- Column already allows NULL or table doesn't exist, ignore
+    NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_business_rules_job_function ON business_rules(job_function_name);
+CREATE INDEX IF NOT EXISTS idx_business_rules_active ON business_rules(is_active);
+CREATE INDEX IF NOT EXISTS idx_business_rules_priority ON business_rules(priority);
+
+ALTER TABLE business_rules ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Enable read access for all users" ON business_rules FOR SELECT USING (true);
+CREATE POLICY "Enable insert for all users" ON business_rules FOR INSERT WITH CHECK (true);
+CREATE POLICY "Enable update for all users" ON business_rules FOR UPDATE USING (true);
+CREATE POLICY "Enable delete for all users" ON business_rules FOR DELETE USING (true);
+
+-- Trigger to update updated_at timestamp
+CREATE OR REPLACE FUNCTION update_business_rules_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER update_business_rules_updated_at
+    BEFORE UPDATE ON business_rules
+    FOR EACH ROW
+    EXECUTE FUNCTION update_business_rules_updated_at();
+
+-- Insert default business rules (migrating from hard-coded rules)
+INSERT INTO business_rules (job_function_name, time_slot_start, time_slot_end, min_staff, max_staff, block_size_minutes, priority, is_active, notes)
+VALUES
+    -- X4 Rules
+    ('X4', '08:00', '14:30', 2, NULL, 390, 1, true, '6.5 hour block'),
+    ('X4', '10:00', '18:30', 2, NULL, 510, 2, true, '8.5 hour block'),
+    ('X4', '12:00', '20:30', 2, NULL, 510, 3, true, '8.5 hour block'),
+    ('X4', '16:00', '20:30', 1, NULL, 270, 4, true, '4.5 hour block'),
+    -- EM9 Rules
+    ('EM9', '08:00', '14:30', 1, NULL, 390, 1, true, '6.5 hour block'),
+    ('EM9', '10:00', '18:30', 2, NULL, 510, 2, true, '8.5 hour block'),
+    ('EM9', '12:00', '20:30', 2, NULL, 510, 3, true, '8.5 hour block'),
+    ('EM9', '16:00', '20:30', 1, NULL, 270, 4, true, '4.5 hour block'),
+    -- Locus Rules
+    ('Locus', '08:00', '14:30', 2, NULL, 390, 1, true, '6.5 hour block'),
+    ('Locus', '10:00', '18:30', 3, NULL, 510, 2, true, '8.5 hour block'),
+    ('Locus', '12:00', '20:30', 3, NULL, 510, 3, true, '8.5 hour block'),
+    ('Locus', '16:00', '20:30', 2, NULL, 270, 4, true, '4.5 hour block'),
+    ('Locus', '08:00', '20:30', NULL, 6, 0, 0, true, 'Global max staff limit')
+ON CONFLICT DO NOTHING;
+
