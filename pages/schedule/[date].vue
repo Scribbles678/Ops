@@ -632,6 +632,21 @@ const getTargetHours = (jobFunctionId: string) => {
   return hours
 }
 
+// Helper function to generate all 15-minute time slots between start and end
+const generateTimeSlots = (startTime: string, endTime: string): string[] => {
+  const slots: string[] = []
+  const startMinutes = timeToMinutes(startTime.substring(0, 5)) // "07:00:00" -> "07:00" -> minutes
+  const endMinutes = timeToMinutes(endTime.substring(0, 5))
+  
+  let currentMinutes = startMinutes
+  while (currentMinutes < endMinutes) {
+    slots.push(minutesToTime(currentMinutes)) // Convert back to "HH:MM" format
+    currentMinutes += 15 // Add 15 minutes for each slot
+  }
+  
+  return slots
+}
+
 // Initialize schedule data from existing assignments
 const initializeScheduleData = () => {
   console.log('Initializing schedule data...')
@@ -646,21 +661,35 @@ const initializeScheduleData = () => {
     initialData[employee.id] = {}
   })
   
-  // Add existing assignments
+  // Add existing assignments - fill in ALL 15-minute slots between start and end
   scheduleAssignments.value.forEach((assignment: any) => {
     if (!initialData[assignment.employee_id]) {
       initialData[assignment.employee_id] = {}
     }
     
     const jobFunction = jobFunctions.value.find((jf: any) => jf.id === assignment.job_function_id)
-    if (jobFunction) {
-      // Convert time format from "HH:MM:SS" to "HH:MM" for consistency
-      const timeKey = assignment.start_time.substring(0, 5) // "07:00:00" -> "07:00"
+    if (jobFunction && assignment.start_time && assignment.end_time) {
+      // Generate all 15-minute slots between start_time and end_time
+      const startTime = assignment.start_time.substring(0, 5) // "07:00:00" -> "07:00"
+      const endTime = assignment.end_time.substring(0, 5)
+      const timeSlots = generateTimeSlots(startTime, endTime)
       
-      initialData[assignment.employee_id][timeKey] = {
-        assignment: jobFunction.name,
-        until: assignment.end_time ? assignment.end_time.substring(0, 5) : ''
-      }
+      // Normalize job function name for consistent merging (especially Lunch/Break)
+      const normalizedName = jobFunction.name === 'Lunch' ? 'LUNCH' : 
+                             jobFunction.name === 'Break' ? 'BREAK' :
+                             jobFunction.name === 'Break 1' ? 'BREAK 1' :
+                             jobFunction.name === 'Break 2' ? 'BREAK 2' :
+                             jobFunction.name
+      
+      // Fill in each 15-minute slot with the assignment
+      timeSlots.forEach((timeSlot: string) => {
+        if (!initialData[assignment.employee_id][timeSlot]) {
+          initialData[assignment.employee_id][timeSlot] = {}
+        }
+        // Set assignment and until time for this slot (use normalized name)
+        initialData[assignment.employee_id][timeSlot].assignment = normalizedName
+        initialData[assignment.employee_id][timeSlot].until = endTime
+      })
     }
   })
   

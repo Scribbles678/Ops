@@ -305,6 +305,7 @@ const emit = defineEmits<{
   editAssignment: [employeeId: string, timeSlot: string]
   assignBreakCoverage: [employeeId: string, timeSlot: string]
   scheduleDataUpdated: [scheduleData: Record<string, any>]
+  addPTO: [employee: any]
 }>()
 
 // Use the passed scheduleAssignmentsData directly instead of local state
@@ -518,7 +519,24 @@ const updateBreakUntil = (employeeId: string, timeSlot: string, breakNumber: num
 const getJobFunctionColor = (jobFunctionName: string) => {
   if (!jobFunctionName) return '#ffffff'
   
-  const jobFunction = props.jobFunctions.find(jf => jf.name === jobFunctionName)
+  // Handle normalized names (e.g., "LUNCH" should match "Lunch")
+  const normalizedName = jobFunctionName === 'LUNCH' ? 'Lunch' :
+                         jobFunctionName === 'BREAK' ? 'Break' :
+                         jobFunctionName === 'BREAK 1' ? 'Break 1' :
+                         jobFunctionName === 'BREAK 2' ? 'Break 2' :
+                         jobFunctionName
+  
+  const jobFunction = props.jobFunctions.find(jf => 
+    jf.name === normalizedName || 
+    jf.name.toLowerCase() === normalizedName.toLowerCase()
+  )
+  
+  // Special handling for LUNCH/BREAK if not found
+  if (!jobFunction) {
+    if (jobFunctionName === 'LUNCH') return '#000000' // Black for lunch
+    if (jobFunctionName === 'BREAK' || jobFunctionName.startsWith('BREAK')) return '#000000' // Black for breaks
+  }
+  
   return jobFunction?.color_code || '#ffffff'
 }
 
@@ -545,6 +563,8 @@ const getEmployeeAssignmentRanges = (employeeId: string, shift: any) => {
 
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]
+    if (!b) continue
+    
     const label = getAssignment(employeeId, b.time) || ''
 
     if (!b.isBreakTime && label) {
@@ -630,7 +650,9 @@ const getShiftTimeBlocks = (shift: any) => {
 
 // Convert time to minutes
 const timeToMinutes = (time: string): number => {
-  const [hours, minutes] = time.split(':').map(Number)
+  const parts = time.split(':').map(Number)
+  const hours = parts[0] || 0
+  const minutes = parts[1] || 0
   return hours * 60 + minutes
 }
 
@@ -643,10 +665,12 @@ const minutesToTime = (minutes: number): string => {
 
 // Format time for display - only show hourly labels with enhanced visual distinction
 const formatTimeForDisplay = (time: string): string => {
-  const [hours, minutes] = time.split(':').map(Number)
+  const parts = time.split(':').map(Number)
+  const hours = parts[0] ?? 0
+  const minutes = parts[1] ?? 0
   
   // Only show time labels for hourly slots (when minutes === 0)
-  if (minutes === 0) {
+  if (minutes === 0 && hours !== undefined) {
     const period = hours >= 12 ? 'PM' : 'AM'
     const displayHours = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours)
     return `${displayHours} ${period}`
@@ -658,7 +682,8 @@ const formatTimeForDisplay = (time: string): string => {
 
 // Check if a time block is an hourly marker for enhanced styling
 const isHourlyMarker = (time: string): boolean => {
-  const [hours, minutes] = time.split(':').map(Number)
+  const parts = time.split(':').map(Number)
+  const minutes = parts[1] ?? 0
   return minutes === 0
 }
 
@@ -745,12 +770,12 @@ const getBreakType = (timeSlot: string, shift: any) => {
   
   // Check if time slot is within break 1 period
   if (break1Start !== null && break1End !== null && timeMinutes >= break1Start && timeMinutes < break1End) {
-    return 'BREAK 1'
+    return 'BREAK'
   }
   
   // Check if time slot is within break 2 period
   if (break2Start !== null && break2End !== null && timeMinutes >= break2Start && timeMinutes < break2End) {
-    return 'BREAK 2'
+    return 'BREAK'
   }
   
   // Check if time slot is within lunch period
@@ -828,9 +853,11 @@ const onSelectEnd = () => {
   const blocks = getShiftTimeBlocks(selectedShift.value)
   const startIdx = selectionRange.value.start - 1
   const endIdxExclusive = selectionRange.value.end - 1
-  const startTime = blocks[startIdx]?.time
-  const endTime = blocks[Math.min(endIdxExclusive, blocks.length - 1)]
-    ? minutesToTime(timeToMinutes(blocks[Math.min(endIdxExclusive - 1, blocks.length - 1)].time) + 15)
+  const startBlock = blocks[startIdx]
+  const endBlock = blocks[Math.min(endIdxExclusive - 1, blocks.length - 1)]
+  const startTime = startBlock?.time || ''
+  const endTime = endBlock
+    ? minutesToTime(timeToMinutes(endBlock.time) + 15)
     : ''
   
   selectedTimeBlock.value = { time: startTime }

@@ -122,6 +122,98 @@
         </NuxtLink>
       </div>
 
+      <!-- Loading Modal -->
+      <div v-if="generating" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4 shadow-xl">
+          <div class="text-center">
+            <div class="mb-4 flex justify-center">
+              <svg class="animate-spin h-12 w-12 text-purple-600" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
+            <h3 class="text-2xl font-bold text-gray-800 mb-2">Generating AI Schedule</h3>
+            <p class="text-gray-600 mb-4">
+              Creating optimized schedule for {{ formatDate(selectedDate || '') }}
+            </p>
+            <p class="text-sm text-gray-500">
+              This may take a few moments while we process business rules and create assignments...
+            </p>
+            <div class="mt-6 flex items-center justify-center space-x-2">
+              <div class="w-2 h-2 bg-purple-600 rounded-full animate-pulse"></div>
+              <div class="w-2 h-2 bg-purple-600 rounded-full animate-pulse" style="animation-delay: 0.2s"></div>
+              <div class="w-2 h-2 bg-purple-600 rounded-full animate-pulse" style="animation-delay: 0.4s"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Warnings Modal -->
+      <div v-if="showWarningsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-2xl font-bold text-gray-800">Schedule Generation Complete</h3>
+            <button @click="closeWarningsModal" class="text-gray-400 hover:text-gray-600">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          
+          <div v-if="scheduleWarnings.length > 0 && scheduleWarnings.some(w => w.includes('trained') || w.includes('Available') || w.includes('Required'))" class="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+            <p class="text-green-800 font-medium">
+              ✅ Schedule generated successfully, but some requirements could not be fulfilled.
+            </p>
+          </div>
+
+          <div v-else-if="scheduleWarnings.length > 0" class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p class="text-red-800 font-medium">
+              ❌ Schedule could not be generated. Please review the issues below.
+            </p>
+          </div>
+
+          <div class="mb-6">
+            <h4 v-if="scheduleWarnings.some(w => w.includes('trained') || w.includes('Available') || w.includes('Required'))" class="text-lg font-semibold text-gray-700 mb-3">⚠️ Training Gaps Detected:</h4>
+            <h4 v-else class="text-lg font-semibold text-red-700 mb-3">❌ Issues Found:</h4>
+            <div class="space-y-2">
+              <div
+                v-for="(warning, index) in scheduleWarnings"
+                :key="index"
+                :class="warning.includes('No') || warning.includes('not') || warning.includes('Error') || warning.includes('No schedule') 
+                  ? 'p-3 bg-red-50 border border-red-200 rounded-lg' 
+                  : 'p-3 bg-yellow-50 border border-yellow-200 rounded-lg'"
+              >
+                <p :class="warning.includes('No') || warning.includes('not') || warning.includes('Error') || warning.includes('No schedule')
+                  ? 'text-sm text-red-800'
+                  : 'text-sm text-yellow-800'"
+                >{{ warning }}</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-4">
+            <p class="text-sm text-blue-800">
+              <strong>Next Steps:</strong>
+              <span v-if="scheduleWarnings.some(w => w.includes('trained') || w.includes('Available') || w.includes('Required'))">
+                Review employee training assignments in the "Details & Settings" page and assign training for the missing job functions, then regenerate the schedule.
+              </span>
+              <span v-else>
+                Please address the issues listed above and try generating the schedule again. Common fixes include: adding employees, configuring shifts, setting up job functions, and assigning employee training.
+              </span>
+            </p>
+          </div>
+
+          <div class="flex justify-end">
+            <button
+              @click="closeWarningsModal"
+              class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            >
+              View Schedule
+            </button>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </template>
@@ -151,13 +243,25 @@ const selectedDate = ref(tomorrowDate.value)
 
 // Check if selected date is weekend
 const isWeekend = computed(() => {
-  const date = new Date(selectedDate.value || '')
+  if (!selectedDate.value) return false
+  
+  let date: Date
+  // For YYYY-MM-DD strings, parse as local date to avoid UTC shift
+  if (typeof selectedDate.value === 'string' && selectedDate.value.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    const [year, month, day] = selectedDate.value.split('-').map(Number)
+    date = new Date(year, month - 1, day)
+  } else {
+    date = new Date(selectedDate.value)
+  }
+  
   const day = date.getDay()
   return day === 0 || day === 6 // Sunday or Saturday
 })
 
 // AI Generation state
 const generating = ref(false)
+const showWarningsModal = ref(false)
+const scheduleWarnings = ref<string[]>([])
 
 // Mock employee data (same as schedule page)
 const employees = ref([
@@ -180,7 +284,17 @@ const employees = ref([
 
 // Functions
 const formatDate = (dateString: string) => {
-  const date = new Date(dateString)
+  if (!dateString) return ''
+  
+  let date: Date
+  // For YYYY-MM-DD strings, parse as local date to avoid UTC shift
+  if (typeof dateString === 'string' && dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    const [year, month, day] = dateString.split('-').map(Number)
+    date = new Date(year, month - 1, day)
+  } else {
+    date = new Date(dateString)
+  }
+  
   return date.toLocaleDateString('en-US', { 
     weekday: 'long', 
     year: 'numeric', 
@@ -213,21 +327,30 @@ const generateAISchedule = async () => {
   if (confirm('Generate AI schedule for ' + formatDate(selectedDate.value || '') + '? This will create assignments based on exact business rules.')) {
     try {
       generating.value = true
+      scheduleWarnings.value = [] // Reset warnings
       
       // Generate AI schedule
-      const schedule = await generateAIScheduleLogic()
+      const { schedule, warnings, errors } = await generateAIScheduleLogic()
       
       if (schedule.length > 0) {
         // Apply the schedule directly
         await applyAISchedule(schedule)
         
-        // Show success message
-        alert(`✅ AI schedule generated successfully!\n\nCreated ${schedule.length} assignments for ${formatDate(selectedDate.value || '')}.\n\nRedirecting to schedule view...`)
+        // Store warnings for modal display
+        scheduleWarnings.value = warnings
         
-        // Navigate to the schedule page to see the results
-        navigateTo(`/schedule/${selectedDate.value || ''}`)
+        // If there are warnings, show the modal instead of alert
+        if (warnings.length > 0) {
+          showWarningsModal.value = true
+        } else {
+          // No warnings - show success and navigate
+          alert(`✅ AI schedule generated successfully!\n\nCreated ${schedule.length} assignments for ${formatDate(selectedDate.value || '')}.\n\nRedirecting to schedule view...`)
+          navigateTo(`/schedule/${selectedDate.value || ''}`)
+        }
       } else {
-        alert('❌ No schedule could be generated.\n\nPlease check:\n• Employee training assignments\n• Shift configurations\n• Job function availability')
+        // Show detailed error modal with specific issues
+        scheduleWarnings.value = errors
+        showWarningsModal.value = true
       }
     } catch (error) {
       console.error('Error generating AI schedule:', error)
@@ -236,6 +359,12 @@ const generateAISchedule = async () => {
       generating.value = false
     }
   }
+}
+
+const closeWarningsModal = () => {
+  showWarningsModal.value = false
+  // Navigate to schedule view after closing modal
+  navigateTo(`/schedule/${selectedDate.value || ''}`)
 }
 
 const goToManualSchedule = () => {
@@ -265,7 +394,10 @@ const setToNextMonday = () => {
 
 // AI Schedule Generation Logic
 
-const generateAIScheduleLogic = async () => {
+const generateAIScheduleLogic = async (): Promise<{ schedule: any[], warnings: string[], errors: string[] }> => {
+  const warnings: string[] = []
+  const errors: string[] = []
+  
   try {
     // Load real data including business rules
     const [employeesData, jobFunctionsData, shiftsData, businessRulesData] = await Promise.all([
@@ -275,10 +407,10 @@ const generateAIScheduleLogic = async () => {
       fetchBusinessRules()
     ])
     
-    const employees = employeesData || []
-    const jobFunctions = jobFunctionsData || []
-    const shifts = shiftsData || []
-    const businessRules = businessRulesData || []
+    const employees = Array.isArray(employeesData) ? employeesData : []
+    const jobFunctions = Array.isArray(jobFunctionsData) ? jobFunctionsData : []
+    const shifts = Array.isArray(shiftsData) ? shiftsData : []
+    const businessRules = Array.isArray(businessRulesData) ? businessRulesData : []
     
     console.log('Loaded data:', { 
       employees: employees.length, 
@@ -287,14 +419,89 @@ const generateAIScheduleLogic = async () => {
       businessRules: businessRules.length
     })
     
-    // Get training data for all employees
-    const employeeIds = employees.map(emp => emp.id)
-    const trainingData = await getAllEmployeeTraining(employeeIds)
+    // Validate data before proceeding
+    if (!Array.isArray(employees) || employees.length === 0) {
+      errors.push('No employees found in the system. Please add employees before generating a schedule.')
+    }
+    
+    const activeEmployees = Array.isArray(employees) ? employees.filter((emp: any) => emp && emp.is_active !== false) : []
+    if (!Array.isArray(activeEmployees) || activeEmployees.length === 0) {
+      errors.push('No active employees found. Please activate employees or add new ones.')
+    }
+    
+    if (!Array.isArray(shifts) || shifts.length === 0) {
+      errors.push('No shifts configured. Please set up shifts before generating a schedule.')
+    }
+    
+    const activeShifts = Array.isArray(shifts) ? shifts.filter((shift: any) => shift && shift.is_active !== false) : []
+    if (!Array.isArray(activeShifts) || activeShifts.length === 0) {
+      errors.push('No active shifts found. Please activate shifts or create new ones.')
+    }
+    
+    if (!Array.isArray(jobFunctions) || jobFunctions.length === 0) {
+      errors.push('No job functions configured. Please add job functions before generating a schedule.')
+    }
+    
+    if (!Array.isArray(businessRules) || businessRules.length === 0) {
+      errors.push('No business rules configured. Please set up business rules in the "Manage Business Rules" page.')
+    }
+    
+    // If we have critical errors, return early
+    if (errors.length > 0) {
+      return { schedule: [], warnings: [], errors }
+    }
+    
+    // Get training data for all employees - safely handle undefined/null
+    const employeeIds = Array.isArray(employees) ? employees
+      .filter((emp: any) => emp && emp.id)
+      .map((emp: any) => emp.id) : []
+    
+    if (employeeIds.length === 0) {
+      errors.push('No valid employee IDs found. Please check employee data.')
+      return { schedule: [], warnings: [], errors }
+    }
+    
+    let trainingData: any = {}
+    try {
+      trainingData = await getAllEmployeeTraining(employeeIds) || {}
+    } catch (trainError: any) {
+      console.error('Error fetching training data:', trainError)
+      errors.push(`Error loading employee training: ${trainError.message || 'Unknown error'}`)
+      return { schedule: [], warnings: [], errors }
+    }
     
     console.log('Training data:', trainingData)
     
-    // Build the schedule using database rules
-    const schedule = await buildOptimalSchedule(employees, jobFunctions, shifts, trainingData, businessRules)
+    // Check if any employees have training - safely handle undefined/null
+    const trainingDataKeys = trainingData && typeof trainingData === 'object' ? Object.keys(trainingData) : []
+    const employeesWithTraining = trainingDataKeys.filter(empId => {
+      const training = trainingData[empId]
+      return training && Array.isArray(training) && training.length > 0
+    })
+    
+    if (employeesWithTraining.length === 0) {
+      errors.push('No employees have any job function training assigned. Please assign training to employees in the "Details & Settings" page.')
+    } else if (employeesWithTraining.length < activeEmployees.length) {
+      warnings.push(`${activeEmployees.length - employeesWithTraining.length} employees have no training assigned. They will not be scheduled.`)
+    }
+    
+    // Check if employees are assigned to shifts
+    const employeesWithShifts = Array.isArray(activeEmployees) 
+      ? activeEmployees.filter((emp: any) => emp && emp.shift_id) 
+      : []
+    if (!Array.isArray(employeesWithShifts) || employeesWithShifts.length === 0) {
+      errors.push('No employees are assigned to shifts. Please assign employees to shifts before generating a schedule.')
+    } else if (Array.isArray(activeEmployees) && employeesWithShifts.length < activeEmployees.length) {
+      warnings.push(`${activeEmployees.length - employeesWithShifts.length} employees are not assigned to any shift. They will not be scheduled.`)
+    }
+    
+    // If we have critical errors after training check, return early
+    if (errors.length > 0) {
+      return { schedule: [], warnings: [...warnings, ...errors], errors }
+    }
+    
+    // Build the schedule using database rules (pass warnings array to collect warnings)
+    const { schedule, warnings: scheduleWarnings } = await buildOptimalSchedule(employees, jobFunctions, shifts, trainingData, businessRules, warnings)
     
     console.log('✅ Generated schedule:', schedule.length, 'assignments')
     console.log('📊 Schedule Summary:')
@@ -303,18 +510,31 @@ const generateAIScheduleLogic = async () => {
     console.log('  - Locus assignments:', schedule.filter(a => a.job_function === 'Locus').length)
     console.log('  - Flex assignments:', schedule.filter(a => a.job_function === 'Flex').length)
     
-    return schedule
-  } catch (error) {
+    // If no assignments were created, add explanation
+    if (schedule.length === 0) {
+      errors.push('No schedule assignments could be created. This may be due to:')
+      errors.push('• No employees available during the required time slots')
+      errors.push('• Employees not trained in the job functions specified in business rules')
+      errors.push('• Employee shift times not overlapping with business rule time slots')
+      errors.push('• All employees already have conflicting assignments')
+    }
+    
+    return { schedule, warnings: [...warnings, ...scheduleWarnings], errors }
+  } catch (error: any) {
     console.error('Error generating AI schedule:', error)
-    return []
+    errors.push(`Error occurred: ${error.message || 'Unknown error'}`)
+    return { schedule: [], warnings: [], errors }
   }
 }
 
 // Core algorithm with 15-minute increments and 2-4 hour blocks
-const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shifts: any[], trainingData: any, dbRules: any[]) => {
+const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shifts: any[], trainingData: any, dbRules: any[], warnings: string[] = []) => {
   const assignments = []
   const employeeAssignments = new Map() // Track what each employee is doing
   const employeeHours = new Map() // Track hours per employee
+  
+  // STEP 1: Assign Startup to all 6am employees (6am-8am)
+  await assignStartupTo6amEmployees(employees, shifts, jobFunctions, trainingData, assignments, employeeAssignments, employeeHours)
   
   // Convert database rules to processing format
   // Group by job function and process max staff limits separately
@@ -387,13 +607,24 @@ const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shift
         jobFunctions,
         jobFunction, 
         timeSlot.start, 
-        timeSlot.end
+        timeSlot.end,
+        assignments // Pass existing assignments to check for conflicts
       )
       
       // Assign staff (respecting max limits)
       const staffToAssign = Math.min(requiredStaff || 0, availableEmployees.length, effectiveMaxStaff)
       
-      console.log(`Assigning ${staffToAssign} staff for ${jobFunction} at ${timeSlot.start}-${timeSlot.end} (available: ${availableEmployees.length}, required: ${requiredStaff}, max: ${effectiveMaxStaff})`)
+      if (availableEmployees.length === 0) {
+        const warning = `No trained employees available for ${jobFunction} at ${timeSlot.start}-${timeSlot.end} (Required: ${requiredStaff || 0})`
+        console.warn(`⚠️ ${warning}`)
+        warnings.push(warning)
+      } else if (availableEmployees.length < (requiredStaff || 0)) {
+        const warning = `Insufficient trained employees for ${jobFunction} at ${timeSlot.start}-${timeSlot.end} (Available: ${availableEmployees.length}, Required: ${requiredStaff || 0})`
+        console.warn(`⚠️ ${warning}`)
+        warnings.push(warning)
+      } else {
+        console.log(`✅ Assigning ${staffToAssign} staff for ${jobFunction} at ${timeSlot.start}-${timeSlot.end} (available: ${availableEmployees.length}, required: ${requiredStaff}, max: ${effectiveMaxStaff})`)
+      }
       
       for (let i = 0; i < staffToAssign; i++) {
         const employee = availableEmployees[i]
@@ -463,23 +694,364 @@ const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shift
   // Add break coverage for Locus and X4
   await addBreakCoverage(employees, shifts, trainingData, jobFunctions, assignments, employeeAssignments)
   
-  // Ensure employees get at least 2 different functions
-  await ensureDiverseAssignments(employees, shifts, trainingData, jobFunctions, assignments, employeeAssignments)
+  // STEP 3: Consolidate assignments into simple 2-4 hour blocks following strategy
+  const consolidatedAssignments = await consolidateAssignmentsStrategy(
+    employees,
+    shifts,
+    trainingData,
+    assignments,
+    employeeAssignments,
+    employeeHours
+  )
   
-  // Fill remaining hours with "Flex" assignments
-  await fillRemainingHours(employees, shifts, trainingData, assignments, employeeAssignments, employeeHours)
+  // Fill remaining hours with "Flex" assignments (2-4 hour blocks)
+  await fillRemainingHoursWithFlex(employees, shifts, trainingData, consolidatedAssignments, employeeAssignments, employeeHours)
   
   // If no assignments were created, create a basic fallback schedule
-  if (assignments.length === 0) {
+  if (consolidatedAssignments.length === 0) {
     console.log('No assignments created, creating fallback schedule')
-    return await createFallbackSchedule(employees, jobFunctions, shifts, trainingData)
+    const fallbackSchedule = await createFallbackSchedule(employees, jobFunctions, shifts, trainingData)
+    return { schedule: Array.isArray(fallbackSchedule) ? fallbackSchedule : [], warnings }
   }
   
-  return assignments
+  return { schedule: consolidatedAssignments, warnings }
 }
 
-// Helper function to find available employees
-const findAvailableEmployees = (employees: any[], shifts: any[], trainingData: any, jobFunctions: any[], jobFunction: string, startTime: string, endTime: string) => {
+// Assign Startup to all 6am employees (6am-8am)
+const assignStartupTo6amEmployees = async (
+  employees: any[],
+  shifts: any[],
+  jobFunctions: any[],
+  trainingData: any,
+  assignments: any[],
+  employeeAssignments: Map<string, any[]>,
+  employeeHours: Map<string, number>
+) => {
+  console.log('🌅 Assigning Startup to 6am employees...')
+  
+  // Find the 6am shift (usually shift starting at 06:00)
+  const sixAMShift = shifts.find((s: any) => {
+    const shiftStart = timeToMinutes(s.start_time)
+    return shiftStart === timeToMinutes('06:00') // 6am = 360 minutes
+  })
+  
+  if (!sixAMShift) {
+    console.log('No 6am shift found, skipping Startup assignments')
+    return
+  }
+  
+  // Find all employees on the 6am shift
+  const sixAMEmployees = employees.filter((emp: any) => emp.shift_id === sixAMShift.id)
+  
+  console.log(`Found ${sixAMEmployees.length} employees on 6am shift`)
+  
+  // Check if "Startup" job function exists
+  const startupJobFunction = jobFunctions.find((jf: any) => jf.name === 'Startup')
+  if (!startupJobFunction) {
+    console.log('Startup job function not found, skipping')
+    return
+  }
+  
+  // Assign Startup (06:00-08:00) to all 6am employees
+  for (const employee of sixAMEmployees) {
+    // Check if employee is trained in Startup (or if Startup doesn't require training)
+    const isTrained = !startupJobFunction.requires_training || trainingData[employee.id]?.includes(startupJobFunction.id)
+    
+    if (isTrained) {
+      const startupAssignments = createBlockAssignments(
+        employee,
+        'Startup',
+        '06:00',
+        '08:00',
+        120 // 2 hours
+      )
+      
+      assignments.push(...startupAssignments)
+      
+      // Track assignment
+      if (!employeeAssignments.has(employee.id)) {
+        employeeAssignments.set(employee.id, [])
+      }
+      employeeAssignments.get(employee.id).push('Startup')
+      
+      // Track hours
+      employeeHours.set(employee.id, (employeeHours.get(employee.id) || 0) + 2)
+    }
+  }
+  
+  console.log(`✅ Assigned Startup to ${sixAMEmployees.length} employees`)
+}
+
+// Consolidate assignments into simple 2-4 hour blocks following strategic pattern
+const consolidateAssignmentsStrategy = async (
+  employees: any[],
+  shifts: any[],
+  trainingData: any,
+  rawAssignments: any[],
+  employeeAssignments: Map<string, any[]>,
+  employeeHours: Map<string, number>
+) => {
+  console.log('🔄 Consolidating assignments into strategic 2-4 hour blocks...')
+  
+  const consolidated: any[] = []
+  const employeeTimeBlocks = new Map<string, Array<{start: number, end: number, function: string}>>()
+  
+  // Group assignments by employee and time
+  for (const employee of employees) {
+    const shift = shifts.find((s: any) => s.id === employee.shift_id)
+    if (!shift) continue
+    
+    const shiftStart = timeToMinutes(shift.start_time)
+    const shiftEnd = timeToMinutes(shift.end_time)
+    
+    // Get all assignments for this employee
+    const empAssignments = rawAssignments
+      .filter(a => a.employee_id === employee.id)
+      .map(a => ({
+        start: timeToMinutes(a.start_time),
+        end: timeToMinutes(a.end_time),
+        function: a.job_function
+      }))
+    
+    // Sort by start time
+    empAssignments.sort((a, b) => a.start - b.start)
+    
+    // Merge contiguous same-function assignments
+    const merged: Array<{start: number, end: number, function: string}> = []
+    for (const assign of empAssignments) {
+      const last = merged[merged.length - 1]
+      if (last && last.function === assign.function && last.end === assign.start) {
+        // Extend contiguous block
+        last.end = assign.end
+      } else {
+        // New block
+        merged.push({ ...assign })
+      }
+    }
+    
+    // Strategy: Organize into 2-4 hour blocks
+    // Goal: Function 1 before lunch, Function 2 after lunch
+    // Lunch is typically 12:30-13:00, use 12:00-13:00 as split point
+    const lunchSplit = timeToMinutes('12:00')
+    const lunchEnd = timeToMinutes('13:00')
+    
+    const beforeLunch: Array<{start: number, end: number, function: string}> = []
+    const afterLunch: Array<{start: number, end: number, function: string}> = []
+    
+    for (const block of merged) {
+      // Skip Startup (already assigned correctly, keep as-is)
+      if (block.function === 'Startup') {
+        beforeLunch.push(block)
+        continue
+      }
+      
+      if (block.end <= lunchSplit) {
+        // Completely before lunch
+        beforeLunch.push(block)
+      } else if (block.start >= lunchEnd) {
+        // Completely after lunch
+        afterLunch.push(block)
+      } else {
+        // Spans lunch period - split it
+        if (block.start < lunchSplit) {
+          beforeLunch.push({ start: block.start, end: lunchSplit, function: block.function })
+        }
+        if (block.end > lunchEnd) {
+          afterLunch.push({ start: lunchEnd, end: block.end, function: block.function })
+        }
+      }
+    }
+    
+    // Consolidate blocks in each period into 2-4 hour chunks
+    const consolidatePeriod = (blocks: Array<{start: number, end: number, function: string}>): Array<{start: number, end: number, function: string}> => {
+      if (blocks.length === 0) return []
+      
+      const result: Array<{start: number, end: number, function: string}> = []
+      const blocksByFunction: Record<string, Array<{start: number, end: number}>> = {}
+      
+      // Group by function
+      for (const block of blocks) {
+        if (!blocksByFunction[block.function]) {
+          blocksByFunction[block.function] = []
+        }
+        blocksByFunction[block.function].push({ start: block.start, end: block.end })
+      }
+      
+      // For each function, merge contiguous blocks
+      for (const [func, funcBlocks] of Object.entries(blocksByFunction)) {
+        funcBlocks.sort((a, b) => a.start - b.start)
+        
+        let currentBlock: {start: number, end: number} | null = null
+        for (const block of funcBlocks) {
+          if (!currentBlock) {
+            currentBlock = { ...block }
+          } else if (block.start <= currentBlock.end + 60) { // Within 1 hour, merge
+            currentBlock.end = Math.max(currentBlock.end, block.end)
+          } else {
+            // Save current and start new
+            result.push({ ...currentBlock, function: func })
+            currentBlock = { ...block }
+          }
+        }
+        if (currentBlock) {
+          result.push({ ...currentBlock, function: func })
+        }
+      }
+      
+      // Sort by start time
+      result.sort((a, b) => a.start - b.start)
+      
+      // Limit to 4 functions per day
+      const uniqueFunctions = new Set(result.map(b => b.function))
+      if (uniqueFunctions.size > 4) {
+        // Keep only first 4 unique functions
+        const seen = new Set<string>()
+        return result.filter(b => {
+          if (seen.has(b.function)) return true
+          if (seen.size >= 4) return false
+          seen.add(b.function)
+          return true
+        })
+      }
+      
+      return result
+    }
+    
+    const beforeConsolidated = consolidatePeriod(beforeLunch)
+    const afterConsolidated = consolidatePeriod(afterLunch)
+    
+    // Combine blocks (prefer 2-4 hour blocks, but keep all assignments)
+    const allBlocks = [...beforeConsolidated, ...afterConsolidated]
+      .sort((a, b) => a.start - b.start)
+    
+    // Merge very small blocks (< 2 hours) with adjacent same-function blocks if possible
+    const finalBlocks: Array<{start: number, end: number, function: string}> = []
+    for (const block of allBlocks) {
+      const blockDuration = block.end - block.start
+      
+      if (blockDuration < 120 && finalBlocks.length > 0) {
+        // Try to merge with previous block if same function and close
+        const last = finalBlocks[finalBlocks.length - 1]
+        if (last.function === block.function && (block.start - last.end) <= 60) {
+          // Merge with previous block
+          last.end = block.end
+          continue
+        }
+      }
+      
+      finalBlocks.push(block)
+    }
+    
+    employeeTimeBlocks.set(employee.id, finalBlocks)
+  }
+  
+  // Convert back to assignment format
+  for (const [employeeId, blocks] of employeeTimeBlocks.entries()) {
+    for (const block of blocks) {
+      const blockAssignments = createBlockAssignments(
+        employees.find(e => e.id === employeeId)!,
+        block.function,
+        minutesToTime(block.start),
+        minutesToTime(block.end),
+        block.end - block.start
+      )
+      consolidated.push(...blockAssignments)
+    }
+  }
+  
+  console.log(`✅ Consolidated ${rawAssignments.length} raw assignments into ${consolidated.length} strategic blocks`)
+  return consolidated
+}
+
+// Fill remaining hours with Flex in 2-4 hour blocks (instead of 1-hour blocks)
+const fillRemainingHoursWithFlex = async (
+  employees: any[],
+  shifts: any[],
+  trainingData: any,
+  assignments: any[],
+  employeeAssignments: Map<string, any[]>,
+  employeeHours: Map<string, number>
+) => {
+  console.log('📦 Filling remaining hours with Flex (2-4 hour blocks)...')
+  
+  for (const employee of employees) {
+    const shift = shifts.find((s: any) => s.id === employee.shift_id)
+    if (!shift) continue
+    
+    const shiftStart = timeToMinutes(shift.start_time)
+    const shiftEnd = timeToMinutes(shift.end_time)
+    
+    // Find assigned time slots
+    const assignedTimes = new Set<number>()
+    assignments
+      .filter((a: any) => a.employee_id === employee.id)
+      .forEach((a: any) => {
+        const start = timeToMinutes(a.start_time)
+        const end = timeToMinutes(a.end_time)
+        for (let t = start; t < end; t += 15) {
+          assignedTimes.add(t)
+        }
+      })
+    
+    // Find gaps and fill with Flex in 2-4 hour blocks
+    let currentTime = shiftStart
+    while (currentTime < shiftEnd) {
+      if (!assignedTimes.has(currentTime)) {
+        // Find the end of this gap
+        let gapEnd = currentTime
+        while (gapEnd < shiftEnd && !assignedTimes.has(gapEnd)) {
+          gapEnd += 15
+        }
+        
+        const gapDuration = gapEnd - currentTime
+        
+        // Create Flex blocks: 2-4 hours each
+        let flexTime = currentTime
+        while (flexTime < gapEnd) {
+          // Target 3 hours (180 minutes), but adjust for remaining gap
+          const remaining = gapEnd - flexTime
+          let blockDuration = Math.min(180, remaining) // Default 3 hours
+          
+          // If remaining is 2-4 hours, use it all
+          if (remaining >= 120 && remaining <= 240) {
+            blockDuration = remaining
+          } else if (remaining > 240) {
+            // Split into multiple 2-4 hour blocks
+            blockDuration = 180 // 3 hours
+          } else if (remaining < 120) {
+            // Less than 2 hours, merge with previous or make minimum 2 hours
+            blockDuration = Math.max(120, remaining)
+          }
+          
+          const flexEnd = Math.min(flexTime + blockDuration, gapEnd)
+          
+          const flexAssignments = createBlockAssignments(
+            employee,
+            'Flex',
+            minutesToTime(flexTime),
+            minutesToTime(flexEnd),
+            flexEnd - flexTime
+          )
+          
+          assignments.push(...flexAssignments)
+          flexTime = flexEnd
+        }
+        
+        currentTime = gapEnd
+      } else {
+        currentTime += 15
+      }
+    }
+  }
+  
+  console.log('✅ Filled remaining hours with Flex blocks')
+}
+
+// Helper function to find available employees (updated to check existing assignments)
+const findAvailableEmployees = (employees: any[], shifts: any[], trainingData: any, jobFunctions: any[], jobFunction: string, startTime: string, endTime: string, existingAssignments: any[] = []) => {
+  const startMinutes = timeToMinutes(startTime)
+  const endMinutes = timeToMinutes(endTime)
+  
   const available = employees.filter((employee: any) => {
     // Check if employee is trained in this job function
     const jobFunctionObj = jobFunctions.find((jf: any) => jf.name === jobFunction)
@@ -508,6 +1080,20 @@ const findAvailableEmployees = (employees: any[], shifts: any[], trainingData: a
     const timeCovered = startTime < shiftEnd && endTime > shiftStart
     if (!timeCovered) {
       console.log(`Employee ${employee.first_name} shift ${shiftStart}-${shiftEnd} doesn't cover ${startTime}-${endTime}`)
+    }
+    
+    // Check if employee already has an assignment during this time
+    const hasConflict = existingAssignments.some((a: any) => {
+      if (a.employee_id !== employee.id) return false
+      const aStart = timeToMinutes(a.start_time)
+      const aEnd = timeToMinutes(a.end_time)
+      // Check for overlap
+      return !(endMinutes <= aStart || startMinutes >= aEnd)
+    })
+    
+    if (hasConflict) {
+      console.log(`Employee ${employee.first_name} already has an assignment during ${startTime}-${endTime}`)
+      return false
     }
     
     return timeCovered
@@ -567,7 +1153,8 @@ const addBreakCoverage = async (employees: any[], shifts: any[], trainingData: a
       jobFunctions,
       priorityFunction, 
       lunchTime.start, 
-      lunchTime.end
+      lunchTime.end,
+      assignments // Pass existing assignments to check for conflicts
     ).filter((emp: any) => !employeesOnFunction.includes(emp.id))
     
     // Assign lunch coverage (1 person per function)
