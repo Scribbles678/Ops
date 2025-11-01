@@ -345,6 +345,34 @@ export const useSchedule = () => {
     }
   }
 
+  // Fetch old schedules for export (older than 7 days)
+  const fetchOldSchedulesForExport = async () => {
+    try {
+      const cutoffDate = new Date()
+      cutoffDate.setDate(cutoffDate.getDate() - 7)
+      const cutoffDateString = cutoffDate.toISOString().split('T')[0] // YYYY-MM-DD
+      
+      const { data, error: fetchError } = await $supabase
+        .from('schedule_assignments')
+        .select(`
+          *,
+          employee:employees(first_name, last_name),
+          job_function:job_functions(name),
+          shift:shifts(name)
+        `)
+        .lt('schedule_date', cutoffDateString)
+        .order('schedule_date', { ascending: true })
+        .order('start_time', { ascending: true })
+      
+      if (fetchError) throw fetchError
+      
+      return data || []
+    } catch (e) {
+      console.error('Error fetching old schedules for export:', e)
+      return []
+    }
+  }
+
   return {
     scheduleAssignments,
     shifts,
@@ -365,7 +393,8 @@ export const useSchedule = () => {
     runCleanup,
     getCleanupStats,
     getCleanupLog,
-    getCleanupStatus
+    getCleanupStatus,
+    fetchOldSchedulesForExport
   }
 }
 

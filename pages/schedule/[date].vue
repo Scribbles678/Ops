@@ -239,11 +239,13 @@
             :shifts="scheduleData"
             :schedule-assignments-data="scheduleAssignmentsData"
             :pto-by-employee-id="ptoByEmployeeId"
+            :shift-swaps-by-employee-id="swapByEmployeeId"
             @add-assignment="handleAddAssignment"
             @edit-assignment="handleEditAssignment"
             @assign-break-coverage="handleBreakCoverage"
             @schedule-data-updated="handleScheduleDataUpdated"
             @addPTO="openPTOModal"
+            @addShiftSwap="openShiftSwapModal"
           />
         </div>
       </div>
@@ -344,6 +346,72 @@
           </div>
         </div>
       </div>
+
+      <!-- Shift Swap Modal -->
+      <div v-if="showShiftSwapModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <h3 class="text-xl font-bold mb-4">Shift Swap</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Employee</label>
+              <input 
+                :value="selectedSwapEmployee ? `${selectedSwapEmployee.first_name} ${selectedSwapEmployee.last_name}` : ''" 
+                type="text" 
+                disabled
+                class="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100" 
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+              <input v-model="shiftSwapForm.swap_date" type="date" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Original Shift</label>
+              <input 
+                :value="getShiftName(shiftSwapForm.original_shift_id)" 
+                type="text" 
+                disabled
+                class="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100" 
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Swap To Shift</label>
+              <select v-model="shiftSwapForm.swapped_shift_id" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+                <option value="">Select a shift...</option>
+                <option 
+                  v-for="shift in scheduleData" 
+                  :key="shift.id" 
+                  :value="shift.id"
+                  :disabled="shift.id === shiftSwapForm.original_shift_id"
+                >
+                  {{ shift.name }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+              <textarea v-model="shiftSwapForm.notes" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-md"></textarea>
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+              <button @click="closeShiftSwapModal" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button 
+                v-if="existingShiftSwap"
+                @click="deleteShiftSwap" 
+                class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              >
+                Remove Swap
+              </button>
+              <button 
+                @click="saveShiftSwap" 
+                :disabled="!shiftSwapForm.swapped_shift_id"
+                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {{ existingShiftSwap ? 'Update Swap' : 'Save Swap' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -393,6 +461,15 @@ const {
   fetchPTOForDate,
   createPTO
 } = usePTO()
+
+const {
+  shiftSwaps,
+  swapByEmployeeId,
+  fetchShiftSwapsForDate,
+  createShiftSwap,
+  deleteShiftSwap: deleteShiftSwapAction,
+  getSwapForEmployee
+} = useShiftSwaps()
 
 // Ensure scheduleAssignments is always an array
 const scheduleAssignments = computed(() => (scheduleAssignmentsRef.value || []) as any[])
@@ -447,9 +524,13 @@ const route = useRoute()
 const scheduleDate = ref('')
 
 // Initialize date on client side to avoid hydration mismatch
-onMounted(() => {
+onMounted(async () => {
   if (!scheduleDate.value) {
     scheduleDate.value = (route.params.date as string) || getTZISODate('America/Chicago')
+  }
+  // Load shift swaps for the initial date
+  if (scheduleDate.value) {
+    await fetchShiftSwapsForDate(scheduleDate.value)
   }
 })
 
@@ -519,6 +600,7 @@ watch(scheduleDate, async (newDate) => {
   if (newDate) {
     await fetchScheduleForDate(newDate)
     await fetchPTOForDate(newDate)
+    await fetchShiftSwapsForDate(newDate)
     await nextTick()
     initializeScheduleData()
   }
@@ -1200,6 +1282,77 @@ const savePTO = async () => {
 
 const closePTOModal = () => {
   showPTOModal.value = false
+}
+
+// Shift Swap Modal state and actions
+const showShiftSwapModal = ref(false)
+const selectedSwapEmployee = ref<any>(null)
+const shiftSwapForm = ref({
+  employee_id: '',
+  swap_date: '',
+  original_shift_id: '',
+  swapped_shift_id: '',
+  notes: ''
+})
+const existingShiftSwap = computed(() => {
+  if (!selectedSwapEmployee.value || !scheduleDate.value) return null
+  return getSwapForEmployee(selectedSwapEmployee.value.id, scheduleDate.value)
+})
+
+const openShiftSwapModal = (employee: any) => {
+  selectedSwapEmployee.value = employee
+  const swap = getSwapForEmployee(employee?.id || '', scheduleDate.value)
+  shiftSwapForm.value.employee_id = employee?.id || ''
+  shiftSwapForm.value.swap_date = scheduleDate.value
+  shiftSwapForm.value.original_shift_id = employee?.shift_id || ''
+  shiftSwapForm.value.swapped_shift_id = swap?.swapped_shift_id || ''
+  shiftSwapForm.value.notes = swap?.notes || ''
+  showShiftSwapModal.value = true
+}
+
+const saveShiftSwap = async () => {
+  if (!shiftSwapForm.value.employee_id || !shiftSwapForm.value.swap_date || !shiftSwapForm.value.swapped_shift_id) return
+  
+  try {
+    await createShiftSwap({
+      employee_id: shiftSwapForm.value.employee_id,
+      swap_date: shiftSwapForm.value.swap_date,
+      original_shift_id: shiftSwapForm.value.original_shift_id,
+      swapped_shift_id: shiftSwapForm.value.swapped_shift_id,
+      notes: shiftSwapForm.value.notes || null
+    })
+    await fetchShiftSwapsForDate(scheduleDate.value)
+    showShiftSwapModal.value = false
+  } catch (e: any) {
+    alert('Failed to save shift swap. Please try again.')
+    console.error('Error saving shift swap:', e)
+  }
+}
+
+const deleteShiftSwap = async () => {
+  if (!existingShiftSwap.value?.id) return
+  
+  try {
+    const ok = await deleteShiftSwapAction(existingShiftSwap.value.id)
+    if (ok) {
+      await fetchShiftSwapsForDate(scheduleDate.value)
+      showShiftSwapModal.value = false
+    } else {
+      alert('Failed to delete shift swap. Please try again.')
+    }
+  } catch (e: any) {
+    alert('Failed to delete shift swap. Please try again.')
+    console.error('Error deleting shift swap:', e)
+  }
+}
+
+const closeShiftSwapModal = () => {
+  showShiftSwapModal.value = false
+}
+
+const getShiftName = (shiftId: string) => {
+  const shift = scheduleData.value.find((s: any) => s.id === shiftId)
+  return shift?.name || 'Unknown Shift'
 }
 
 // Meter dashboard functions

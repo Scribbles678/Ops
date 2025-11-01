@@ -57,9 +57,10 @@
         >
           <!-- Employee name -->
           <div class="employee-name flex items-center gap-2">
-            <span class="whitespace-nowrap truncate max-w-[160px]" :title="`${employee.last_name}, ${employee.first_name}`">{{ employee.last_name }}, {{ employee.first_name }}</span>
+            <span class="whitespace-nowrap truncate max-w-[200px]" :title="`${employee.last_name}, ${employee.first_name}`">{{ employee.last_name }}, {{ employee.first_name }}</span>
             <span v-if="hasPTO(employee.id)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-700 border border-red-200">PTO</span>
             <button @click="emit('addPTO', employee)" class="px-1.5 py-0.5 text-[10px] rounded border border-gray-300 text-gray-700 hover:bg-gray-100">PTO</button>
+            <button @click="emit('addShiftSwap', employee)" class="px-1.5 py-0.5 text-[10px] rounded border border-blue-300 text-blue-700 hover:bg-blue-100">SS</button>
           </div>
 
           <!-- Grid row background cells for alignment and interaction -->
@@ -297,6 +298,7 @@ const props = defineProps<{
   shifts: any[]
   scheduleAssignmentsData?: Record<string, any>
   ptoByEmployeeId?: Record<string, any[]>
+  shiftSwapsByEmployeeId?: Record<string, any>
 }>()
 
 // Emits
@@ -306,6 +308,7 @@ const emit = defineEmits<{
   assignBreakCoverage: [employeeId: string, timeSlot: string]
   scheduleDataUpdated: [scheduleData: Record<string, any>]
   addPTO: [employee: any]
+  addShiftSwap: [employee: any]
 }>()
 
 // Use the passed scheduleAssignmentsData directly instead of local state
@@ -347,7 +350,18 @@ const selectionRange = computed(() => {
 // Group employees by their assigned shifts
 const shiftsWithEmployees = computed(() => {
   return props.shifts.map(shift => {
-    const employeesForShift = props.employees.filter(employee => employee.shift_id === shift.id)
+    // Get employees for this shift:
+    // 1. Employees whose shift_id matches this shift
+    // 2. Employees who are swapped TO this shift for today
+    const employeesForShift = props.employees.filter(employee => {
+      // Check if employee has a shift swap to this shift
+      const swap = props.shiftSwapsByEmployeeId?.[employee.id]
+      if (swap && swap.swapped_shift_id === shift.id) {
+        return true
+      }
+      // Otherwise, use their normal shift_id
+      return employee.shift_id === shift.id
+    })
     
     return {
       ...shift,
@@ -1024,7 +1038,7 @@ initializeScheduleData()
 }
 
 .employee-name-header {
-  @apply w-48 px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
+  @apply w-56 px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
 }
 
 .time-block {
@@ -1053,7 +1067,7 @@ initializeScheduleData()
 }
 
 .employee-name {
-  @apply w-48 px-3 py-2 font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
+  @apply w-56 px-3 py-2 font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
 }
 
 .time-block-content {
@@ -1173,7 +1187,7 @@ initializeScheduleData()
   }
   
   .employee-name {
-    @apply w-28 px-2;
+    @apply w-40 px-2;
   }
   
   .assignment-input,
@@ -1190,7 +1204,7 @@ initializeScheduleData()
   }
   
   .employee-name {
-    @apply w-24 px-1;
+    @apply w-36 px-1;
   }
   
   .assignment-input,

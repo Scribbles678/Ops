@@ -95,6 +95,21 @@
 
           <div class="flex space-x-4">
             <button 
+              @click="exportToExcel" 
+              :disabled="exporting || !stats?.assignments_to_cleanup"
+              class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            >
+              <svg v-if="exporting" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <svg v-else class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              {{ exporting ? 'Exporting...' : 'Export to Excel' }}
+            </button>
+            
+            <button 
               @click="runManualCleanup" 
               :disabled="loading || !stats?.assignments_to_cleanup"
               class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
@@ -208,7 +223,7 @@
 
 <script setup lang="ts">
 // Import composables
-const { runCleanup, getCleanupStats, getCleanupLog, getCleanupStatus } = useSchedule()
+const { runCleanup, getCleanupStats, getCleanupLog, getCleanupStatus, fetchOldSchedulesForExport } = useSchedule()
 const { logout } = useAuth()
 
 // Reactive data
@@ -217,6 +232,7 @@ const cleanupStatus = ref([])
 const cleanupLog = ref([])
 const cleanupResult = ref(null)
 const loading = ref(false)
+const exporting = ref(false)
 const error = ref('')
 
 // Load data on mount
@@ -307,6 +323,72 @@ const formatDateTime = (dateString: string) => {
 const handleLogout = async () => {
   if (confirm('Are you sure you want to logout?')) {
     await logout()
+  }
+}
+
+// Export to Excel function (client-only)
+const exportToExcel = async () => {
+  try {
+    exporting.value = true
+    error.value = ''
+    
+    // Dynamically import xlsx only on client side
+    const XLSX = await import('xlsx')
+    
+    // Fetch old schedules with employee, shift, and job function names
+    const oldSchedules = await fetchOldSchedulesForExport()
+    
+    if (!oldSchedules || oldSchedules.length === 0) {
+      alert('No old schedules found to export. All schedules are within the 7-day retention period.')
+      return
+    }
+    
+    // Format data for Excel (simple flat format)
+    const excelData = oldSchedules.map((assignment: any) => ({
+      'Date': assignment.schedule_date || '',
+      'Employee Name': assignment.employee 
+        ? `${assignment.employee.first_name || ''} ${assignment.employee.last_name || ''}`.trim()
+        : 'Unknown',
+      'Shift Name': assignment.shift?.name || 'Unknown',
+      'Job Function': assignment.job_function?.name || 'Unknown',
+      'Start Time': assignment.start_time || '',
+      'End Time': assignment.end_time || '',
+      'Created At': assignment.created_at ? new Date(assignment.created_at).toLocaleString() : ''
+    }))
+    
+    // Create workbook and worksheet
+    const ws = XLSX.utils.json_to_sheet(excelData)
+    
+    // Set column widths for better readability
+    const colWidths = [
+      { wch: 12 }, // Date
+      { wch: 25 }, // Employee Name
+      { wch: 20 }, // Shift Name
+      { wch: 20 }, // Job Function
+      { wch: 12 }, // Start Time
+      { wch: 12 }, // End Time
+      { wch: 20 }  // Created At
+    ]
+    ws['!cols'] = colWidths
+    
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Old Schedules')
+    
+    // Generate filename with current date
+    const today = new Date().toISOString().split('T')[0]
+    const filename = `schedule_export_${today}.xlsx`
+    
+    // Download the file
+    XLSX.writeFile(wb, filename)
+    
+    // Show success message
+    alert(`Successfully exported ${oldSchedules.length} schedule assignments to ${filename}`)
+  } catch (err: any) {
+    error.value = err.message || 'Error exporting to Excel'
+    alert('Failed to export to Excel. Please try again.')
+    console.error('Error exporting to Excel:', err)
+  } finally {
+    exporting.value = false
   }
 }
 </script>
