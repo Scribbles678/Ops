@@ -202,7 +202,10 @@ export const useSchedule = () => {
     error.value = null
     
     try {
-      // Fetch source schedule
+      // Fetch source schedule assignments
+      // Note: Only job function assignments are copied from schedule_assignments table.
+      // PTO records (pto_days table) and shift swaps (shift_swaps table) are NOT copied,
+      // as they are date-specific and stored in separate tables.
       const { data: sourceData, error: fetchError } = await $supabase
         .from('schedule_assignments')
         .select('*')
@@ -210,16 +213,30 @@ export const useSchedule = () => {
       
       if (fetchError) throw fetchError
       
+      if (!sourceData || sourceData.length === 0) {
+        return true // No assignments to copy
+      }
+      
       // Create new assignments with new date
-      const newAssignments = sourceData.map(assignment => ({
-        employee_id: assignment.employee_id,
-        job_function_id: assignment.job_function_id,
-        shift_id: assignment.shift_id,
-        schedule_date: toDate,
-        assignment_order: assignment.assignment_order,
-        start_time: assignment.start_time,
-        end_time: assignment.end_time
-      }))
+      // Only copying actual job function assignments, not PTO or shift swap data
+      const newAssignments = sourceData
+        .filter(assignment => {
+          // Ensure we have required fields
+          return assignment.employee_id && 
+                 assignment.job_function_id && 
+                 assignment.shift_id &&
+                 assignment.start_time &&
+                 assignment.end_time
+        })
+        .map(assignment => ({
+          employee_id: assignment.employee_id,
+          job_function_id: assignment.job_function_id,
+          shift_id: assignment.shift_id,
+          schedule_date: toDate,
+          assignment_order: assignment.assignment_order,
+          start_time: assignment.start_time,
+          end_time: assignment.end_time
+        }))
       
       if (newAssignments.length > 0) {
         const { error: insertError } = await $supabase

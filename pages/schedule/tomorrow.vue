@@ -68,6 +68,7 @@
             </div>
             <h3 class="text-xl font-bold text-gray-800 mb-2">Copy Today's Schedule</h3>
             <p class="text-gray-600">Copy the current schedule to {{ formatDate(selectedDate || '') }}</p>
+            <p class="text-xs text-gray-500 mt-2 italic">Note: PTO and shift swaps are excluded</p>
           </div>
         </div>
 
