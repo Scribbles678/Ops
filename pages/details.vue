@@ -583,16 +583,33 @@
               </p>
             </div>
 
-            <!-- Success Message -->
-            <div v-if="targetHoursSaved" class="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <div class="flex items-center">
-                <svg class="w-5 h-5 text-green-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                </svg>
-                <p class="text-sm text-green-800 font-medium">Target hours saved successfully!</p>
-              </div>
-            </div>
           </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Notification Modal -->
+    <div v-if="showNotificationModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xl font-bold text-gray-800">{{ notificationType === 'success' ? '✅ Success' : '❌ Error' }}</h3>
+          <button @click="closeNotificationModal" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div :class="notificationType === 'success' ? 'bg-green-50 border border-green-200 rounded-lg p-4 mb-4' : 'bg-red-50 border border-red-200 rounded-lg p-4 mb-4'">
+          <p :class="notificationType === 'success' ? 'text-green-800' : 'text-red-800'" class="text-sm">{{ notificationMessage }}</p>
+        </div>
+        <div class="flex justify-end">
+          <button
+            @click="closeNotificationModal"
+            :class="notificationType === 'success' ? 'px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium' : 'px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium'"
+          >
+            OK
+          </button>
         </div>
       </div>
     </div>
@@ -836,6 +853,13 @@ const {
   deleteShift 
 } = useSchedule()
 
+const { 
+  employees, 
+  fetchEmployees: fetchEmployeesForDetails, 
+  loading: employeesLoading 
+} = useEmployees()
+
+
 // Cleanup composables
 const { 
   runCleanup, 
@@ -857,7 +881,11 @@ const exporting = ref(false)
 // Target hours state
 const targetHours = ref({})
 const targetHoursLoading = ref(false)
-const targetHoursSaved = ref(false)
+
+// Notification modal state
+const showNotificationModal = ref(false)
+const notificationMessage = ref('')
+const notificationType = ref<'success' | 'error'>('success')
 
 // Modal states
 const showJobFunctionModal = ref(false)
@@ -888,6 +916,7 @@ const shiftFormData = ref({
   lunch_end: null,
   is_active: true
 })
+
 
 // Loading and error states
 const loading = computed(() => jobFunctionsLoading.value || shiftsLoading.value)
@@ -1078,13 +1107,25 @@ const fetchTargetHours = async () => {
 const saveTargetHours = async () => {
   try {
     targetHoursLoading.value = true
-    targetHoursSaved.value = false
     
-    // Prepare data for upsert
-    const upsertData = Object.entries(targetHours.value).map(([jobFunctionId, hours]) => ({
+    // Ensure all job functions are included in the save (even if not explicitly changed)
+    // This prevents losing values for job functions that weren't touched
+    const allTargetHours = { ...targetHours.value }
+    
+    // Add any job functions that aren't in the local state yet (use default 8.00)
+    jobFunctions.value.forEach(jf => {
+      if (!(jf.id in allTargetHours)) {
+        allTargetHours[jf.id] = 8.00
+      }
+    })
+    
+    // Prepare data for upsert - save ALL job functions
+    const upsertData = Object.entries(allTargetHours).map(([jobFunctionId, hours]) => ({
       job_function_id: jobFunctionId,
       target_hours: parseFloat(hours) || 0
     }))
+    
+    console.log('Saving target hours:', upsertData)
     
     // Save to database using upsert
     const { error } = await $supabase
@@ -1096,20 +1137,34 @@ const saveTargetHours = async () => {
     
     if (error) throw error
     
-    console.log('Saved target hours to database:', targetHours.value)
+    console.log('Saved target hours to database successfully')
     
-    // Show success message
-    targetHoursSaved.value = true
-    setTimeout(() => {
-      targetHoursSaved.value = false
-    }, 3000)
+    // Update local state with what we just saved (preserve all values)
+    targetHours.value = allTargetHours
+    
+    // Don't refetch - we know what was saved, so keep the local state
+    // This prevents any timing issues or race conditions
+    
+    // Show success modal
+    showNotification('Target hours saved successfully!', 'success')
     
   } catch (error) {
     console.error('Error saving target hours:', error)
-    alert('Error saving target hours. Please try again.')
+    showNotification('Error saving target hours. Please try again.', 'error')
   } finally {
     targetHoursLoading.value = false
   }
+}
+
+// Notification modal functions
+const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+  notificationMessage.value = message
+  notificationType.value = type
+  showNotificationModal.value = true
+}
+
+const closeNotificationModal = () => {
+  showNotificationModal.value = false
 }
 
 // Cleanup functions
@@ -1246,7 +1301,8 @@ const exportToExcel = async () => {
 onMounted(async () => {
   await Promise.all([
     fetchJobFunctions(false), // Get all job functions including inactive
-    fetchShifts()
+    fetchShifts(),
+    fetchEmployeesForDetails(false) // Get all employees including inactive
   ])
   
   // Load cleanup data if cleanup tab is active

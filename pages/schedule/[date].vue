@@ -367,6 +367,7 @@
             :schedule-assignments-data="scheduleAssignmentsData"
             :pto-by-employee-id="ptoByEmployeeId"
             :shift-swaps-by-employee-id="swapByEmployeeId"
+            :preferred-assignments-map="getPreferredAssignmentsMap()"
             @add-assignment="handleAddAssignment"
             @edit-assignment="handleEditAssignment"
             @assign-break-coverage="handleBreakCoverage"
@@ -939,7 +940,8 @@ onMounted(async () => {
       fetchEmployees(),
       fetchJobFunctions(),
       fetchShifts(),
-      fetchScheduleForDate(scheduleDate.value)
+      fetchScheduleForDate(scheduleDate.value),
+      fetchPreferredAssignments() // Load preferred assignments
     ])
     await fetchPTOForDate(scheduleDate.value)
     // Load target hours from database

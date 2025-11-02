@@ -251,6 +251,7 @@ const { logout } = useAuth()
 const { jobFunctions, fetchJobFunctions } = useJobFunctions()
 const { fetchEmployees, getAllEmployeeTraining } = useEmployees()
 const { fetchBusinessRules, rulesByJobFunction } = useBusinessRules()
+const { fetchPreferredAssignments, getPreferredAssignmentsMap } = usePreferredAssignments()
 
 // Tomorrow's date
 const tomorrowDate = computed(() => {
@@ -444,13 +445,16 @@ const generateAIScheduleLogic = async (): Promise<{ schedule: any[], warnings: s
   const errors: string[] = []
   
   try {
-    // Load real data including business rules
+    // Load real data including business rules and preferred assignments
     const [employeesData, jobFunctionsData, shiftsData, businessRulesData] = await Promise.all([
       fetchEmployees(),
       fetchJobFunctions(),
       fetchShifts(),
       fetchBusinessRules()
     ])
+    
+    // Fetch preferred assignments separately
+    await fetchPreferredAssignments()
     
     const employees = Array.isArray(employeesData) ? employeesData : []
     const jobFunctions = Array.isArray(jobFunctionsData) ? jobFunctionsData : []
@@ -545,8 +549,11 @@ const generateAIScheduleLogic = async (): Promise<{ schedule: any[], warnings: s
       return { schedule: [], warnings: [...warnings, ...errors], errors }
     }
     
+    // Get preferred assignments map for prioritizing employees
+    const preferredAssignmentsMap = getPreferredAssignmentsMap()
+    
     // Build the schedule using database rules (pass warnings array to collect warnings)
-    const { schedule, warnings: scheduleWarnings } = await buildOptimalSchedule(employees, jobFunctions, shifts, trainingData, businessRules, warnings)
+    const { schedule, warnings: scheduleWarnings } = await buildOptimalSchedule(employees, jobFunctions, shifts, trainingData, businessRules, warnings, preferredAssignmentsMap)
     
     console.log('✅ Generated schedule:', schedule.length, 'assignments')
     console.log('📊 Schedule Summary:')
@@ -573,7 +580,7 @@ const generateAIScheduleLogic = async (): Promise<{ schedule: any[], warnings: s
 }
 
 // Core algorithm with 15-minute increments and 2-4 hour blocks
-const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shifts: any[], trainingData: any, dbRules: any[], warnings: string[] = []) => {
+const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shifts: any[], trainingData: any, dbRules: any[], warnings: string[] = [], preferredAssignmentsMap: Record<string, Record<string, any>> = {}) => {
   const assignments = []
   const employeeAssignments = new Map() // Track what each employee is doing
   const employeeHours = new Map() // Track hours per employee
@@ -653,7 +660,8 @@ const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shift
         jobFunction, 
         timeSlot.start, 
         timeSlot.end,
-        assignments // Pass existing assignments to check for conflicts
+        assignments, // Pass existing assignments to check for conflicts
+        preferredAssignmentsMap // Pass preferred assignments for prioritization
       )
       
       // Assign staff (respecting max limits)
@@ -1092,8 +1100,8 @@ const fillRemainingHoursWithFlex = async (
   console.log('✅ Filled remaining hours with Flex blocks')
 }
 
-// Helper function to find available employees (updated to check existing assignments)
-const findAvailableEmployees = (employees: any[], shifts: any[], trainingData: any, jobFunctions: any[], jobFunction: string, startTime: string, endTime: string, existingAssignments: any[] = []) => {
+// Helper function to find available employees (updated to check existing assignments and prioritize preferred assignments)
+const findAvailableEmployees = (employees: any[], shifts: any[], trainingData: any, jobFunctions: any[], jobFunction: string, startTime: string, endTime: string, existingAssignments: any[] = [], preferredAssignmentsMap: Record<string, Record<string, any>> = {}) => {
   const startMinutes = timeToMinutes(startTime)
   const endMinutes = timeToMinutes(endTime)
   
@@ -1144,7 +1152,38 @@ const findAvailableEmployees = (employees: any[], shifts: any[], trainingData: a
     return timeCovered
   })
   
+  // Sort by preferred assignment priority (higher priority first)
+  // Employees with preferred assignments come first, sorted by priority (descending)
+  // Then employees with required assignments (is_required = true)
+  // Then regular employees
+  const jobFunctionObj = jobFunctions.find((jf: any) => jf.name === jobFunction)
+  if (jobFunctionObj) {
+    available.sort((a: any, b: any) => {
+      const aPref = preferredAssignmentsMap[a.id]?.[jobFunctionObj.id]
+      const bPref = preferredAssignmentsMap[b.id]?.[jobFunctionObj.id]
+      
+      // Required assignments come first
+      if (aPref?.is_required && !bPref?.is_required) return -1
+      if (!aPref?.is_required && bPref?.is_required) return 1
+      
+      // Then sort by priority (higher priority first)
+      if (aPref && bPref) {
+        return (bPref.priority || 0) - (aPref.priority || 0)
+      }
+      if (aPref && !bPref) return -1
+      if (!aPref && bPref) return 1
+      
+      return 0 // Equal priority
+    })
+  }
+  
   console.log(`Found ${available.length} available employees for ${jobFunction} at ${startTime}-${endTime}`)
+  if (jobFunctionObj) {
+    const preferredCount = available.filter((emp: any) => preferredAssignmentsMap[emp.id]?.[jobFunctionObj.id]).length
+    if (preferredCount > 0) {
+      console.log(`  → ${preferredCount} employees have preferred assignments for ${jobFunction}`)
+    }
+  }
   return available
 }
 

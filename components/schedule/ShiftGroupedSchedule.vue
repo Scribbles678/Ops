@@ -173,12 +173,37 @@
               class="p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-left"
               :class="{ 'bg-blue-100 border-blue-500': selectedJobFunction?.id === jobFunction.id }"
             >
-              <div class="flex items-center space-x-2">
-                <div 
-                  class="w-4 h-4 rounded border border-gray-300" 
-                  :style="{ backgroundColor: jobFunction.color_code }"
-                ></div>
-                <span class="text-sm font-medium">{{ jobFunction.name }}</span>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                  <div 
+                    class="w-4 h-4 rounded border border-gray-300" 
+                    :style="{ backgroundColor: jobFunction.color_code }"
+                  ></div>
+                  <span class="text-sm font-medium">{{ jobFunction.name }}</span>
+                </div>
+                <div v-if="selectedEmployee && preferredAssignmentsMap?.[selectedEmployee.id]?.[jobFunction.id]" class="flex items-center space-x-1">
+                  <span 
+                    v-if="props.preferredAssignmentsMap[selectedEmployee.id][jobFunction.id].is_required"
+                    class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-700 border border-red-200"
+                    title="Required assignment"
+                  >
+                    Required
+                  </span>
+                  <span 
+                    v-else
+                    class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-100 text-blue-700 border border-blue-200"
+                    title="Preferred assignment"
+                  >
+                    Preferred
+                  </span>
+                  <span 
+                    v-if="(props.preferredAssignmentsMap[selectedEmployee.id][jobFunction.id].priority || 0) > 0"
+                    class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-purple-100 text-purple-700 border border-purple-200"
+                    :title="`Priority: ${props.preferredAssignmentsMap[selectedEmployee.id][jobFunction.id].priority}`"
+                  >
+                    P{{ props.preferredAssignmentsMap[selectedEmployee.id][jobFunction.id].priority }}
+                  </span>
+                </div>
               </div>
             </button>
           </div>
@@ -271,6 +296,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 
 const { getEmployeeTraining } = useEmployees()
 const { getGroupedJobFunctions, isMeterJobFunction } = useJobFunctions()
+const { isPreferredAssignment, getAssignmentPriority, isRequiredAssignment } = usePreferredAssignments()
 
 // Optimize meter job functions with computed property to avoid repeated filtering
 const allIndividualMeters = computed(() => {
@@ -295,6 +321,7 @@ const props = defineProps<{
   scheduleAssignmentsData?: Record<string, any>
   ptoByEmployeeId?: Record<string, any[]>
   shiftSwapsByEmployeeId?: Record<string, any>
+  preferredAssignmentsMap?: Record<string, Record<string, any>>
 }>()
 
 // Emits
@@ -370,6 +397,7 @@ const shiftsWithEmployees = computed(() => {
 })
 
 // Available job functions for the selected employee - optimized for performance
+// Prioritizes preferred/required assignments
 const availableJobFunctions = computed(() => {
   if (!selectedEmployee.value) return []
   
@@ -390,7 +418,33 @@ const availableJobFunctions = computed(() => {
     isGroup: true
   }
   
-  return [...nonMeterFunctions, meterEntry].sort((a, b) => a.sort_order - b.sort_order)
+  // Combine all job functions
+  const allFunctions = [...nonMeterFunctions, meterEntry]
+  
+  // Sort by preferred assignment priority, then by sort_order
+  return allFunctions.sort((a, b) => {
+    const employeeId = selectedEmployee.value?.id
+    if (!employeeId) return a.sort_order - b.sort_order
+    
+    // Check if either has a preferred assignment
+    const prefA = props.preferredAssignmentsMap?.[employeeId]?.[a.id]
+    const prefB = props.preferredAssignmentsMap?.[employeeId]?.[b.id]
+    
+    // Required assignments come first
+    if (prefA?.is_required && !prefB?.is_required) return -1
+    if (!prefA?.is_required && prefB?.is_required) return 1
+    
+    // Then sort by priority (higher priority first)
+    if (prefA && prefB) {
+      const priorityDiff = (prefB.priority || 0) - (prefA.priority || 0)
+      if (priorityDiff !== 0) return priorityDiff
+    }
+    if (prefA && !prefB) return -1
+    if (!prefA && prefB) return 1
+    
+    // Fallback to sort_order
+    return a.sort_order - b.sort_order
+  })
 })
 
 // Initialize schedule data for each employee

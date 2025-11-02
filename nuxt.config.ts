@@ -35,6 +35,10 @@ export default defineNuxtConfig({
   nitro: {
     experimental: {
       wasm: true
+    },
+    // Handle service worker routes gracefully
+    routeRules: {
+      '/sw.js': { prerender: true, headers: { 'Cache-Control': 'public, max-age=31536000' } }
     }
   }
 })
