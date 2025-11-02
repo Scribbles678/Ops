@@ -149,6 +149,31 @@
         </div>
       </div>
 
+      <!-- Notification Modal -->
+      <div v-if="showNotificationModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xl font-bold text-gray-800">{{ notificationType === 'success' ? '✅ Success' : '❌ Error' }}</h3>
+            <button @click="closeNotificationModal" class="text-gray-400 hover:text-gray-600">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div :class="notificationType === 'success' ? 'bg-green-50 border border-green-200 rounded-lg p-4 mb-4' : 'bg-red-50 border border-red-200 rounded-lg p-4 mb-4'">
+            <p :class="notificationType === 'success' ? 'text-green-800' : 'text-red-800'" class="text-sm whitespace-pre-line">{{ notificationMessage }}</p>
+          </div>
+          <div class="flex justify-end">
+            <button
+              @click="closeNotificationModal"
+              :class="notificationType === 'success' ? 'px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium' : 'px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium'"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Warnings Modal -->
       <div v-if="showWarningsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div class="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
@@ -264,6 +289,22 @@ const generating = ref(false)
 const showWarningsModal = ref(false)
 const scheduleWarnings = ref<string[]>([])
 
+// Notification modal state
+const showNotificationModal = ref(false)
+const notificationMessage = ref('')
+const notificationType = ref<'success' | 'error'>('success')
+
+const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+  notificationMessage.value = message
+  notificationType.value = type
+  showNotificationModal.value = true
+}
+
+const closeNotificationModal = () => {
+  showNotificationModal.value = false
+  notificationMessage.value = ''
+}
+
 // Mock employee data (same as schedule page)
 const employees = ref([
   { id: '1', first_name: 'John', last_name: 'Smith', trained_job_functions: ['RT Pick', 'Pick'] },
@@ -312,15 +353,15 @@ const copyTodaySchedule = async () => {
     const success = await copySchedule(today, selectedDate.value || '')
     
     if (success) {
-      alert(`Today's schedule copied to ${formatDate(selectedDate.value || '')} successfully!`)
+      showNotification(`Today's schedule copied to ${formatDate(selectedDate.value || '')} successfully!`, 'success')
       // Navigate to the selected date's schedule page to see/edit the copied schedule
       navigateTo(`/schedule/${selectedDate.value || ''}`)
     } else {
-      alert('Error copying schedule. Please try again.')
+      showNotification('Error copying schedule. Please try again.', 'error')
     }
   } catch (error) {
     console.error('Error copying schedule:', error)
-    alert('Error copying schedule. Please try again.')
+    showNotification('Error copying schedule. Please try again.', 'error')
   }
 }
 
@@ -345,8 +386,11 @@ const generateAISchedule = async () => {
           showWarningsModal.value = true
         } else {
           // No warnings - show success and navigate
-          alert(`✅ AI schedule generated successfully!\n\nCreated ${schedule.length} assignments for ${formatDate(selectedDate.value || '')}.\n\nRedirecting to schedule view...`)
-          navigateTo(`/schedule/${selectedDate.value || ''}`)
+          showNotification(`✅ AI schedule generated successfully!\n\nCreated ${schedule.length} assignments for ${formatDate(selectedDate.value || '')}.\n\nRedirecting to schedule view...`, 'success')
+          // Wait a moment for modal to show, then navigate
+          setTimeout(() => {
+            navigateTo(`/schedule/${selectedDate.value || ''}`)
+          }, 500)
         }
       } else {
         // Show detailed error modal with specific issues
@@ -355,7 +399,7 @@ const generateAISchedule = async () => {
       }
     } catch (error) {
       console.error('Error generating AI schedule:', error)
-      alert('❌ Error generating AI schedule.\n\nPlease try again or check the console for details.')
+      showNotification('❌ Error generating AI schedule.\n\nPlease try again or check the console for details.', 'error')
     } finally {
       generating.value = false
     }

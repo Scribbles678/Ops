@@ -54,20 +54,24 @@
               {{ employee.last_name }}, {{ employee.first_name }}
             </div>
             
-            <!-- Inline assignment pills -->
+            <!-- Inline assignment pills and break/lunch blocks -->
             <div class="flex flex-wrap gap-1">
               <div
-                v-for="assignment in employee.assignments"
-                :key="assignment.id"
+                v-for="item in getEmployeeScheduleItems(employee)"
+                :key="item.id"
                 class="rounded-sm px-1 py-0.5 text-[9px] border border-opacity-50"
-                :style="{
-                  backgroundColor: assignment.job_function.color_code,
-                  borderColor: darkenColor(assignment.job_function.color_code),
-                  color: getTextColor(assignment.job_function.color_code)
+                :style="item.isBreak ? {
+                  backgroundColor: '#4B5563', // Dark gray for breaks/lunch
+                  borderColor: '#6B7280',
+                  color: '#ffffff'
+                } : {
+                  backgroundColor: item.assignment.job_function.color_code,
+                  borderColor: darkenColor(item.assignment.job_function.color_code),
+                  color: getTextColor(item.assignment.job_function.color_code)
                 }"
               >
-                <span class="font-semibold mr-1">{{ assignment.job_function.name }}</span>
-                <span class="opacity-90">{{ formatTime(assignment.start_time) }}-{{ formatTime(assignment.end_time) }}</span>
+                <span class="font-semibold mr-1">{{ item.isBreak ? item.label : item.assignment.job_function.name }}</span>
+                <span class="opacity-90">{{ item.timeRange }}</span>
               </div>
             </div>
           </div>
@@ -350,6 +354,203 @@ const getTextColor = (hex: string): string => {
   
   // Return white text for dark backgrounds, black text for light backgrounds
   return luminance > 0.5 ? '#000000' : '#ffffff'
+}
+
+// Helper to convert time string to minutes
+const timeToMinutes = (time: string): number => {
+  const parts = time.split(':').map(Number)
+  const hours = parts[0] || 0
+  const minutes = parts[1] || 0
+  return hours * 60 + minutes
+}
+
+// Helper to convert minutes to time string
+const minutesToTime = (minutes: number): string => {
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
+}
+
+// Get break periods for a shift
+const getBreakPeriods = (shift: any): Array<{start: string, end: string, type: string, label: string}> => {
+  const periods: Array<{start: string, end: string, type: string, label: string}> = []
+  
+  const convertTime = (timeStr: string | null | undefined): string | null => {
+    if (!timeStr) return null
+    const cleanTime = timeStr.toString().trim()
+    if (cleanTime.includes(':')) {
+      const parts = cleanTime.split(':')
+      if (parts.length === 3) {
+        return `${parts[0]}:${parts[1]}`
+      }
+    }
+    return cleanTime
+  }
+  
+  const break1Start = convertTime(shift.break_1_start)
+  const break1End = convertTime(shift.break_1_end)
+  const break2Start = convertTime(shift.break_2_start)
+  const break2End = convertTime(shift.break_2_end)
+  const lunchStart = convertTime(shift.lunch_start)
+  const lunchEnd = convertTime(shift.lunch_end)
+  
+  if (break1Start && break1End) {
+    periods.push({
+      start: break1Start,
+      end: break1End,
+      type: 'break',
+      label: 'BREAK'
+    })
+  }
+  
+  if (break2Start && break2End) {
+    periods.push({
+      start: break2Start,
+      end: break2End,
+      type: 'break',
+      label: 'BREAK'
+    })
+  }
+  
+  if (lunchStart && lunchEnd) {
+    periods.push({
+      start: lunchStart,
+      end: lunchEnd,
+      type: 'lunch',
+      label: 'LUNCH'
+    })
+  }
+  
+  return periods.sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start))
+}
+
+// Get combined schedule items (assignments + breaks) for an employee, sorted by time
+// This function splits assignments around breaks to show chronological order
+const getEmployeeScheduleItems = (employee: any): Array<{id: string, isBreak: boolean, assignment?: any, label?: string, timeRange: string, sortTime: number}> => {
+  const items: Array<{id: string, isBreak: boolean, assignment?: any, label?: string, timeRange: string, sortTime: number}> = []
+  
+  // Get employee's shift
+  const employeeShift = shifts.value.find(s => s.id === employee.shift_id)
+  if (!employeeShift) {
+    // If no shift found, just return assignments
+    return employee.assignments.map((a: any) => ({
+      id: `assignment-${a.id}`,
+      isBreak: false,
+      assignment: a,
+      timeRange: `${formatTime(a.start_time)}-${formatTime(a.end_time)}`,
+      sortTime: timeToMinutes(a.start_time.substring(0, 5))
+    }))
+  }
+  
+  // Get break/lunch periods for this shift
+  const breakPeriods = getBreakPeriods(employeeShift)
+  
+  // Process each assignment and split it around breaks
+  employee.assignments.forEach((assignment: any) => {
+    const assignmentStartMinutes = timeToMinutes(assignment.start_time.substring(0, 5))
+    const assignmentEndMinutes = timeToMinutes(assignment.end_time.substring(0, 5))
+    
+    // Find breaks that fall within this assignment's time range
+    const breaksInRange = breakPeriods.filter(period => {
+      const breakStart = timeToMinutes(period.start)
+      const breakEnd = timeToMinutes(period.end)
+      // Check if break overlaps with assignment
+      return !(breakEnd <= assignmentStartMinutes || breakStart >= assignmentEndMinutes)
+    })
+    
+    // If no breaks within assignment, add assignment as-is
+    if (breaksInRange.length === 0) {
+      items.push({
+        id: `assignment-${assignment.id}`,
+        isBreak: false,
+        assignment: assignment,
+        timeRange: `${formatTime(assignment.start_time)}-${formatTime(assignment.end_time)}`,
+        sortTime: assignmentStartMinutes
+      })
+    } else {
+      // Split assignment around breaks
+      let currentStart = assignmentStartMinutes
+      
+      // Sort breaks by start time
+      const sortedBreaks = [...breaksInRange].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start))
+      
+      for (const breakPeriod of sortedBreaks) {
+        const breakStart = timeToMinutes(breakPeriod.start)
+        const breakEnd = timeToMinutes(breakPeriod.end)
+        
+        // Add assignment segment before this break (if there's time)
+        if (currentStart < breakStart) {
+          items.push({
+            id: `assignment-${assignment.id}-before-${breakPeriod.type}-${breakStart}`,
+            isBreak: false,
+            assignment: {
+              ...assignment,
+              // Create a virtual segment with modified times
+              start_time: minutesToTime(currentStart) + ':00',
+              end_time: minutesToTime(breakStart) + ':00'
+            },
+            timeRange: `${formatTime(minutesToTime(currentStart))}-${formatTime(breakPeriod.start)}`,
+            sortTime: currentStart
+          })
+        }
+        
+        // Add the break period
+        items.push({
+          id: `break-${employee.id}-${breakPeriod.type}-${breakStart}`,
+          isBreak: true,
+          label: breakPeriod.label,
+          timeRange: `${formatTime(breakPeriod.start)}-${formatTime(breakPeriod.end)}`,
+          sortTime: breakStart
+        })
+        
+        // Update current start to after the break
+        currentStart = breakEnd
+      }
+      
+      // Add final assignment segment after all breaks (if there's time)
+      if (currentStart < assignmentEndMinutes) {
+        items.push({
+          id: `assignment-${assignment.id}-after-breaks`,
+          isBreak: false,
+          assignment: {
+            ...assignment,
+            // Create a virtual segment with modified times
+            start_time: minutesToTime(currentStart) + ':00',
+            end_time: minutesToTime(assignmentEndMinutes) + ':00'
+          },
+          timeRange: `${formatTime(minutesToTime(currentStart))}-${formatTime(assignment.end_time)}`,
+          sortTime: currentStart
+        })
+      }
+    }
+  })
+  
+  // Add any breaks that don't overlap with assignments (standalone breaks)
+  breakPeriods.forEach((period, index) => {
+    const breakStart = timeToMinutes(period.start)
+    const breakEnd = timeToMinutes(period.end)
+    
+    // Check if this break overlaps with any assignment
+    const overlapsAssignment = employee.assignments.some((assignment: any) => {
+      const assignStart = timeToMinutes(assignment.start_time.substring(0, 5))
+      const assignEnd = timeToMinutes(assignment.end_time.substring(0, 5))
+      return !(breakEnd <= assignStart || breakStart >= assignEnd)
+    })
+    
+    // If break doesn't overlap with any assignment, add it as standalone
+    if (!overlapsAssignment) {
+      items.push({
+        id: `break-standalone-${employee.id}-${period.type}-${index}`,
+        isBreak: true,
+        label: period.label,
+        timeRange: `${formatTime(period.start)}-${formatTime(period.end)}`,
+        sortTime: breakStart
+      })
+    }
+  })
+  
+  // Sort all items by start time
+  return items.sort((a, b) => a.sortTime - b.sortTime)
 }
 </script>
 

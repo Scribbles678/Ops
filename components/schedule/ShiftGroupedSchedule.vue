@@ -14,36 +14,27 @@
       </div>
 
       <!-- Time Block Headers -->
-      <div class="time-blocks-header">
+      <div class="time-blocks-header-grid">
         <div class="employee-name-header">Staff</div>
         <div 
-          v-for="timeBlock in getShiftTimeBlocks(shift)" 
-          :key="timeBlock.time"
-          class="time-block"
-          :class="{ 'hourly-marker': isHourlyMarker(timeBlock.time) }"
-        >
-          <div class="time-header" :class="{ 'hourly-header': isHourlyMarker(timeBlock.time) }">
-            {{ timeBlock.display }}
-          </div>
-        </div>
-      </div>
-
-      <!-- Break Overlay Row (aligns once per shift) -->
-      <div class="relative mb-2 min-w-max">
-        <div 
-          class="grid w-full"
+          class="time-header-grid relative"
           :style="{ gridTemplateColumns: getGridTemplateColumns(shift) }"
         >
+          <!-- Render all time block cells for alignment (but empty) -->
           <div
             v-for="timeBlock in getShiftTimeBlocks(shift)"
-            :key="`break-${shift.id}-${timeBlock.time}`"
-            class="min-h-[10px] border-r border-gray-100"
-            :class="{
-              'bg-gray-50': !timeBlock.isBreakTime,
-              'bg-gray-300': timeBlock.isBreakTime
-            }"
+            :key="`header-cell-${timeBlock.time}`"
+            class="time-block-header-cell"
+          ></div>
+          
+          <!-- Render hourly markers that span the full hour (4 columns) -->
+          <div
+            v-for="(marker, index) in getHourlyMarkers(shift)"
+            :key="`hour-marker-${shift.id}-${marker.time}`"
+            class="time-hour-marker"
+            :style="{ gridColumn: `${marker.startIndex + 1} / span ${marker.span}` }"
           >
-            <span v-if="timeBlock.isBreakTime" class="sr-only">{{ getBreakType(timeBlock.time, shift) }}</span>
+            {{ formatTimeForDisplay(marker.time) }}
           </div>
         </div>
       </div>
@@ -59,12 +50,12 @@
           <div class="employee-name flex items-center gap-2">
             <span class="whitespace-nowrap truncate max-w-[200px]" :title="`${employee.last_name}, ${employee.first_name}`">{{ employee.last_name }}, {{ employee.first_name }}</span>
             <span v-if="hasPTO(employee.id)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-700 border border-red-200">PTO</span>
-            <button @click="emit('addPTO', employee)" class="px-1.5 py-0.5 text-[10px] rounded border border-gray-300 text-gray-700 hover:bg-gray-100">PTO</button>
-            <button @click="emit('addShiftSwap', employee)" class="px-1.5 py-0.5 text-[10px] rounded border border-blue-300 text-blue-700 hover:bg-blue-100">SS</button>
+            <button @click="emit('addPTO', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors duration-150 shadow-sm">PTO</button>
+            <button @click="emit('addShiftSwap', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-blue-300 text-blue-700 hover:bg-blue-100 transition-colors duration-150 shadow-sm">SS</button>
           </div>
 
           <!-- Grid row background cells for alignment and interaction -->
-          <div class="relative w-full">
+          <div class="relative flex-1 min-w-0">
             <div
               class="grid"
               :style="{ gridTemplateColumns: getGridTemplateColumns(shift) }"
@@ -73,7 +64,6 @@
                 v-for="timeBlock in getShiftTimeBlocks(shift)" 
                 :key="`cell-${employee.id}-${shift.id}-${timeBlock.time}`"
                 class="time-block-content select-none"
-                :class="{ 'hourly-marker-content': isHourlyMarker(timeBlock.time) }"
                 @mousedown.prevent="onSelectStart(employee, shift, timeBlock)"
                 @mouseenter="onSelectMove(shift, timeBlock)"
                 @mouseup="onSelectEnd()"
@@ -82,13 +72,14 @@
                   <div 
                     v-if="!isBreakTime(timeBlock.time, shift)"
                     @click="openAssignmentModal(employee, timeBlock, shift)"
-                    class="assignment-clickable-full bg-white hover:bg-blue-50"
+                    class="assignment-clickable-full bg-white hover:bg-blue-50 transition-colors duration-150 rounded-sm"
                   >
                     <!-- Empty background cell; assignments are rendered as overlay spans -->
                   </div>
                   <div 
                     v-else
-                    class="break-cell-full rounded-lg border border-gray-300 bg-gray-800 text-white"
+                    class="break-cell-full rounded-lg border text-white font-medium text-xs flex items-center justify-center"
+                    style="background: linear-gradient(135deg, #374151 0%, #1f2937 100%); border-color: rgba(0, 0, 0, 0.2); box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.1);"
                   >
                     {{ getBreakType(timeBlock.time, shift) }}
                   </div>
@@ -104,11 +95,13 @@
               <div
                 v-for="range in getEmployeeAssignmentRanges(employee.id, shift)"
                 :key="`range-${employee.id}-${shift.id}-${range.start}-${range.end}-${range.label}`"
-                class="rounded-md border border-gray-300 flex items-center justify-start px-1.5 text-[11px] font-medium shadow-sm overflow-hidden"
+                class="rounded-lg border flex items-center justify-start px-2 text-[11px] font-medium overflow-hidden transition-all duration-200"
                 :style="{
                   gridColumn: `${range.start} / ${range.end}`,
                   backgroundColor: getJobFunctionColor(range.label),
-                  color: '#000'
+                  color: getTextColor(getJobFunctionColor(range.label)),
+                  boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1)',
+                  borderColor: 'rgba(0, 0, 0, 0.1)'
                 }"
               >
                 <span class="truncate">{{ range.label }}</span>
@@ -117,8 +110,11 @@
               <!-- Selection overlay while dragging -->
               <div
                 v-if="isSelecting && selectedEmployee?.id === employee.id && selectedShift?.id === shift.id && selectionRange"
-                class="rounded-lg border-2 border-blue-400 bg-blue-200/40"
-                :style="{ gridColumn: `${selectionRange.start} / ${selectionRange.end}` }"
+                class="rounded-lg border-2 border-blue-500 bg-blue-100/60 backdrop-blur-sm"
+                :style="{ 
+                  gridColumn: `${selectionRange.start} / ${selectionRange.end}`,
+                  boxShadow: '0 0 0 1px rgba(59, 130, 246, 0.2)'
+                }"
               ></div>
             </div>
           </div>
@@ -133,7 +129,6 @@
             v-for="timeBlock in getShiftTimeBlocks(shift)" 
             :key="timeBlock.time"
             class="time-block-content"
-            :class="{ 'hourly-marker-content': isHourlyMarker(timeBlock.time) }"
           >
             <div class="assignment-cell-full">
               <div 
@@ -554,6 +549,24 @@ const getJobFunctionColor = (jobFunctionName: string) => {
   return jobFunction?.color_code || '#ffffff'
 }
 
+// Get appropriate text color based on background luminance
+const getTextColor = (hex: string): string => {
+  if (!hex || hex === '#ffffff' || hex === '#FFFFFF') return '#000000'
+  if (hex === '#000000' || hex === '#000') return '#ffffff'
+  
+  // Convert hex to RGB
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  
+  // Calculate relative luminance (per WCAG)
+  // L = 0.299*R + 0.587*G + 0.114*B
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  
+  // Use white text on dark backgrounds (luminance < 0.5), black on light
+  return luminance > 0.5 ? '#000000' : '#ffffff'
+}
+
 // Grid helpers
 const getGridTemplateColumns = (shift: any) => {
   const cols = getShiftTimeBlocks(shift).length
@@ -677,7 +690,7 @@ const minutesToTime = (minutes: number): string => {
   return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
 }
 
-// Format time for display - only show hourly labels with enhanced visual distinction
+// Format time for display - only show hourly labels
 const formatTimeForDisplay = (time: string): string => {
   const parts = time.split(':').map(Number)
   const hours = parts[0] ?? 0
@@ -690,8 +703,33 @@ const formatTimeForDisplay = (time: string): string => {
     return `${displayHours} ${period}`
   }
   
-  // Return empty string for non-hourly slots
+  // Return empty string for non-hourly slots (handled by v-if in template)
   return ''
+}
+
+// Get hourly markers for a shift to create spanning headers
+const getHourlyMarkers = (shift: any) => {
+  const blocks = getShiftTimeBlocks(shift)
+  const hourlyMarkers: Array<{ time: string; startIndex: number; span: number }> = []
+  
+  blocks.forEach((block, index) => {
+    if (isHourlyMarker(block.time)) {
+      // Calculate span: typically 4 blocks (1 hour = 4 x 15 minutes)
+      // But check if this is the last hour - may be less than 4
+      let span = 4
+      if (index + 4 > blocks.length) {
+        span = blocks.length - index
+      }
+      
+      hourlyMarkers.push({
+        time: block.time,
+        startIndex: index, // 0-based for CSS grid-column
+        span: span
+      })
+    }
+  })
+  
+  return hourlyMarkers
 }
 
 // Check if a time block is an hourly marker for enhanced styling
@@ -946,22 +984,55 @@ const saveAssignment = () => {
 }
 
 const removeAssignment = () => {
-  if (!selectedEmployee.value || !selectedTimeBlock.value) return
+  if (!selectedEmployee.value || !selectedTimeBlock.value || !selectedShift.value) return
   
-  // Get the current assignment to determine the time range
+  // Get the current assignment at the clicked time
   const currentAssignment = getAssignment(selectedEmployee.value.id, selectedTimeBlock.value.time)
-  const currentUntil = getUntil(selectedEmployee.value.id, selectedTimeBlock.value.time)
   
-  if (currentAssignment && currentUntil) {
-    // Clear all assignments in the time range
-    const startMinutes = timeToMinutes(selectedTimeBlock.value.time)
-    const endMinutes = timeToMinutes(currentUntil)
-    clearAssignmentsInRange(selectedEmployee.value.id, startMinutes, endMinutes)
-  } else {
-    // Just clear the single time slot
-    updateAssignment(selectedEmployee.value.id, selectedTimeBlock.value.time, '')
-    updateUntil(selectedEmployee.value.id, selectedTimeBlock.value.time, '')
+  if (!currentAssignment) {
+    // No assignment to remove
+    closeAssignmentModal()
+    return
   }
+  
+  // Find the entire contiguous assignment range that contains the clicked time
+  const blocks = getShiftTimeBlocks(selectedShift.value)
+  const clickedTime = selectedTimeBlock.value.time
+  const clickedMinutes = timeToMinutes(clickedTime)
+  
+  // Find the start of the contiguous assignment
+  let rangeStartMinutes = clickedMinutes
+  let rangeEndMinutes = clickedMinutes + 15 // Default to just the clicked block
+  
+  // Walk backwards to find the start of the contiguous range
+  let checkMinutes = clickedMinutes
+  while (checkMinutes >= timeToMinutes(blocks[0]?.time || '00:00')) {
+    const checkTime = minutesToTime(checkMinutes)
+    const assignment = getAssignment(selectedEmployee.value.id, checkTime)
+    if (assignment === currentAssignment && !isBreakTime(checkTime, selectedShift.value)) {
+      rangeStartMinutes = checkMinutes
+      checkMinutes -= 15
+    } else {
+      break
+    }
+  }
+  
+  // Walk forwards to find the end of the contiguous range
+  checkMinutes = clickedMinutes + 15
+  const shiftEndMinutes = timeToMinutes(selectedShift.value.end_time || '23:59')
+  while (checkMinutes < shiftEndMinutes) {
+    const checkTime = minutesToTime(checkMinutes)
+    const assignment = getAssignment(selectedEmployee.value.id, checkTime)
+    if (assignment === currentAssignment && !isBreakTime(checkTime, selectedShift.value)) {
+      rangeEndMinutes = checkMinutes + 15
+      checkMinutes += 15
+    } else {
+      break
+    }
+  }
+  
+  // Remove all assignments in the entire range
+  clearAssignmentsInRange(selectedEmployee.value.id, rangeStartMinutes, rangeEndMinutes)
   
   closeAssignmentModal()
 }
@@ -1026,57 +1097,103 @@ initializeScheduleData()
 }
 
 .shift-group {
-  @apply bg-white rounded-lg border border-gray-200 p-6 w-full;
+  @apply bg-white rounded-xl border border-gray-200 p-6 w-full;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
 }
 
 .shift-header {
   @apply mb-6;
 }
 
-.time-blocks-header {
-  @apply flex bg-gray-100 border-b-2 border-gray-300 sticky top-0 z-10 min-w-max;
+.shift-header h2 {
+  @apply text-gray-800;
+  letter-spacing: -0.025em;
+}
+
+.time-blocks-header-grid {
+  @apply flex bg-gradient-to-b from-gray-50 to-gray-100 border-b border-gray-300 sticky top-0 z-10;
+  box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  /* Ensure header structure matches employee rows exactly */
+  align-items: stretch;
 }
 
 .employee-name-header {
-  @apply w-56 px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
+  @apply px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
+  background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
+  box-shadow: inset 0 -1px 0 0 rgba(0, 0, 0, 0.06);
+  /* Exact width: 224px (14rem) to match employee-name */
+  width: 224px;
+  min-width: 224px;
+  max-width: 224px;
+  box-sizing: border-box;
 }
 
-.time-block {
-  @apply border-r border-gray-300 min-w-[48px];
+.time-header-grid {
+  @apply grid flex-1;
+  background: transparent;
+  /* Ensure grid starts immediately after employee name header */
+  min-width: 0;
+  /* No gaps - borders handle separation */
+  column-gap: 0;
+  row-gap: 0;
+  /* Ensure perfect alignment */
+  margin: 0;
+  padding: 0;
 }
 
-.time-header {
-  @apply bg-gray-200 px-0 py-1 text-sm font-semibold text-center border-b border-gray-300;
+.time-block-header-cell {
+  @apply relative;
+  background: transparent;
+  /* Grid will handle width via gridTemplateColumns */
+  /* Add border to match content cells for alignment */
+  border-right: 1px solid rgba(229, 231, 235, 0.5);
 }
 
-/* Enhanced styling for hourly markers */
-.hourly-marker {
-  @apply border-l-4 border-blue-500 bg-blue-50;
-}
-
-.hourly-header {
-  @apply bg-blue-100 text-blue-800 font-bold text-base border-b-2 border-blue-400;
+.time-hour-marker {
+  @apply px-3 py-2 text-xs font-semibold text-gray-700 text-center flex items-center justify-center;
+  /* Modern styling with gradient and subtle shadow */
+  background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+  border-right: 2px solid #d1d5db;
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  letter-spacing: 0.025em;
+  /* Spanning is handled via grid-column in the inline style */
 }
 
 .shift-employees {
-  @apply divide-y divide-gray-200 min-w-max;
+  @apply divide-y divide-gray-200;
+  /* Remove min-w-max to allow proper flex alignment */
 }
 
 .employee-row {
-  @apply flex hover:bg-gray-50 min-w-max;
+  @apply flex transition-colors duration-150;
+  border-bottom: 1px solid rgba(229, 231, 235, 0.6);
+  /* Match header structure exactly */
+  align-items: stretch;
+}
+
+.employee-row:hover {
+  background: linear-gradient(to right, #f9fafb 0%, #ffffff 100%);
 }
 
 .employee-name {
-  @apply w-56 px-3 py-2 font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
+  @apply px-3 py-2 font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
+  background: rgba(249, 250, 251, 0.5);
+  /* Exact width: 224px (14rem) to match employee-name-header */
+  width: 224px;
+  min-width: 224px;
+  max-width: 224px;
+  box-sizing: border-box;
 }
 
 .time-block-content {
-  @apply border-r border-gray-300 min-w-[48px];
+  @apply relative;
+  /* Grid will handle width via gridTemplateColumns */
+  /* Border must match header cells exactly for alignment */
+  border-right: 1px solid rgba(229, 231, 235, 0.5);
 }
 
-.hourly-marker-content {
-  @apply border-l-4 border-blue-500 bg-blue-50;
-}
+/* Removed hourly-marker-content - was causing unnecessary blue vertical bars */
 
 .assignment-cell-full {
   @apply w-full h-full;

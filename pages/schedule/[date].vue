@@ -347,6 +347,31 @@
         </div>
       </div>
 
+      <!-- Notification Modal -->
+      <div v-if="showNotificationModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xl font-bold text-gray-800">{{ notificationType === 'success' ? '✅ Success' : '❌ Error' }}</h3>
+            <button @click="closeNotificationModal" class="text-gray-400 hover:text-gray-600">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <div :class="notificationType === 'success' ? 'bg-green-50 border border-green-200 rounded-lg p-4 mb-4' : 'bg-red-50 border border-red-200 rounded-lg p-4 mb-4'">
+            <p :class="notificationType === 'success' ? 'text-green-800' : 'text-red-800'" class="text-sm">{{ notificationMessage }}</p>
+          </div>
+          <div class="flex justify-end">
+            <button
+              @click="closeNotificationModal"
+              :class="notificationType === 'success' ? 'px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium' : 'px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium'"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Shift Swap Modal -->
       <div v-if="showShiftSwapModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
@@ -1194,13 +1219,13 @@ const saveSchedule = async () => {
     // Success!
     isSaving.value = false
     saveProgress.value = ''
-    alert(`Schedule saved successfully! ${assignmentsToSave.length} assignments created.`)
+    showNotification(`Schedule saved successfully! ${assignmentsToSave.length} assignments created.`, 'success')
     
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error saving schedule:', error)
     isSaving.value = false
     saveProgress.value = ''
-    alert(`Error saving schedule: ${error.message || 'Unknown error'}. Please try again.`)
+    showNotification(`Error saving schedule: ${error.message || 'Unknown error'}. Please try again.`, 'error')
   }
 }
 
@@ -1234,6 +1259,22 @@ const handleScheduleDataUpdated = (newScheduleData: Record<string, any>) => {
 }
 
 // PTO Modal state and actions
+// Notification modal state
+const showNotificationModal = ref(false)
+const notificationMessage = ref('')
+const notificationType = ref<'success' | 'error'>('success')
+
+const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
+  notificationMessage.value = message
+  notificationType.value = type
+  showNotificationModal.value = true
+}
+
+const closeNotificationModal = () => {
+  showNotificationModal.value = false
+  notificationMessage.value = ''
+}
+
 const showPTOModal = ref(false)
 const ptoForm = ref({
   employee_id: '',
@@ -1276,7 +1317,7 @@ const savePTO = async () => {
     await fetchPTOForDate(scheduleDate.value)
     showPTOModal.value = false
   } else {
-    alert('Failed to create PTO. Please try again.')
+    showNotification('Failed to create PTO. Please try again.', 'error')
   }
 }
 
@@ -1324,7 +1365,7 @@ const saveShiftSwap = async () => {
     await fetchShiftSwapsForDate(scheduleDate.value)
     showShiftSwapModal.value = false
   } catch (e: any) {
-    alert('Failed to save shift swap. Please try again.')
+    showNotification('Failed to save shift swap. Please try again.', 'error')
     console.error('Error saving shift swap:', e)
   }
 }
@@ -1338,10 +1379,10 @@ const deleteShiftSwap = async () => {
       await fetchShiftSwapsForDate(scheduleDate.value)
       showShiftSwapModal.value = false
     } else {
-      alert('Failed to delete shift swap. Please try again.')
+      showNotification('Failed to delete shift swap. Please try again.', 'error')
     }
   } catch (e: any) {
-    alert('Failed to delete shift swap. Please try again.')
+    showNotification('Failed to delete shift swap. Please try again.', 'error')
     console.error('Error deleting shift swap:', e)
   }
 }
@@ -1358,14 +1399,14 @@ const getShiftName = (shiftId: string) => {
 // Meter dashboard functions
 const meterTimeSlots = computed(() => {
   const slots = []
-  // Generate time slots from 6 AM to 8:30 PM (6:00 to 20:30)
-  for (let hour = 6; hour <= 20; hour++) {
+  // Generate time slots from 8 AM to 8 PM (08:00 to 20:00) to conserve space
+  for (let hour = 8; hour <= 20; hour++) {
     for (let quarter = 0; quarter < 4; quarter++) {
       const minutes = quarter * 15
       const timeString = `${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
       
-      // Stop at 8:30 PM (20:30)
-      if (hour === 20 && minutes > 30) break
+      // Stop at 8:00 PM (20:00) - only show up to 8pm, not 8:30pm
+      if (hour === 20 && minutes > 0) break
       
       slots.push({
         time: timeString,
