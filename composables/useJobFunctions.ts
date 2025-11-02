@@ -123,13 +123,18 @@ export const useJobFunctions = () => {
     
     jobFunctions.value.forEach(jf => {
       if (isMeterJobFunction(jf.name)) {
+        // Individual meter entries (Meter 1, Meter 2, etc.)
         meters.push(jf)
+      } else if (jf.name === 'Meter') {
+        // Skip standalone "Meter" entry - we'll create a grouped one instead
+        // This prevents duplicate "Meter" entries in the UI
       } else {
+        // All other non-meter job functions
         grouped.push(jf)
       }
     })
     
-    // Add a single "Meter" entry representing all meters
+    // Add a single "Meter" entry representing all meters (only if we have individual meters)
     if (meters.length > 0) {
       grouped.push({
         id: 'meter-group',

@@ -4,7 +4,8 @@
     <div
       v-for="shift in shiftsWithEmployees"
       :key="shift.id"
-      class="shift-group mb-8 w-full"
+      class="shift-group mb-8"
+      :style="{ width: `${24 + 224 + (getShiftTimeBlocks(shift).length * 48)}px`, maxWidth: '100%' }"
     >
       <!-- Shift Header -->
       <div class="shift-header">
@@ -78,7 +79,7 @@
                   </div>
                   <div 
                     v-else
-                    class="break-cell-full rounded-lg border text-white font-medium text-xs flex items-center justify-center"
+                    class="break-cell-full rounded-lg border text-white flex items-center justify-center"
                     style="background: linear-gradient(135deg, #374151 0%, #1f2937 100%); border-color: rgba(0, 0, 0, 0.2); box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.1);"
                   >
                     {{ getBreakType(timeBlock.time, shift) }}
@@ -346,16 +347,19 @@ const selectionRange = computed(() => {
 const shiftsWithEmployees = computed(() => {
   return props.shifts.map(shift => {
     // Get employees for this shift:
-    // 1. Employees whose shift_id matches this shift
-    // 2. Employees who are swapped TO this shift for today
+    // 1. Employees who are swapped TO this shift for today
+    // 2. Employees whose shift_id matches this shift AND they don't have a swap
     const employeesForShift = props.employees.filter(employee => {
-      // Check if employee has a shift swap to this shift
+      // Check if employee has a shift swap
       const swap = props.shiftSwapsByEmployeeId?.[employee.id]
-      if (swap && swap.swapped_shift_id === shift.id) {
-        return true
+      
+      if (swap) {
+        // If employee has a swap, only show them in the swapped shift
+        return swap.swapped_shift_id === shift.id
+      } else {
+        // If no swap, show them in their normal shift
+        return employee.shift_id === shift.id
       }
-      // Otherwise, use their normal shift_id
-      return employee.shift_id === shift.id
     })
     
     return {
@@ -1097,8 +1101,11 @@ initializeScheduleData()
 }
 
 .shift-group {
-  @apply bg-white rounded-xl border border-gray-200 p-6 w-full;
+  @apply bg-white rounded-xl border border-gray-200;
+  padding: 24px 0 24px 24px; /* top right bottom left - only left/top/bottom padding, no right padding */
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  /* Width is set dynamically based on shift end_time via inline style */
+  /* Content extends to the right edge of container (no right padding) */
 }
 
 .shift-header {
@@ -1233,7 +1240,8 @@ initializeScheduleData()
 }
 
 .break-cell-full {
-  @apply w-full h-full px-0 py-0.5 text-[10px] font-bold text-center cursor-not-allowed min-h-[28px] flex items-center justify-center;
+  @apply w-full h-full px-2 text-[11px] font-medium text-center cursor-not-allowed flex items-center justify-center;
+  /* Match assignment block styling for consistent height */
 }
 
 .empty-cell-full {

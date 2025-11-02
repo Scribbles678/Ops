@@ -28,6 +28,10 @@
               <div class="text-sm font-bold text-orange-600">{{ unassignedEmployees }}</div>
               <div class="text-[11px] text-gray-600">Unassigned</div>
             </div>
+            <div class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-center">
+              <div class="text-sm font-bold text-red-600">{{ totalPTOHours }}</div>
+              <div class="text-[11px] text-gray-600">PTO Hours</div>
+            </div>
           </div>
         </div>
         <div class="flex space-x-4">
@@ -104,32 +108,92 @@
           </div>
         </div>
 
-        <!-- Job Function Hours Breakdown / Meter Dashboard (Right Side) -->
-        <div class="flex-1">
+        <!-- Job Function Hours Breakdown / Dashboards (Right Side) -->
+        <div class="flex-1" :style="{ maxWidth: activeDashboard !== 'jobFunctions' ? `${64 + (meterTimeSlots.length * 24)}px` : 'none' }">
           <div class="card mb-0 h-full">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="text-lg font-bold text-gray-800">
-                {{ showMeterDashboard ? 'Meter Staffing Dashboard' : 'Job Function Hours Breakdown' }}
-              </h3>
-              <div class="flex space-x-2">
+            <div class="flex items-center mb-3">
+              <div class="flex flex-wrap gap-2">
                 <button 
-                  @click="showMeterDashboard = false"
-                  class="px-3 py-1 text-sm rounded border transition-colors"
-                  :class="!showMeterDashboard ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                  @click="activeDashboard = 'jobFunctions'"
+                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  :class="activeDashboard === 'jobFunctions' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   Job Functions
                 </button>
                 <button 
-                  @click="showMeterDashboard = true"
-                  class="px-3 py-1 text-sm rounded border transition-colors"
-                  :class="showMeterDashboard ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                  @click="activeDashboard = 'meter'"
+                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  :class="activeDashboard === 'meter' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
-                  Meter Dashboard
+                  Meter
+                </button>
+                <button 
+                  @click="activeDashboard = 'locus'"
+                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  :class="activeDashboard === 'locus' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  Locus
+                </button>
+                <button 
+                  @click="activeDashboard = 'pick'"
+                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  :class="activeDashboard === 'pick' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  Pick
+                </button>
+                <button 
+                  @click="activeDashboard = 'x4'"
+                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  :class="activeDashboard === 'x4' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  X4
+                </button>
+                <button 
+                  @click="activeDashboard = 'em9'"
+                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  :class="activeDashboard === 'em9' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  EM9
+                </button>
+                <button 
+                  @click="activeDashboard = 'speedcell'"
+                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  :class="activeDashboard === 'speedcell' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  Speedcell
+                </button>
+                <button 
+                  @click="activeDashboard = 'helpdesk'"
+                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  :class="activeDashboard === 'helpdesk' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  Helpdesk
+                </button>
+                <button 
+                  @click="activeDashboard = 'rtPick'"
+                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  :class="activeDashboard === 'rtPick' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  RT Pick
+                </button>
+                <button 
+                  @click="activeDashboard = 'projects'"
+                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  :class="activeDashboard === 'projects' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  Projects
+                </button>
+                <button 
+                  @click="activeDashboard = 'dgPick'"
+                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  :class="activeDashboard === 'dgPick' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  DG Pick
                 </button>
               </div>
             </div>
             <!-- Job Function Hours Breakdown -->
-            <div v-if="!showMeterDashboard" class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
+            <div v-if="activeDashboard === 'jobFunctions'" class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
               <div v-for="jobFunction in jobFunctionHours" :key="jobFunction.name" class="text-center bg-gray-50 rounded-lg p-2 border border-gray-200 hover:shadow-sm transition-shadow">
                 <div class="flex items-center justify-center mb-1">
                   <div 
@@ -138,7 +202,7 @@
                   ></div>
                   <span class="text-xs font-semibold text-gray-800">{{ jobFunction.name }}</span>
                 </div>
-                <div class="text-[11px] text-gray-600 mb-0.5">Actual Hours</div>
+                <div class="text-[11px] text-gray-600 mb-0.5">Scheduled Hours</div>
                 <div class="text-base font-bold text-gray-900 bg-white rounded py-0.5 px-2 shadow-sm mb-0.5">
                   {{ jobFunction.hours }}
                 </div>
@@ -148,49 +212,112 @@
                 </div>
               </div>
             </div>
-            <!-- Meter Dashboard (compact within top row) -->
+            <!-- Job Function Dashboards (Meter, Locus, Pick, X4, EM9, Speedcell, Helpdesk) -->
             <div v-else class="overflow-x-auto">
               <div class="min-w-max">
-                <div class="flex border-b-2 border-gray-300 mb-2">
-                  <div class="w-20 px-2 py-1 text-xs font-medium text-gray-700 bg-gray-50 border-r border-gray-300 sticky left-0 z-10">
-                    Meter
+                <!-- Header Row -->
+                <div class="flex border-b border-gray-200 mb-0.5 bg-gradient-to-b from-gray-50 to-white sticky top-0 z-20 shadow-sm">
+                  <div class="w-16 px-1.5 py-1 text-[9px] font-semibold text-gray-700 bg-white border-r border-gray-200 sticky left-0 z-30">
+                    {{ activeDashboard === 'meter' ? 'Meter' : getDashboardLabel(activeDashboard) }}
                   </div>
-                  <div v-for="timeSlot in meterTimeSlots" :key="timeSlot.time" class="px-1 py-1 text-center text-xs font-medium border-r border-gray-200" :class="{ 'hourly-marker': isHourlyMarker(timeSlot.time) }" :style="{ minWidth: '40px' }">
+                  <div 
+                    v-for="timeSlot in meterTimeSlots" 
+                    :key="timeSlot.time" 
+                    class="px-1 py-1 text-center text-[9px] font-semibold border-r border-gray-200 box-border" 
+                    :class="{ 
+                      'bg-blue-50 text-blue-700': isHourlyMarker(timeSlot.time),
+                      'bg-transparent text-gray-500': !isHourlyMarker(timeSlot.time)
+                    }" 
+                    :style="{ width: '24px', flexShrink: 0, flexGrow: 0 }"
+                  >
                     {{ formatTimeForMeterDashboard(timeSlot.time) }}
                   </div>
                 </div>
 
-                <!-- Meter Rows (restored) -->
+                <!-- Dashboard Rows -->
                 <div class="min-w-max">
-                  <div
-                    v-for="meterNumber in 20"
-                    :key="meterNumber"
-                    class="flex border-b border-gray-200 hover:bg-gray-50"
-                  >
-                    <!-- Meter Label -->
-                    <div class="w-20 px-2 py-1 text-xs font-medium text-gray-800 bg-white border-r border-gray-300 sticky left-0 z-10">
-                      Meter {{ meterNumber }}
-                    </div>
-
-                    <!-- Time Slots for this Meter -->
+                  <!-- Meter Dashboard -->
+                  <template v-if="activeDashboard === 'meter'">
                     <div
-                      v-for="timeSlot in meterTimeSlots"
-                      :key="`meter-${meterNumber}-${timeSlot.time}`"
-                      class="px-1 py-1 text-center text-xs border-r border-gray-200 relative"
-                      :class="{ 'hourly-marker-content': isHourlyMarker(timeSlot.time) }"
-                      :style="{ minWidth: '40px' }"
+                      v-for="meterNumber in 20"
+                      :key="meterNumber"
+                      class="flex border-b border-gray-100 hover:bg-gray-50/50 transition-colors"
                     >
+                      <!-- Meter Label -->
+                      <div class="w-16 px-1.5 py-1 text-[9px] font-medium text-gray-700 bg-white border-r border-gray-200 sticky left-0 z-10 flex items-center">
+                        <span class="text-gray-600">M</span>
+                        <span class="ml-0.5 font-semibold text-gray-800">{{ meterNumber }}</span>
+                      </div>
+
+                      <!-- Time Slots for this Meter -->
                       <div
-                        class="w-full h-full flex items-center justify-center rounded cursor-pointer transition"
-                        :class="getMeterSlotClasses(meterNumber, timeSlot.time)"
-                        :style="getMeterSlotStyle(meterNumber, timeSlot.time)"
-                        @click="toggleMeterSlot(meterNumber, timeSlot.time)"
+                        v-for="timeSlot in meterTimeSlots"
+                        :key="`meter-${meterNumber}-${timeSlot.time}`"
+                        class="px-0 py-0.5 text-center border-r border-gray-100 relative box-border"
+                        :class="{ 
+                          'bg-blue-50/30': isHourlyMarker(timeSlot.time),
+                          'bg-transparent': !isHourlyMarker(timeSlot.time)
+                        }"
+                        :style="{ width: '24px', flexShrink: 0, flexGrow: 0 }"
                       >
-                        <span v-if="isMeterBooked(meterNumber, timeSlot.time)" class="text-white text-xs">●</span>
-                        <span v-else class="text-gray-300 text-xs">○</span>
+                        <div
+                          class="w-full h-4 flex items-center justify-center rounded transition-all"
+                          :class="getMeterSlotClasses(meterNumber, timeSlot.time)"
+                          :style="getMeterSlotStyle(meterNumber, timeSlot.time)"
+                        >
+                          <span 
+                            v-if="isMeterBooked(meterNumber, timeSlot.time)" 
+                            class="w-1.5 h-1.5 rounded-full bg-white shadow-sm"
+                          ></span>
+                          <span 
+                            v-else 
+                            class="w-1 h-1 rounded-full bg-gray-200"
+                          ></span>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  </template>
+
+                  <!-- Other Job Function Dashboards (Locus, Pick, X4, EM9, Speedcell, Helpdesk) -->
+                  <template v-else>
+                    <div
+                      v-for="employee in getEmployeesForJobFunction(activeDashboard)"
+                      :key="employee.id"
+                      class="flex border-b border-gray-100 hover:bg-gray-50/50 transition-colors"
+                    >
+                      <!-- Employee Label -->
+                      <div class="w-16 px-1.5 py-1 text-[9px] font-medium text-gray-700 bg-white border-r border-gray-200 sticky left-0 z-10 flex items-center">
+                        <span class="text-gray-600 truncate">{{ employee.last_name }}, {{ employee.first_name.charAt(0) }}</span>
+                      </div>
+
+                      <!-- Time Slots for this Employee -->
+                      <div
+                        v-for="timeSlot in meterTimeSlots"
+                        :key="`${employee.id}-${timeSlot.time}`"
+                        class="px-0 py-0.5 text-center border-r border-gray-100 relative box-border"
+                        :class="{ 
+                          'bg-blue-50/30': isHourlyMarker(timeSlot.time),
+                          'bg-transparent': !isHourlyMarker(timeSlot.time)
+                        }"
+                        :style="{ width: '24px', flexShrink: 0, flexGrow: 0 }"
+                      >
+                        <div
+                          class="w-full h-4 flex items-center justify-center rounded transition-all"
+                          :class="getJobFunctionSlotClasses(employee.id, timeSlot.time, activeDashboard)"
+                          :style="getJobFunctionSlotStyle(employee.id, timeSlot.time, activeDashboard)"
+                        >
+                          <span 
+                            v-if="isEmployeeAssignedToJobFunction(employee.id, timeSlot.time, activeDashboard)" 
+                            class="w-1.5 h-1.5 rounded-full bg-white shadow-sm"
+                          ></span>
+                          <span 
+                            v-else 
+                            class="w-1 h-1 rounded-full bg-gray-200"
+                          ></span>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                 </div>
               </div>
             </div>
@@ -540,9 +667,9 @@ const saveProgress = ref('')
 // Target hours state
 const targetHours = ref({})
 
-// Meter dashboard state
-const showMeterDashboard = ref(false)
-const meterBookings = ref<Record<string, boolean>>({})
+// Dashboard state - tracks which dashboard view is active
+const activeDashboard = ref<'jobFunctions' | 'meter' | 'locus' | 'pick' | 'x4' | 'em9' | 'speedcell' | 'helpdesk' | 'rtPick' | 'projects' | 'dgPick'>('jobFunctions')
+const meterBookings = ref<Record<string, number>>({}) // Changed to number to track count of bookings
 
 // Get route params - use client-only for date to avoid hydration mismatch
 const route = useRoute()
@@ -831,14 +958,90 @@ onMounted(async () => {
   }
 })
 
+// Helper function to check if a shift is the part-time shift (4-8:30 PM)
+const isPartTimeShift = (shift: any): boolean => {
+  if (!shift) return false
+  // Check if shift starts at 4:00 PM (16:00) and ends at 8:30 PM (20:30)
+  const startTime = shift.start_time?.substring(0, 5) || '' // "HH:MM" format
+  const endTime = shift.end_time?.substring(0, 5) || ''
+  return startTime === '16:00' && endTime === '20:30'
+}
+
+// Helper function to check if an employee is part-time (in 4-8:30 PM shift)
+const isPartTimeEmployee = (employee: any): boolean => {
+  if (!employee) return false
+  
+  // Account for shift swaps
+  const swap = swapByEmployeeId.value?.[employee.id]
+  const actualShiftId = swap ? swap.swapped_shift_id : employee.shift_id
+  
+  if (!actualShiftId) return false
+  
+  const shift = scheduleData.value.find((s: any) => s.id === actualShiftId)
+  return isPartTimeShift(shift)
+}
+
+// Helper function to get employee count (0.5 for part-time, 1 for full-time)
+const getEmployeeCount = (employee: any): number => {
+  return isPartTimeEmployee(employee) ? 0.5 : 1
+}
+
 // Computed properties
 const totalEmployees = computed(() => {
-  return employees.value.length
+  if (!employees.value) return 0
+  
+  // Sum up employee counts: 0.5 for part-time (4-8:30 PM), 1 for full-time
+  return employees.value.reduce((total: number, employee: any) => {
+    return total + getEmployeeCount(employee)
+  }, 0)
 })
 
 const totalLaborHours = computed(() => {
-  // Calculate as total employees × 8 hours (standard work day)
-  return totalEmployees.value * 8
+  if (!employees.value || !scheduleData.value) return 0
+  
+  // Calculate total working hours based on shift hours, excluding PTO and lunch
+  let totalHours = 0
+  
+  employees.value.forEach((employee: any) => {
+    // Skip employees on PTO for this day
+    if (ptoByEmployeeId.value && ptoByEmployeeId.value[employee.id] && ptoByEmployeeId.value[employee.id].length > 0) {
+      return // Skip this employee
+    }
+    
+    // Get employee's shift (accounting for shift swaps)
+    const swap = swapByEmployeeId.value?.[employee.id]
+    const actualShiftId = swap ? swap.swapped_shift_id : employee.shift_id
+    
+    if (!actualShiftId) return // Skip employees without a shift
+    
+    const shift = scheduleData.value.find((s: any) => s.id === actualShiftId)
+    if (!shift || !shift.start_time || !shift.end_time) return
+    
+    // Calculate shift hours from start_time to end_time
+    const shiftStartMinutes = timeToMinutes(shift.start_time.substring(0, 5))
+    const shiftEndMinutes = timeToMinutes(shift.end_time.substring(0, 5))
+    let shiftTotalMinutes = shiftEndMinutes - shiftStartMinutes
+    
+    // Subtract lunch time (unpaid) if it exists
+    if (shift.lunch_start && shift.lunch_end) {
+      const lunchStartMinutes = timeToMinutes(shift.lunch_start.substring(0, 5))
+      const lunchEndMinutes = timeToMinutes(shift.lunch_end.substring(0, 5))
+      
+      // Only subtract lunch if it falls within the shift
+      if (lunchStartMinutes >= shiftStartMinutes && lunchEndMinutes <= shiftEndMinutes) {
+        shiftTotalMinutes -= (lunchEndMinutes - lunchStartMinutes)
+      }
+    }
+    
+    // Convert minutes to hours
+    const employeeHours = shiftTotalMinutes / 60
+    
+    // Factor in part-time multiplier (0.5 for part-time employees)
+    const multiplier = isPartTimeEmployee(employee) ? 0.5 : 1
+    totalHours += employeeHours * multiplier
+  })
+  
+  return Math.round(totalHours * 10) / 10
 })
 
 const totalShifts = computed(() => {
@@ -847,8 +1050,90 @@ const totalShifts = computed(() => {
 
 const unassignedEmployees = computed(() => {
   if (!scheduleAssignments.value || !employees.value) return 0
+  
   const assignedEmployeeIds = new Set(scheduleAssignments.value.map((a: any) => a.employee_id))
-  return employees.value.filter((e: any) => !assignedEmployeeIds.has(e.id)).length
+  
+  // Sum up unassigned employee counts: 0.5 for part-time, 1 for full-time
+  return employees.value
+    .filter((e: any) => !assignedEmployeeIds.has(e.id))
+    .reduce((total: number, employee: any) => {
+      return total + getEmployeeCount(employee)
+    }, 0)
+})
+
+const totalPTOHours = computed(() => {
+  if (!pto.value || pto.value.length === 0 || !employees.value || !scheduleData.value) return 0
+  
+  let totalHours = 0
+  
+  // Process each PTO record
+  pto.value.forEach((ptoRecord: any) => {
+    const employee = employees.value.find((e: any) => e.id === ptoRecord.employee_id)
+    if (!employee) return
+    
+    // Get employee's shift (accounting for shift swaps)
+    const swap = swapByEmployeeId.value?.[employee.id]
+    const actualShiftId = swap ? swap.swapped_shift_id : employee.shift_id
+    
+    if (!actualShiftId) return
+    
+    const shift = scheduleData.value.find((s: any) => s.id === actualShiftId)
+    if (!shift) return
+    
+    let ptoHours = 0
+    
+    // Check if it's full day PTO (no start_time or end_time)
+    if (!ptoRecord.start_time && !ptoRecord.end_time) {
+      // Full day PTO: use shift hours (excluding lunch)
+      const shiftStartMinutes = timeToMinutes(shift.start_time.substring(0, 5))
+      const shiftEndMinutes = timeToMinutes(shift.end_time.substring(0, 5))
+      let shiftTotalMinutes = shiftEndMinutes - shiftStartMinutes
+      
+      // Subtract lunch time (unpaid) if it exists
+      if (shift.lunch_start && shift.lunch_end) {
+        const lunchStartMinutes = timeToMinutes(shift.lunch_start.substring(0, 5))
+        const lunchEndMinutes = timeToMinutes(shift.lunch_end.substring(0, 5))
+        
+        // Only subtract lunch if it falls within the shift
+        if (lunchStartMinutes >= shiftStartMinutes && lunchEndMinutes <= shiftEndMinutes) {
+          shiftTotalMinutes -= (lunchEndMinutes - lunchStartMinutes)
+        }
+      }
+      
+      ptoHours = shiftTotalMinutes / 60
+    } else {
+      // Partial day PTO: calculate hours between start_time and end_time
+      const ptoStartMinutes = ptoRecord.start_time ? timeToMinutes(ptoRecord.start_time.substring(0, 5)) : 0
+      const ptoEndMinutes = ptoRecord.end_time ? timeToMinutes(ptoRecord.end_time.substring(0, 5)) : 0
+      
+      if (ptoStartMinutes >= 0 && ptoEndMinutes > ptoStartMinutes) {
+        let ptoTotalMinutes = ptoEndMinutes - ptoStartMinutes
+        
+        // Subtract lunch time if it falls within the PTO period
+        if (shift.lunch_start && shift.lunch_end) {
+          const lunchStartMinutes = timeToMinutes(shift.lunch_start.substring(0, 5))
+          const lunchEndMinutes = timeToMinutes(shift.lunch_end.substring(0, 5))
+          
+          // Calculate overlap between PTO period and lunch period
+          const overlapStart = Math.max(ptoStartMinutes, lunchStartMinutes)
+          const overlapEnd = Math.min(ptoEndMinutes, lunchEndMinutes)
+          
+          if (overlapEnd > overlapStart) {
+            // There's overlap - subtract the overlapping lunch time
+            ptoTotalMinutes -= (overlapEnd - overlapStart)
+          }
+        }
+        
+        ptoHours = ptoTotalMinutes / 60
+      }
+    }
+    
+    // Factor in part-time multiplier (0.5 for part-time employees)
+    const multiplier = isPartTimeEmployee(employee) ? 0.5 : 1
+    totalHours += ptoHours * multiplier
+  })
+  
+  return Math.round(totalHours * 10) / 10
 })
 
 const jobFunctionHours = computed(() => {
@@ -865,10 +1150,36 @@ const jobFunctionHours = computed(() => {
   // Always initialize Meter entry for grouping
   jobFunctionTotals['Meter'] = 0
   
+  // Helper function to check if a time slot is lunch time (unpaid)
+  const isLunchTime = (timeSlot: string, employeeId: string): boolean => {
+    const employee = employees.value.find((e: any) => e.id === employeeId)
+    if (!employee || !employee.shift_id) return false
+    
+    // Account for shift swaps
+    const swap = swapByEmployeeId.value?.[employeeId]
+    const actualShiftId = swap ? swap.swapped_shift_id : employee.shift_id
+    
+    const shift = scheduleData.value.find((s: any) => s.id === actualShiftId)
+    if (!shift || !shift.lunch_start || !shift.lunch_end) return false
+    
+    // Convert time slot to minutes (format: "HH:MM")
+    const timeMinutes = timeToMinutes(timeSlot)
+    const lunchStartMinutes = timeToMinutes(shift.lunch_start.substring(0, 5))
+    const lunchEndMinutes = timeToMinutes(shift.lunch_end.substring(0, 5))
+    
+    // Check if time slot falls within lunch period
+    return timeMinutes >= lunchStartMinutes && timeMinutes < lunchEndMinutes
+  }
+  
   // Calculate hours for each employee's schedule
   Object.entries(scheduleAssignmentsData.value).forEach(([employeeId, employeeSchedule]: [string, any]) => {
     Object.entries(employeeSchedule).forEach(([timeSlot, data]: [string, any]) => {
       if (data.assignment && data.assignment.trim() !== '') {
+        // Skip lunch time (unpaid) - but keep breaks (paid)
+        if (isLunchTime(timeSlot, employeeId)) {
+          return // Skip this time slot
+        }
+        
         // Each 15-minute slot = 0.25 hours
         const jobName = data.assignment
         
@@ -1439,21 +1750,45 @@ const isHourlyMarker = (time: string): boolean => {
 
 const isMeterBooked = (meterNumber: number, timeSlot: string): boolean => {
   const key = `meter-${meterNumber}-${timeSlot}`
-  return meterBookings.value[key] || false
+  return (meterBookings.value[key] || 0) > 0
+}
+
+// Check if a meter is double-booked (booked more than once)
+const isMeterDoubleBooked = (meterNumber: number, timeSlot: string): boolean => {
+  const key = `meter-${meterNumber}-${timeSlot}`
+  return (meterBookings.value[key] || 0) > 1
 }
 
 const getMeterSlotClasses = (meterNumber: number, timeSlot: string): string => {
   const isBooked = isMeterBooked(meterNumber, timeSlot)
+  const isDoubleBooked = isMeterDoubleBooked(meterNumber, timeSlot)
+  
+  if (isDoubleBooked) {
+    return 'shadow-md ring-2 ring-red-500 ring-opacity-75'
+  }
+  
   return isBooked 
-    ? 'hover:opacity-80' 
-    : 'bg-gray-100 hover:bg-gray-200'
+    ? 'shadow-sm' 
+    : ''
 }
 
 const getMeterSlotStyle = (meterNumber: number, timeSlot: string): Record<string, string> => {
+  // Check if this specific 15-minute time slot is booked
   const isBooked = isMeterBooked(meterNumber, timeSlot)
+  // Check if this specific 15-minute time slot is double-booked (count > 1)
+  const isDoubleBooked = isMeterDoubleBooked(meterNumber, timeSlot)
+  
   if (!isBooked) return {}
   
-  // Get the meter color from job functions
+  // If double-booked, use red background - ONLY for this specific time slot
+  if (isDoubleBooked) {
+    return {
+      backgroundColor: '#DC2626', // Red-600
+      color: '#ffffff'
+    }
+  }
+  
+  // Get the meter color from job functions for normal bookings (count === 1)
   const meterJobFunction = jobFunctions.value?.find(jf => jf.name === `Meter ${meterNumber}`)
   const meterColor = meterJobFunction?.color_code || '#87CEEB' // Default meter color
   
@@ -1463,9 +1798,135 @@ const getMeterSlotStyle = (meterNumber: number, timeSlot: string): Record<string
   }
 }
 
-const toggleMeterSlot = (meterNumber: number, timeSlot: string) => {
-  const key = `meter-${meterNumber}-${timeSlot}`
-  meterBookings.value[key] = !meterBookings.value[key]
+// Helper function to get dashboard label
+const getDashboardLabel = (dashboard: string): string => {
+  const labels: Record<string, string> = {
+    'locus': 'Locus',
+    'pick': 'Pick',
+    'x4': 'X4',
+    'em9': 'EM9',
+    'speedcell': 'Speedcell',
+    'helpdesk': 'Helpdesk',
+    'rtPick': 'RT Pick',
+    'projects': 'Projects',
+    'dgPick': 'DG Pick'
+  }
+  return labels[dashboard] || dashboard
+}
+
+// Helper function to normalize job function names for matching
+const normalizeJobFunctionName = (name: string): string => {
+  // Convert dashboard key to job function name format
+  const mapping: Record<string, string> = {
+    'locus': 'Locus',
+    'pick': 'Pick',
+    'x4': 'X4',
+    'em9': 'EM9',
+    'speedcell': 'Speedcell',
+    'helpdesk': 'Helpdesk',
+    'rtpick': 'RT Pick',
+    'projects': 'Projects',
+    'dgpick': 'DG Pick'
+  }
+  return mapping[name.toLowerCase()] || name
+}
+
+// Get employees assigned to a specific job function
+const getEmployeesForJobFunction = (jobFunctionKey: string) => {
+  if (!employees.value || !scheduleAssignmentsData.value) return []
+  
+  const jobFunctionName = normalizeJobFunctionName(jobFunctionKey)
+  const assignedEmployees = new Set<string>()
+  
+  // Find all employees who have assignments to this job function
+  Object.entries(scheduleAssignmentsData.value).forEach(([employeeId, employeeSchedule]: [string, any]) => {
+    Object.entries(employeeSchedule).forEach(([timeSlot, data]: [string, any]) => {
+      if (data && data.assignment) {
+        // Check if assignment matches the job function (case-insensitive, handle variations)
+        const assignment = String(data.assignment).toLowerCase()
+        const targetName = jobFunctionName.toLowerCase()
+        
+        if (assignment === targetName || assignment.includes(targetName)) {
+          assignedEmployees.add(employeeId)
+        }
+      }
+    })
+  })
+  
+  // Return employees in sorted order
+  return employees.value
+    .filter((e: any) => assignedEmployees.has(e.id))
+    .sort((a: any, b: any) => {
+      // Sort by last name, then first name
+      if (a.last_name !== b.last_name) {
+        return a.last_name.localeCompare(b.last_name)
+      }
+      return a.first_name.localeCompare(b.first_name)
+    })
+}
+
+// Check if employee is assigned to job function at a specific time slot
+const isEmployeeAssignedToJobFunction = (employeeId: string, timeSlot: string, jobFunctionKey: string): boolean => {
+  if (!scheduleAssignmentsData.value || !scheduleAssignmentsData.value[employeeId]) return false
+  
+  const employeeSchedule = scheduleAssignmentsData.value[employeeId]
+  const assignment = employeeSchedule[timeSlot]
+  
+  if (!assignment || !assignment.assignment) return false
+  
+  const jobFunctionName = normalizeJobFunctionName(jobFunctionKey)
+  const assignmentName = String(assignment.assignment).toLowerCase()
+  const targetName = jobFunctionName.toLowerCase()
+  
+  // Check if assignment matches (exact or contains)
+  if (assignmentName === targetName) return true
+  
+  // Handle variations (e.g., "Pick" might appear as "Pick 1" or "Pick 2")
+  if (assignmentName.includes(targetName)) return true
+  
+  // Also check if the assignment starts at this time or is continuing
+  if (assignment.start_time && assignment.end_time) {
+    const slotMinutes = timeToMinutesHelper(timeSlot)
+    const startMinutes = timeToMinutesHelper(assignment.start_time.substring(0, 5))
+    const endMinutes = timeToMinutesHelper(assignment.end_time.substring(0, 5))
+    
+    if (slotMinutes >= startMinutes && slotMinutes < endMinutes) {
+      return assignmentName === targetName || assignmentName.includes(targetName)
+    }
+  }
+  
+  return false
+}
+
+// Helper function to convert time to minutes
+const timeToMinutesHelper = (time: string): number => {
+  const parts = time.split(':').map(Number)
+  return (parts[0] || 0) * 60 + (parts[1] || 0)
+}
+
+// Get slot classes for job function dashboard
+const getJobFunctionSlotClasses = (employeeId: string, timeSlot: string, jobFunctionKey: string): string => {
+  const isAssigned = isEmployeeAssignedToJobFunction(employeeId, timeSlot, jobFunctionKey)
+  return isAssigned ? 'shadow-sm' : ''
+}
+
+// Get slot style for job function dashboard
+const getJobFunctionSlotStyle = (employeeId: string, timeSlot: string, jobFunctionKey: string): Record<string, string> => {
+  const isAssigned = isEmployeeAssignedToJobFunction(employeeId, timeSlot, jobFunctionKey)
+  if (!isAssigned) return {}
+  
+  // Get the job function color
+  const jobFunctionName = normalizeJobFunctionName(jobFunctionKey)
+  const jobFunction = jobFunctions.value?.find(jf => 
+    jf.name.toLowerCase() === jobFunctionName.toLowerCase()
+  )
+  
+  const jobColor = jobFunction?.color_code || '#3B82F6'
+  
+  return {
+    backgroundColor: jobColor,
+    color: '#ffffff'
+  }
 }
 
 // Sync meter bookings with actual schedule assignments
@@ -1476,34 +1937,78 @@ const syncMeterBookings = () => {
   // Clear existing bookings
   meterBookings.value = {}
   
+  // Track processed assignment ranges to avoid double-counting the same assignment
+  // Key format: `${employeeId}-${meterAssignment}-${startTime}-${endTime}`
+  const processedRanges = new Set<string>()
+  
   // Get all meter assignments from schedule data
   if (scheduleAssignmentsData.value) {
     Object.entries(scheduleAssignmentsData.value).forEach(([employeeId, employeeSchedule]: [string, any]) => {
+      if (!employeeSchedule) return
+      
+      // Collect all unique assignment ranges first
+      const assignmentRanges = new Map<string, { meterNumber: number; startTime: string; endTime: string }>()
+      
+      // Find the start of each contiguous assignment range
       Object.entries(employeeSchedule).forEach(([timeSlot, data]: [string, any]) => {
         if (data && data.assignment && data.assignment.startsWith('Meter ')) {
           const meterNumber = parseInt(data.assignment.split(' ')[1])
-          console.log(`📊 Found meter assignment: Meter ${meterNumber} at ${timeSlot} until ${data.until}`)
           
           if (meterNumber >= 1 && meterNumber <= 20) {
-            // Mark all time slots for this assignment as booked
             const startTime = timeSlot
             const endTime = data.until
             
-            // Generate all 15-minute slots between start and end time
-            const startMinutes = timeToMinutes(startTime)
-            const endMinutes = timeToMinutes(endTime)
+            // Check if this is the start of a new assignment range
+            // Look at the previous time slot
+            const prevSlotMinutes = timeToMinutes(timeSlot) - 15
+            const prevSlot = prevSlotMinutes >= 0 ? minutesToTime(prevSlotMinutes) : null
+            const prevData = prevSlot ? employeeSchedule[prevSlot] : null
             
-            let currentMinutes = startMinutes
-            while (currentMinutes < endMinutes) {
-              const timeString = minutesToTime(currentMinutes)
-              const key = `meter-${meterNumber}-${timeString}`
-              meterBookings.value[key] = true
-              currentMinutes += 15
+            // This is the start of an assignment if:
+            // 1. No previous slot exists
+            // 2. Previous slot has no assignment
+            // 3. Previous slot has a different assignment
+            // 4. Previous slot has a different end time (assignment ended)
+            const isStartOfAssignment = !prevData || 
+                                        !prevData.assignment || 
+                                        !prevData.assignment.startsWith('Meter ') ||
+                                        parseInt(prevData.assignment.split(' ')[1]) !== meterNumber ||
+                                        prevData.until !== endTime
+            
+            if (isStartOfAssignment && startTime && endTime) {
+              const rangeKey = `${employeeId}-${data.assignment}-${startTime}-${endTime}`
+              if (!assignmentRanges.has(rangeKey)) {
+                assignmentRanges.set(rangeKey, { meterNumber, startTime, endTime })
+              }
             }
           }
         }
       })
+      
+      // Now process each unique assignment range exactly once
+      assignmentRanges.forEach((range, rangeKey) => {
+        console.log(`📊 Processing meter assignment: Meter ${range.meterNumber} at ${range.startTime} until ${range.endTime}`)
+        
+        // Generate all 15-minute slots between start and end time
+        const startMinutes = timeToMinutes(range.startTime)
+        const endMinutes = timeToMinutes(range.endTime)
+        
+        let currentMinutes = startMinutes
+        while (currentMinutes < endMinutes) {
+          const timeString = minutesToTime(currentMinutes)
+          const key = `meter-${range.meterNumber}-${timeString}`
+          // Increment count - this tracks double-bookings (when multiple employees book same meter at same time)
+          meterBookings.value[key] = (meterBookings.value[key] || 0) + 1
+          currentMinutes += 15
+        }
+      })
     })
+  }
+  
+  // Log any double-bookings for debugging
+  const doubleBookings = Object.entries(meterBookings.value).filter(([_, count]) => count > 1)
+  if (doubleBookings.length > 0) {
+    console.warn('⚠️ Double-booked meters detected:', doubleBookings)
   }
   
   console.log('📋 Final meter bookings:', meterBookings.value)

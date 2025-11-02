@@ -112,6 +112,9 @@ const {
 // PTO
 const { ptoByEmployeeId, fetchPTOForDate } = usePTO()
 
+// Shift Swaps
+const { swapByEmployeeId, fetchShiftSwapsForDate } = useShiftSwaps()
+
 const {
   employees,
   loading: employeesLoading,
@@ -121,6 +124,7 @@ const {
 const lastUpdated = ref('')
 const refreshInterval = ref<NodeJS.Timeout | null>(null)
 const rolloverInterval = ref<NodeJS.Timeout | null>(null)
+const realtimeSubscriptions = ref<any[]>([])
 
 // Timezone-aware date helper (America/Chicago) to avoid UTC off-by-one
 const getTZISODate = (tz: string): string => {
@@ -187,10 +191,15 @@ const shiftsWithAssignments = computed(() => {
     return false
   }
   
-  // Group employees by their shift_id
+  // Group employees by their shift_id, accounting for shift swaps
   employees.value.forEach(employee => {
-    const shiftId = employee.shift_id
-    if (shiftMap.has(shiftId)) {
+    // Check if employee has a shift swap
+    const swap = swapByEmployeeId.value?.[employee.id]
+    
+    // Determine which shift this employee should appear in
+    const targetShiftId = swap ? swap.swapped_shift_id : employee.shift_id
+    
+    if (shiftMap.has(targetShiftId)) {
       // If employee has any PTO record for today, skip entirely to save space
       const hasAnyPTO = !!(ptoByEmployeeId.value && ptoByEmployeeId.value[employee.id] && ptoByEmployeeId.value[employee.id].length > 0)
       if (hasAnyPTO) return
@@ -204,7 +213,7 @@ const shiftsWithAssignments = computed(() => {
         assignments: employeeAssignmentsList
       }
       
-      shiftMap.get(shiftId).employees.push(employeeWithAssignments)
+      shiftMap.get(targetShiftId).employees.push(employeeWithAssignments)
     }
   })
   
@@ -257,7 +266,67 @@ onMounted(() => {
   today.value = getTZISODate(TIMEZONE)
   loadData()
   
-  // Set up auto-refresh every 2 minutes
+  // Set up real-time subscriptions for immediate updates
+  const { $supabase } = useNuxtApp()
+  
+  // Subscribe to schedule_assignments changes
+  const assignmentsChannel = $supabase
+    .channel('schedule-assignments-changes')
+    .on(
+      'postgres_changes',
+      {
+        event: '*', // INSERT, UPDATE, DELETE
+        schema: 'public',
+        table: 'schedule_assignments',
+        filter: `schedule_date=eq.${today.value}`
+      },
+      (payload) => {
+        console.log('Schedule assignment change detected:', payload)
+        loadData()
+      }
+    )
+    .subscribe()
+  realtimeSubscriptions.value.push(assignmentsChannel)
+  
+  // Subscribe to PTO changes
+  const ptoChannel = $supabase
+    .channel('pto-changes')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'pto_days',
+        filter: `pto_date=eq.${today.value}`
+      },
+      (payload) => {
+        console.log('PTO change detected:', payload)
+        loadData()
+      }
+    )
+    .subscribe()
+  realtimeSubscriptions.value.push(ptoChannel)
+  
+  // Subscribe to shift swap changes
+  const swapChannel = $supabase
+    .channel('shift-swaps-changes')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'shift_swaps',
+        filter: `swap_date=eq.${today.value}`
+      },
+      (payload) => {
+        console.log('Shift swap change detected:', payload)
+        loadData()
+      }
+    )
+    .subscribe()
+  realtimeSubscriptions.value.push(swapChannel)
+
+  // Set up auto-refresh every 2 minutes as fallback
   refreshInterval.value = setInterval(() => {
     loadData()
   }, 120000)
@@ -268,6 +337,68 @@ onMounted(() => {
     if (today.value !== current) {
       today.value = current
       loadData()
+      // Resubscribe for new date - clean up old subscriptions first
+      realtimeSubscriptions.value.forEach(sub => {
+        $supabase.removeChannel(sub)
+      })
+      realtimeSubscriptions.value = []
+      
+      // Subscribe to schedule_assignments changes for new date
+      const assignmentsChannel = $supabase
+        .channel('schedule-assignments-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'schedule_assignments',
+            filter: `schedule_date=eq.${today.value}`
+          },
+          (payload) => {
+            console.log('Schedule assignment change detected:', payload)
+            loadData()
+          }
+        )
+        .subscribe()
+      realtimeSubscriptions.value.push(assignmentsChannel)
+      
+      // Subscribe to PTO changes for new date
+      const ptoChannel = $supabase
+        .channel('pto-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'pto_days',
+            filter: `pto_date=eq.${today.value}`
+          },
+          (payload) => {
+            console.log('PTO change detected:', payload)
+            loadData()
+          }
+        )
+        .subscribe()
+      realtimeSubscriptions.value.push(ptoChannel)
+      
+      // Subscribe to shift swap changes for new date
+      const swapChannel = $supabase
+        .channel('shift-swaps-changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'shift_swaps',
+            filter: `swap_date=eq.${today.value}`
+          },
+          (payload) => {
+            console.log('Shift swap change detected:', payload)
+            loadData()
+          }
+        )
+        .subscribe()
+      realtimeSubscriptions.value.push(swapChannel)
     }
   }
   rolloverInterval.value = setInterval(tick, 60000)
@@ -280,6 +411,12 @@ onUnmounted(() => {
   if (rolloverInterval.value) {
     clearInterval(rolloverInterval.value)
   }
+  // Clean up real-time subscriptions
+  const { $supabase } = useNuxtApp()
+  realtimeSubscriptions.value.forEach(sub => {
+    $supabase.removeChannel(sub)
+  })
+  realtimeSubscriptions.value = []
 })
 
 const loadData = async () => {
@@ -295,7 +432,8 @@ const loadData = async () => {
       fetchShifts(),
       fetchEmployees(),
       fetchScheduleForDate(today.value),
-      fetchPTOForDate(today.value)
+      fetchPTOForDate(today.value),
+      fetchShiftSwapsForDate(today.value)
     ])
     updateLastUpdated()
     console.log('Display data refreshed')
@@ -429,8 +567,10 @@ const getBreakPeriods = (shift: any): Array<{start: string, end: string, type: s
 const getEmployeeScheduleItems = (employee: any): Array<{id: string, isBreak: boolean, assignment?: any, label?: string, timeRange: string, sortTime: number}> => {
   const items: Array<{id: string, isBreak: boolean, assignment?: any, label?: string, timeRange: string, sortTime: number}> = []
   
-  // Get employee's shift
-  const employeeShift = shifts.value.find(s => s.id === employee.shift_id)
+  // Get employee's shift (accounting for shift swaps)
+  const swap = swapByEmployeeId.value?.[employee.id]
+  const targetShiftId = swap ? swap.swapped_shift_id : employee.shift_id
+  const employeeShift = shifts.value.find(s => s.id === targetShiftId)
   if (!employeeShift) {
     // If no shift found, just return assignments
     return employee.assignments.map((a: any) => ({
