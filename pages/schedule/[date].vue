@@ -624,6 +624,12 @@ const {
   getSwapForEmployee
 } = useShiftSwaps()
 
+// Preferred Assignments composable
+const {
+  fetchPreferredAssignments,
+  getPreferredAssignmentsMap
+} = usePreferredAssignments()
+
 // Ensure scheduleAssignments is always an array
 const scheduleAssignments = computed(() => (scheduleAssignmentsRef.value || []) as any[])
 
@@ -754,6 +760,7 @@ watch(scheduleDate, async (newDate) => {
     await fetchScheduleForDate(newDate)
     await fetchPTOForDate(newDate)
     await fetchShiftSwapsForDate(newDate)
+    await fetchPreferredAssignments() // Reload preferred assignments when date changes
     await nextTick()
     initializeScheduleData()
   }
