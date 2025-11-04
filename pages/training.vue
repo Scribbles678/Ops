@@ -124,7 +124,7 @@
                   :data-employee-id="employee.id"
                   :data-job-function-id="jobFunction.id"
                   :checked="isEmployeeTrained(employee.id, jobFunction.id)"
-                  @change="toggleTraining(employee.id, jobFunction.id)"
+                  @change="toggleTraining(employee.id, jobFunction.id, $event)"
                   class="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                 />
                 <div class="flex items-center space-x-1">
@@ -281,6 +281,13 @@ const filteredEmployees = computed(() => {
 
 // hasChanges computed property removed since we're auto-saving
 
+// Reload training data when needed
+const reloadTrainingData = async () => {
+  if (employees.value.length > 0) {
+    await loadTrainingData()
+  }
+}
+
 onMounted(async () => {
   try {
     // Load core data in parallel for immediate UI display
@@ -294,9 +301,9 @@ onMounted(async () => {
     console.log('Loaded job functions:', jobFunctionsResult?.length || 0)
     console.log('Loaded shifts:', shiftsResult?.length || 0)
     
-    // Load training data and employee shifts in the background (non-blocking)
-    // This allows the UI to show immediately while data loads
-    Promise.all([
+    // Load training data and employee shifts - wait for them to complete
+    // This ensures data is loaded before allowing edits
+    await Promise.all([
       loadTrainingData().catch(error => {
         console.error('Error loading training data:', error)
       }),
@@ -304,8 +311,18 @@ onMounted(async () => {
         console.error('Error loading employee shifts:', error)
       })
     ])
+    
+    console.log('Training data loaded:', Object.keys(employeeTraining.value).length, 'employees')
   } catch (error) {
     console.error('Error loading initial data:', error)
+  }
+})
+
+// Reload training data when employees list changes
+watch(() => employees.value.length, async (newLength, oldLength) => {
+  if (newLength > 0 && newLength !== oldLength) {
+    console.log('Employees list changed, reloading training data...')
+    await reloadTrainingData()
   }
 })
 
@@ -327,17 +344,35 @@ onBeforeRouteLeave((to, from, next) => {
 })
 
 const loadTrainingData = async () => {
-  if (employees.value.length === 0) return
+  if (employees.value.length === 0) {
+    console.log('No employees to load training data for')
+    return
+  }
   
   trainingDataLoading.value = true
   
   try {
     // Use bulk fetch for much faster loading
     const employeeIds = employees.value.map(emp => emp.id)
+    console.log('Loading training data for employees:', employeeIds.length)
+    
     const training = await getAllEmployeeTraining(employeeIds)
     
-    employeeTraining.value = training
-    originalTraining.value = JSON.parse(JSON.stringify(training))
+    console.log('Training data loaded:', Object.keys(training).length, 'employees with training records')
+    
+    // Clean and normalize the training data (remove any null/undefined values)
+    const cleanedTraining: Record<string, string[]> = {}
+    Object.keys(training).forEach(empId => {
+      cleanedTraining[empId] = Array.from(new Set(training[empId].filter(id => id && id !== 'meter-group')))
+    })
+    
+    employeeTraining.value = cleanedTraining
+    originalTraining.value = JSON.parse(JSON.stringify(cleanedTraining))
+    
+    console.log('Training data normalized and stored')
+  } catch (error) {
+    console.error('Error in loadTrainingData:', error)
+    throw error
   } finally {
     trainingDataLoading.value = false
   }
@@ -395,10 +430,33 @@ const isEmployeeTrained = (employeeId: string, jobFunctionId: string): boolean =
 
 
 // Completely non-reactive checkbox handling
-const toggleTraining = (employeeId: string, jobFunctionId: string) => {
-  // Get current state from DOM or initialize
+const toggleTraining = (employeeId: string, jobFunctionId: string, event?: Event) => {
+  // Ensure training data is loaded before allowing changes
+  if (trainingDataLoading.value) {
+    console.warn('Training data is still loading. Please wait...')
+    return
+  }
+  
+  // Get the checkbox element to read its CURRENT state (from DOM, not reactive state)
+  const checkbox = event?.target as HTMLInputElement || 
+    document.querySelector(`[data-employee-id="${employeeId}"][data-job-function-id="${jobFunctionId}"]`) as HTMLInputElement
+  
+  if (!checkbox) {
+    console.error('Checkbox not found for:', employeeId, jobFunctionId)
+    return
+  }
+  
+  // Read the ACTUAL checked state from the DOM (what the user just clicked)
+  // This is critical - we must read the actual state, not infer it
+  const isNowChecked = checkbox.checked
+  
+  // Get current state from pendingChanges or initialize from saved state
   if (!pendingChanges.has(employeeId)) {
-    pendingChanges.set(employeeId, [...(employeeTraining.value[employeeId] || [])])
+    // Initialize from current training state, or empty array if not loaded yet
+    const currentTrainingState = employeeTraining.value[employeeId] || []
+    // Clean the training state (remove duplicates and invalid IDs)
+    const cleanTrainingState = Array.from(new Set(currentTrainingState.filter(id => id && id !== 'meter-group')))
+    pendingChanges.set(employeeId, [...cleanTrainingState])
   }
   
   const currentTraining = pendingChanges.get(employeeId)!
@@ -406,9 +464,15 @@ const toggleTraining = (employeeId: string, jobFunctionId: string) => {
   // Special handling for meter group
   if (jobFunctionId === 'meter-group') {
     const allMeters = getAllMeterJobFunctions()
-    const isCurrentlyTrained = allMeters.some(meter => currentTraining.includes(meter.id))
     
-    if (isCurrentlyTrained) {
+    if (isNowChecked) {
+      // Add training to all meters
+      allMeters.forEach(meter => {
+        if (!currentTraining.includes(meter.id)) {
+          currentTraining.push(meter.id)
+        }
+      })
+    } else {
       // Remove training from all meters
       allMeters.forEach(meter => {
         const index = currentTraining.indexOf(meter.id)
@@ -416,30 +480,28 @@ const toggleTraining = (employeeId: string, jobFunctionId: string) => {
           currentTraining.splice(index, 1)
         }
       })
-    } else {
-      // Add training to all meters
-      allMeters.forEach(meter => {
-        if (!currentTraining.includes(meter.id)) {
-          currentTraining.push(meter.id)
-        }
-      })
     }
   } else {
-    // Regular job function handling
-    const index = currentTraining.indexOf(jobFunctionId)
-    
-    if (index > -1) {
-      currentTraining.splice(index, 1)
+    // Regular job function handling - use the ACTUAL checkbox state
+    if (isNowChecked) {
+      // Checkbox is now checked - add to training
+      if (!currentTraining.includes(jobFunctionId)) {
+        currentTraining.push(jobFunctionId)
+      }
     } else {
-      currentTraining.push(jobFunctionId)
+      // Checkbox is now unchecked - remove from training
+      const index = currentTraining.indexOf(jobFunctionId)
+      if (index > -1) {
+        currentTraining.splice(index, 1)
+      }
     }
   }
   
-  // Update the checkbox state in DOM (no reactive state changes)
-  const checkbox = document.querySelector(`[data-employee-id="${employeeId}"][data-job-function-id="${jobFunctionId}"]`) as HTMLInputElement
-  if (checkbox) {
-    checkbox.checked = isEmployeeTrained(employeeId, jobFunctionId)
-  }
+  // Ensure we have a clean array (no duplicates, no invalid IDs)
+  const cleanTraining = Array.from(new Set(currentTraining.filter(id => id && id !== 'meter-group')))
+  pendingChanges.set(employeeId, cleanTraining)
+  
+  console.log(`Training toggle for ${employeeId}: ${jobFunctionId} = ${isNowChecked}, total: ${cleanTraining.length} items`)
   
   // Update save button state
   updateSaveButtonState(employeeId)
@@ -468,8 +530,19 @@ const updateSaveButtonState = (employeeId: string) => {
 const saveEmployeeTraining = async (employeeId: string) => {
   if (!pendingChanges.has(employeeId)) return
   
+  // Ensure training data is loaded before saving
+  if (trainingDataLoading.value) {
+    alert('Training data is still loading. Please wait before saving.')
+    return
+  }
+  
   const saveButton = document.querySelector(`[data-save-button="${employeeId}"]`) as HTMLButtonElement
   const statusIndicator = document.querySelector(`[data-status-indicator="${employeeId}"]`)
+  
+  if (!saveButton) {
+    console.error('Save button not found for employee:', employeeId)
+    return
+  }
   
   // Set saving state
   saveStates.set(employeeId, 'saving')
@@ -491,11 +564,56 @@ const saveEmployeeTraining = async (employeeId: string) => {
   
   try {
     const newTraining = pendingChanges.get(employeeId)!
-    await updateEmployeeTraining(employeeId, newTraining)
+    
+    // Ensure we have a clean array of IDs (no duplicates, no nulls)
+    const cleanTraining = Array.from(new Set(newTraining.filter(id => id && id !== 'meter-group')))
+    
+    console.log(`Saving training for employee ${employeeId}:`, cleanTraining)
+    
+    const result = await updateEmployeeTraining(employeeId, cleanTraining)
+    
+    // Verify the save actually succeeded
+    if (!result) {
+      throw new Error('Save operation returned false')
+    }
+    
+    // Wait a moment for database to commit
+    await new Promise(resolve => setTimeout(resolve, 100))
+    
+    // Verify the save by fetching the updated training data
+    const updatedTraining = await getEmployeeTraining(employeeId)
+    const cleanUpdatedTraining = Array.from(new Set(updatedTraining.filter(id => id)))
+    
+    // Compare as sets (order doesn't matter)
+    const savedSet = new Set(cleanTraining)
+    const fetchedSet = new Set(cleanUpdatedTraining)
+    
+    const trainingMatches = savedSet.size === fetchedSet.size && 
+      Array.from(savedSet).every(id => fetchedSet.has(id))
+    
+    if (!trainingMatches) {
+      console.error('Training data mismatch after save:', {
+        saved: Array.from(savedSet).sort(),
+        fetched: Array.from(fetchedSet).sort(),
+        savedCount: savedSet.size,
+        fetchedCount: fetchedSet.size
+      })
+      
+      // Reload training data to get the actual state
+      await loadTrainingData()
+      
+      // Update the reactive state with what was actually saved
+      employeeTraining.value[employeeId] = cleanUpdatedTraining
+      originalTraining.value[employeeId] = [...cleanUpdatedTraining]
+      
+      throw new Error(`Training data did not save correctly. Expected ${savedSet.size} items, got ${fetchedSet.size}. Please try again.`)
+    }
+    
+    console.log(`Training saved successfully for employee ${employeeId}`)
     
     // Update reactive state only after successful save
-    employeeTraining.value[employeeId] = [...newTraining]
-    originalTraining.value[employeeId] = [...newTraining]
+    employeeTraining.value[employeeId] = [...cleanTraining]
+    originalTraining.value[employeeId] = [...cleanTraining]
     
     // Clear pending changes
     pendingChanges.delete(employeeId)
@@ -524,9 +642,12 @@ const saveEmployeeTraining = async (employeeId: string) => {
       }
     }, 2000)
     
-  } catch (e) {
+  } catch (e: any) {
     console.error('Error saving training:', e)
     saveStates.set(employeeId, 'error')
+    
+    // Show error message to user
+    const errorMessage = e?.message || 'Failed to save training. Please try again.'
     
     saveButton.textContent = 'Error - Try Again'
     saveButton.className = 'px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition text-sm'
@@ -534,7 +655,7 @@ const saveEmployeeTraining = async (employeeId: string) => {
     
     if (statusIndicator) {
       statusIndicator.innerHTML = `
-        <div class="flex items-center">
+        <div class="flex items-center" title="${errorMessage}">
           <svg class="h-4 w-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
             <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
           </svg>
@@ -542,6 +663,8 @@ const saveEmployeeTraining = async (employeeId: string) => {
         </div>
       `
     }
+    
+    // Don't clear pending changes on error - allow user to retry
   }
 }
 

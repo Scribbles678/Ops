@@ -151,10 +151,12 @@ export const useEmployees = () => {
     
     try {
       // Delete existing training records
-      await $supabase
+      const { error: deleteError } = await $supabase
         .from('employee_training')
         .delete()
         .eq('employee_id', employeeId)
+      
+      if (deleteError) throw deleteError
       
       // Insert new training records
       if (jobFunctionIds.length > 0) {
@@ -174,7 +176,8 @@ export const useEmployees = () => {
     } catch (e) {
       error.value = e.message
       console.error('Error updating employee training:', e)
-      return false
+      // Throw the error so the caller knows it failed
+      throw e
     } finally {
       loading.value = false
     }
