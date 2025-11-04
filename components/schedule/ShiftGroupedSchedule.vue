@@ -4,12 +4,12 @@
     <div
       v-for="shift in shiftsWithEmployees"
       :key="shift.id"
-      class="shift-group mb-8"
+      class="shift-group mb-3"
       :style="{ width: `${24 + 224 + (getShiftTimeBlocks(shift).length * 48)}px`, maxWidth: '100%' }"
     >
       <!-- Shift Header -->
       <div class="shift-header">
-        <h2 class="text-2xl font-bold text-gray-800 mb-4 pb-3 border-b border-gray-300">
+        <h2 class="text-lg font-bold text-gray-800 mb-2 pb-1.5 border-b border-gray-300">
           {{ shift.name }}
         </h2>
       </div>
@@ -48,11 +48,13 @@
           class="employee-row odd:bg-white even:bg-gray-50/40"
         >
           <!-- Employee name -->
-          <div class="employee-name flex items-center gap-2">
-            <span class="whitespace-nowrap truncate max-w-[200px]" :title="`${employee.last_name}, ${employee.first_name}`">{{ employee.last_name }}, {{ employee.first_name }}</span>
-            <span v-if="hasPTO(employee.id)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-700 border border-red-200">PTO</span>
-            <button @click="emit('addPTO', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors duration-150 shadow-sm">PTO</button>
-            <button @click="emit('addShiftSwap', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-blue-300 text-blue-700 hover:bg-blue-100 transition-colors duration-150 shadow-sm">SS</button>
+          <div class="employee-name flex items-center justify-between gap-2">
+            <span class="whitespace-nowrap truncate flex-1" :title="`${employee.last_name}, ${employee.first_name}`">{{ employee.last_name }}, {{ employee.first_name }}</span>
+            <div class="flex items-center gap-1 flex-shrink-0">
+              <span v-if="hasPTO(employee.id)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-700 border border-red-200">PTO</span>
+              <button @click="emit('addPTO', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors duration-150 shadow-sm">PTO</button>
+              <button @click="emit('addShiftSwap', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-blue-300 text-blue-700 hover:bg-blue-100 transition-colors duration-150 shadow-sm">SS</button>
+            </div>
           </div>
 
           <!-- Grid row background cells for alignment and interaction -->
@@ -65,9 +67,6 @@
                 v-for="timeBlock in getShiftTimeBlocks(shift)" 
                 :key="`cell-${employee.id}-${shift.id}-${timeBlock.time}`"
                 class="time-block-content select-none"
-                @mousedown.prevent="onSelectStart(employee, shift, timeBlock)"
-                @mouseenter="onSelectMove(shift, timeBlock)"
-                @mouseup="onSelectEnd()"
               >
                 <div class="assignment-cell-full">
                   <div 
@@ -96,7 +95,7 @@
               <div
                 v-for="range in getEmployeeAssignmentRanges(employee.id, shift)"
                 :key="`range-${employee.id}-${shift.id}-${range.start}-${range.end}-${range.label}`"
-                class="rounded-lg border flex items-center justify-start px-2 text-[11px] font-medium overflow-hidden transition-all duration-200"
+                class="rounded-lg border flex items-center justify-start px-1.5 text-[10px] font-medium overflow-hidden transition-all duration-200"
                 :style="{
                   gridColumn: `${range.start} / ${range.end}`,
                   backgroundColor: getJobFunctionColor(range.label),
@@ -108,15 +107,6 @@
                 <span class="truncate">{{ range.label }}</span>
               </div>
 
-              <!-- Selection overlay while dragging -->
-              <div
-                v-if="isSelecting && selectedEmployee?.id === employee.id && selectedShift?.id === shift.id && selectionRange"
-                class="rounded-lg border-2 border-blue-500 bg-blue-100/60 backdrop-blur-sm"
-                :style="{ 
-                  gridColumn: `${selectionRange.start} / ${selectionRange.end}`,
-                  boxShadow: '0 0 0 1px rgba(59, 130, 246, 0.2)'
-                }"
-              ></div>
             </div>
           </div>
         </div>
@@ -350,25 +340,6 @@ const assignmentStartTime = ref('')
 const assignmentEndTime = ref('')
 const selectedMeterNumber = ref('')
 
-// Drag-to-select state
-const isSelecting = ref(false)
-const selectionStartTime = ref('')
-const selectionEndTime = ref('')
-const selectionRange = computed(() => {
-  if (!isSelecting.value || !selectionStartTime.value || !selectionEndTime.value || !selectedShift.value) return null
-  const blocks = getShiftTimeBlocks(selectedShift.value)
-  const startIdx = Math.min(
-    Math.max(blocks.findIndex(b => b.time === selectionStartTime.value), 0),
-    blocks.length - 1
-  )
-  const endIdx = Math.min(
-    Math.max(blocks.findIndex(b => b.time === selectionEndTime.value), 0),
-    blocks.length - 1
-  )
-  const start = Math.min(startIdx, endIdx) + 1
-  const end = Math.max(startIdx, endIdx) + 2 // end is exclusive
-  return { start, end }
-})
 
 // Group employees by their assigned shifts
 const shiftsWithEmployees = computed(() => {
@@ -938,44 +909,6 @@ const closeAssignmentModal = () => {
   selectedMeterNumber.value = ''
 }
 
-// Drag-to-select handlers
-const onSelectStart = (employee: any, shift: any, timeBlock: any) => {
-  if (isBreakTime(timeBlock.time, shift)) return
-  isSelecting.value = true
-  selectedEmployee.value = employee
-  selectedShift.value = shift
-  selectionStartTime.value = timeBlock.time
-  selectionEndTime.value = timeBlock.time
-}
-
-const onSelectMove = (shift: any, timeBlock: any) => {
-  if (!isSelecting.value) return
-  if (!selectedShift.value || selectedShift.value.id !== shift.id) return
-  if (isBreakTime(timeBlock.time, shift)) return
-  selectionEndTime.value = timeBlock.time
-}
-
-const onSelectEnd = () => {
-  if (!isSelecting.value) return
-  isSelecting.value = false
-  // Open modal with prefilled start/end based on selection
-  if (!selectedEmployee.value || !selectedShift.value || !selectionRange.value) return
-  const blocks = getShiftTimeBlocks(selectedShift.value)
-  const startIdx = selectionRange.value.start - 1
-  const endIdxExclusive = selectionRange.value.end - 1
-  const startBlock = blocks[startIdx]
-  const endBlock = blocks[Math.min(endIdxExclusive - 1, blocks.length - 1)]
-  const startTime = startBlock?.time || ''
-  const endTime = endBlock
-    ? minutesToTime(timeToMinutes(endBlock.time) + 15)
-    : ''
-  
-  selectedTimeBlock.value = { time: startTime }
-  assignmentStartTime.value = startTime
-  assignmentEndTime.value = endTime
-  showAssignmentModal.value = true
-}
-
 const selectJobFunction = (jobFunction: any) => {
   selectedJobFunction.value = jobFunction
   // Clear meter number when selecting a non-meter job function
@@ -1156,14 +1089,14 @@ initializeScheduleData()
 
 .shift-group {
   @apply bg-white rounded-xl border border-gray-200;
-  padding: 24px 0 24px 24px; /* top right bottom left - only left/top/bottom padding, no right padding */
+  padding: 12px 0 12px 16px; /* top right bottom left - only left/top/bottom padding, no right padding */
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
   /* Width is set dynamically based on shift end_time via inline style */
   /* Content extends to the right edge of container (no right padding) */
 }
 
 .shift-header {
-  @apply mb-6;
+  @apply mb-3;
 }
 
 .shift-header h2 {
@@ -1179,7 +1112,7 @@ initializeScheduleData()
 }
 
 .employee-name-header {
-  @apply px-3 py-2 font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
+  @apply px-2 py-1.5 text-xs font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
   background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
   box-shadow: inset 0 -1px 0 0 rgba(0, 0, 0, 0.06);
   /* Exact width: 224px (14rem) to match employee-name */
@@ -1211,7 +1144,7 @@ initializeScheduleData()
 }
 
 .time-hour-marker {
-  @apply px-3 py-2 text-xs font-semibold text-gray-700 text-center flex items-center justify-center;
+  @apply px-2 py-1 text-[10px] font-semibold text-gray-700 text-center flex items-center justify-center;
   /* Modern styling with gradient and subtle shadow */
   background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
   border-right: 2px solid #d1d5db;
@@ -1238,7 +1171,7 @@ initializeScheduleData()
 }
 
 .employee-name {
-  @apply px-3 py-2 font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
+  @apply px-2 py-1.5 text-xs font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
   background: rgba(249, 250, 251, 0.5);
   /* Exact width: 224px (14rem) to match employee-name-header */
   width: 224px;
@@ -1270,7 +1203,7 @@ initializeScheduleData()
 }
 
 .assignment-clickable-full {
-  @apply w-full h-full px-0 py-0.5 text-xs border border-gray-300 cursor-pointer hover:bg-opacity-80 transition-all min-h-[28px] flex items-center justify-center;
+  @apply w-full h-full px-0 py-0.5 text-[10px] border border-gray-300 cursor-pointer hover:bg-opacity-80 transition-all min-h-[22px] flex items-center justify-center;
 }
 
 .assignment-start {
@@ -1294,12 +1227,12 @@ initializeScheduleData()
 }
 
 .break-cell-full {
-  @apply w-full h-full px-2 text-[11px] font-medium text-center cursor-not-allowed flex items-center justify-center;
+  @apply w-full h-full px-1.5 text-[10px] font-medium text-center cursor-not-allowed flex items-center justify-center;
   /* Match assignment block styling for consistent height */
 }
 
 .empty-cell-full {
-  @apply w-full h-full px-0 py-0.5 text-[10px] text-center border border-gray-200 min-h-[28px] flex items-center justify-center;
+  @apply w-full h-full px-0 py-0.5 text-[9px] text-center border border-gray-200 min-h-[22px] flex items-center justify-center;
 }
 
 .break-blocked {

@@ -1,107 +1,107 @@
 <template>
   <div class="min-h-screen bg-gray-50">
-    <div class="px-4 py-6">
+    <div class="px-3 py-2">
       <!-- Header -->
-      <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center justify-between mb-2">
         <div class="flex flex-col">
-          <h1 class="text-4xl font-bold text-gray-800">View/Edit Schedule</h1>
-          <p class="text-gray-600 mt-2">
+          <h1 class="text-2xl font-bold text-gray-800">View/Edit Schedule</h1>
+          <p class="text-gray-600 mt-0.5 text-sm">
             <ClientOnly>
               {{ formatDate(scheduleDate || '') }}
             </ClientOnly>
           </p>
           <!-- KPI strip under title -->
-          <div class="hidden md:flex gap-2 mt-2">
-            <div class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-center">
-              <div class="text-sm font-bold text-blue-600">{{ totalEmployees }}</div>
-              <div class="text-[11px] text-gray-600">Employees</div>
+          <div class="hidden md:flex gap-1.5 mt-1.5">
+            <div class="rounded border border-gray-200 bg-white px-2 py-1 text-center">
+              <div class="text-xs font-bold text-blue-600">{{ totalEmployees }}</div>
+              <div class="text-[10px] text-gray-600">Employees</div>
             </div>
-            <div class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-center">
-              <div class="text-sm font-bold text-green-600">{{ totalLaborHours }}h</div>
-              <div class="text-[11px] text-gray-600">Labor Hours</div>
+            <div class="rounded border border-gray-200 bg-white px-2 py-1 text-center">
+              <div class="text-xs font-bold text-green-600">{{ totalLaborHours }}h</div>
+              <div class="text-[10px] text-gray-600">Labor Hours</div>
             </div>
-            <div class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-center">
-              <div class="text-sm font-bold text-purple-600">{{ totalShifts }}</div>
-              <div class="text-[11px] text-gray-600">Active Shifts</div>
+            <div class="rounded border border-gray-200 bg-white px-2 py-1 text-center">
+              <div class="text-xs font-bold text-purple-600">{{ totalShifts }}</div>
+              <div class="text-[10px] text-gray-600">Active Shifts</div>
             </div>
-            <div class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-center">
-              <div class="text-sm font-bold text-orange-600">{{ unassignedEmployees }}</div>
-              <div class="text-[11px] text-gray-600">Unassigned</div>
+            <div class="rounded border border-gray-200 bg-white px-2 py-1 text-center">
+              <div class="text-xs font-bold text-orange-600">{{ unassignedEmployees }}</div>
+              <div class="text-[10px] text-gray-600">Unassigned</div>
             </div>
-            <div class="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-center">
-              <div class="text-sm font-bold text-red-600">{{ totalPTOHours }}</div>
-              <div class="text-[11px] text-gray-600">PTO Hours</div>
+            <div class="rounded border border-gray-200 bg-white px-2 py-1 text-center">
+              <div class="text-xs font-bold text-red-600">{{ totalPTOHours }}</div>
+              <div class="text-[10px] text-gray-600">PTO Hours</div>
             </div>
           </div>
         </div>
-        <div class="flex space-x-4">
+        <div class="flex space-x-2">
           <button 
             @click="saveSchedule" 
             :disabled="isSaving"
-            class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center text-sm px-3 py-1.5"
           >
-            <svg v-if="isSaving" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+            <svg v-if="isSaving" class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
             {{ isSaving ? 'Saving...' : 'Save Schedule' }}
           </button>
-          <button @click="handleLogout" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+          <button @click="handleLogout" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">
             Logout
           </button>
-          <NuxtLink to="/" class="btn-secondary">
+          <NuxtLink to="/" class="btn-secondary text-sm px-3 py-1.5">
             ← Back to Home
           </NuxtLink>
         </div>
       </div>
 
       <!-- Date Selector and Job Function Breakdown Row -->
-      <div class="flex gap-4 mb-4 items-stretch">
+      <div class="flex gap-3 mb-2 items-stretch">
         <!-- Date Selector (Left Side) -->
-        <div class="card flex-shrink-0 h-full" style="width: 400px;">
-          <div class="p-4">
-            <h2 class="text-lg font-bold text-gray-800 mb-3">Select Schedule Date</h2>
-            <div class="flex items-center space-x-4">
+        <div class="card flex-shrink-0 h-full" style="width: 320px;">
+          <div class="p-2.5">
+            <h2 class="text-base font-bold text-gray-800 mb-2">Select Schedule Date</h2>
+            <div class="flex items-center space-x-2">
               <div class="flex-1">
-                <label for="schedule-date" class="block text-sm font-medium text-gray-700 mb-2">
+                <label for="schedule-date" class="block text-xs font-medium text-gray-700 mb-1">
                   Schedule Date
                 </label>
                 <input
                   id="schedule-date"
                   v-model="scheduleDate"
                   type="date"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
-              <div class="flex flex-col space-y-2">
+              <div class="flex flex-col space-y-1.5">
                 <button 
                   @click="goToToday" 
-                  class="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-sm"
+                  class="px-2.5 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-xs"
                 >
                   Today
                 </button>
                 <button 
                   @click="goToYesterday" 
-                  class="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-sm"
+                  class="px-2.5 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors text-xs"
                 >
                   Yesterday
                 </button>
                 <button 
                   @click="goToTomorrow" 
-                  class="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-sm"
+                  class="px-2.5 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition-colors text-xs"
                 >
                   Tomorrow
                 </button>
               </div>
             </div>
-            <div class="mt-4 p-3 bg-blue-50 rounded-lg">
-              <p class="text-sm text-blue-800">
+            <div class="mt-2 p-2 bg-blue-50 rounded-lg">
+              <p class="text-xs text-blue-800">
                 <strong>Selected:</strong> 
                 <ClientOnly>
                   {{ formatDate(scheduleDate) }}
-                  <span v-if="isWeekend" class="ml-2 text-orange-600 font-medium">(Weekend)</span>
-                  <span v-if="isFuture" class="ml-2 text-green-600 font-medium">(Future)</span>
-                  <span v-if="isPast" class="ml-2 text-gray-600 font-medium">(Past)</span>
+                  <span v-if="isWeekend" class="ml-1.5 text-orange-600 font-medium">(Weekend)</span>
+                  <span v-if="isFuture" class="ml-1.5 text-green-600 font-medium">(Future)</span>
+                  <span v-if="isPast" class="ml-1.5 text-gray-600 font-medium">(Past)</span>
                 </ClientOnly>
               </p>
             </div>
@@ -109,83 +109,83 @@
         </div>
 
         <!-- Job Function Hours Breakdown / Dashboards (Right Side) -->
-        <div class="flex-1" :style="{ maxWidth: activeDashboard !== 'jobFunctions' ? `${64 + (meterTimeSlots.length * 24)}px` : 'none' }">
+        <div class="flex-1" :style="{ maxWidth: activeDashboard !== 'jobFunctions' ? `${112 + (meterTimeSlots.length * 24)}px` : 'none' }">
           <div class="card mb-0 h-full">
-            <div class="flex items-center mb-3">
-              <div class="flex flex-wrap gap-2">
+            <div class="flex items-center mb-2 p-2">
+              <div class="flex flex-wrap gap-1.5">
                 <button 
                   @click="activeDashboard = 'jobFunctions'"
-                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
                   :class="activeDashboard === 'jobFunctions' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   Job Functions
                 </button>
                 <button 
                   @click="activeDashboard = 'meter'"
-                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
                   :class="activeDashboard === 'meter' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   Meter
                 </button>
                 <button 
                   @click="activeDashboard = 'locus'"
-                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
                   :class="activeDashboard === 'locus' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   Locus
                 </button>
                 <button 
                   @click="activeDashboard = 'pick'"
-                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
                   :class="activeDashboard === 'pick' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   Pick
                 </button>
                 <button 
                   @click="activeDashboard = 'x4'"
-                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
                   :class="activeDashboard === 'x4' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   X4
                 </button>
                 <button 
                   @click="activeDashboard = 'em9'"
-                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
                   :class="activeDashboard === 'em9' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   EM9
                 </button>
                 <button 
                   @click="activeDashboard = 'speedcell'"
-                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
                   :class="activeDashboard === 'speedcell' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   Speedcell
                 </button>
                 <button 
                   @click="activeDashboard = 'helpdesk'"
-                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
                   :class="activeDashboard === 'helpdesk' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   Helpdesk
                 </button>
                 <button 
                   @click="activeDashboard = 'rtPick'"
-                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
                   :class="activeDashboard === 'rtPick' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   RT Pick
                 </button>
                 <button 
                   @click="activeDashboard = 'projects'"
-                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
                   :class="activeDashboard === 'projects' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   Projects
                 </button>
                 <button 
                   @click="activeDashboard = 'dgPick'"
-                  class="px-2 py-1 text-xs rounded border transition-colors"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
                   :class="activeDashboard === 'dgPick' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
                   DG Pick
@@ -193,21 +193,21 @@
               </div>
             </div>
             <!-- Job Function Hours Breakdown -->
-            <div v-if="activeDashboard === 'jobFunctions'" class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2">
-              <div v-for="jobFunction in jobFunctionHours" :key="jobFunction.name" class="text-center bg-gray-50 rounded-lg p-2 border border-gray-200 hover:shadow-sm transition-shadow">
-                <div class="flex items-center justify-center mb-1">
+            <div v-if="activeDashboard === 'jobFunctions'" class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-1.5 p-2">
+              <div v-for="jobFunction in jobFunctionHours" :key="jobFunction.name" class="text-center bg-gray-50 rounded-lg p-1.5 border border-gray-200 hover:shadow-sm transition-shadow">
+                <div class="flex items-center justify-center mb-0.5">
                   <div 
-                    class="w-3 h-3 rounded border-2 border-gray-400 mr-2 shadow-sm" 
+                    class="w-2 h-2 rounded border border-gray-400 mr-1.5 shadow-sm" 
                     :style="{ backgroundColor: jobFunction.color }"
                   ></div>
-                  <span class="text-xs font-semibold text-gray-800">{{ jobFunction.name }}</span>
+                  <span class="text-[10px] font-semibold text-gray-800">{{ jobFunction.name }}</span>
                 </div>
-                <div class="text-[11px] text-gray-600 mb-0.5">Scheduled Hours</div>
-                <div class="text-base font-bold text-gray-900 bg-white rounded py-0.5 px-2 shadow-sm mb-0.5">
+                <div class="text-[9px] text-gray-600 mb-0.5">Scheduled Hours</div>
+                <div class="text-sm font-bold text-gray-900 bg-white rounded py-0.5 px-1.5 shadow-sm mb-0.5">
                   {{ jobFunction.hours }}
                 </div>
-                <div class="text-[11px] text-gray-600 mb-0.5">Target Hours</div>
-                <div class="text-sm font-semibold text-blue-600 bg-blue-50 rounded py-0.5 px-2">
+                <div class="text-[9px] text-gray-600 mb-0.5">Target Hours</div>
+                <div class="text-xs font-semibold text-blue-600 bg-blue-50 rounded py-0.5 px-1.5">
                   {{ getTargetHours(jobFunction.id) }}
                 </div>
               </div>
@@ -217,7 +217,7 @@
               <div class="min-w-max">
                 <!-- Header Row -->
                 <div class="flex border-b border-gray-200 mb-0.5 bg-gradient-to-b from-gray-50 to-white sticky top-0 z-20 shadow-sm">
-                  <div class="w-16 px-1.5 py-1 text-[9px] font-semibold text-gray-700 bg-white border-r border-gray-200 sticky left-0 z-30">
+                  <div class="w-28 px-1.5 py-1 text-[9px] font-semibold text-gray-700 bg-white border-r border-gray-200 sticky left-0 z-30">
                     {{ activeDashboard === 'meter' ? 'Meter' : getDashboardLabel(activeDashboard) }}
                   </div>
                   <div 
@@ -244,7 +244,7 @@
                       class="flex border-b border-gray-100 hover:bg-gray-50/50 transition-colors"
                     >
                       <!-- Meter Label -->
-                      <div class="w-16 px-1.5 py-1 text-[9px] font-medium text-gray-700 bg-white border-r border-gray-200 sticky left-0 z-10 flex items-center">
+                      <div class="w-28 px-1.5 py-1 text-[9px] font-medium text-gray-700 bg-white border-r border-gray-200 sticky left-0 z-10 flex items-center">
                         <span class="text-gray-600">M</span>
                         <span class="ml-0.5 font-semibold text-gray-800">{{ meterNumber }}</span>
                       </div>
@@ -286,8 +286,8 @@
                       class="flex border-b border-gray-100 hover:bg-gray-50/50 transition-colors"
                     >
                       <!-- Employee Label -->
-                      <div class="w-16 px-1.5 py-1 text-[9px] font-medium text-gray-700 bg-white border-r border-gray-200 sticky left-0 z-10 flex items-center">
-                        <span class="text-gray-600 truncate">{{ employee.last_name }}, {{ employee.first_name.charAt(0) }}</span>
+                      <div class="w-28 px-1.5 py-1 text-[9px] font-medium text-gray-700 bg-white border-r border-gray-200 sticky left-0 z-10 flex items-center">
+                        <span class="text-gray-600 truncate">{{ employee.last_name }}, {{ employee.first_name }}</span>
                       </div>
 
                       <!-- Time Slots for this Employee -->
@@ -1299,7 +1299,7 @@ const getJobFunctionColor = (jobFunctions: string) => {
     'RT Pick': '#FFA500',
     'Pick': '#FFFF00',
     'Meter': '#87CEEB',
-    'Locus': '#FFFFFF',
+    'Locus': '#FFD700', // Gold color for better visibility
     'Helpdesk': '#FFD700',
     'Coordinator': '#C0C0C0',
     'Team Lead': '#000080'
@@ -1851,12 +1851,21 @@ const getEmployeesForJobFunction = (jobFunctionKey: string) => {
   Object.entries(scheduleAssignmentsData.value).forEach(([employeeId, employeeSchedule]: [string, any]) => {
     Object.entries(employeeSchedule).forEach(([timeSlot, data]: [string, any]) => {
       if (data && data.assignment) {
-        // Check if assignment matches the job function (case-insensitive, handle variations)
-        const assignment = String(data.assignment).toLowerCase()
-        const targetName = jobFunctionName.toLowerCase()
+        // Check if assignment matches the job function (case-insensitive)
+        const assignment = String(data.assignment).toLowerCase().trim()
+        const targetName = jobFunctionName.toLowerCase().trim()
         
-        if (assignment === targetName || assignment.includes(targetName)) {
-          assignedEmployees.add(employeeId)
+        // For Meter, allow variations like "Meter 1", "Meter 2", etc.
+        if (targetName === 'meter') {
+          if (assignment === 'meter' || assignment.startsWith('meter ')) {
+            assignedEmployees.add(employeeId)
+          }
+        } else {
+          // For all other job functions, use exact matching to avoid confusion
+          // e.g., "Pick" should NOT match "RT Pick", "DG Pick", etc.
+          if (assignment === targetName) {
+            assignedEmployees.add(employeeId)
+          }
         }
       }
     })
@@ -1884,27 +1893,17 @@ const isEmployeeAssignedToJobFunction = (employeeId: string, timeSlot: string, j
   if (!assignment || !assignment.assignment) return false
   
   const jobFunctionName = normalizeJobFunctionName(jobFunctionKey)
-  const assignmentName = String(assignment.assignment).toLowerCase()
-  const targetName = jobFunctionName.toLowerCase()
+  const assignmentName = String(assignment.assignment).toLowerCase().trim()
+  const targetName = jobFunctionName.toLowerCase().trim()
   
-  // Check if assignment matches (exact or contains)
-  if (assignmentName === targetName) return true
-  
-  // Handle variations (e.g., "Pick" might appear as "Pick 1" or "Pick 2")
-  if (assignmentName.includes(targetName)) return true
-  
-  // Also check if the assignment starts at this time or is continuing
-  if (assignment.start_time && assignment.end_time) {
-    const slotMinutes = timeToMinutesHelper(timeSlot)
-    const startMinutes = timeToMinutesHelper(assignment.start_time.substring(0, 5))
-    const endMinutes = timeToMinutesHelper(assignment.end_time.substring(0, 5))
-    
-    if (slotMinutes >= startMinutes && slotMinutes < endMinutes) {
-      return assignmentName === targetName || assignmentName.includes(targetName)
-    }
+  // For Meter, allow variations like "Meter 1", "Meter 2", etc.
+  if (targetName === 'meter') {
+    return assignmentName === 'meter' || assignmentName.startsWith('meter ')
   }
   
-  return false
+  // For all other job functions, use exact matching to avoid confusion
+  // e.g., "Pick" should NOT match "RT Pick", "DG Pick", etc.
+  return assignmentName === targetName
 }
 
 // Helper function to convert time to minutes

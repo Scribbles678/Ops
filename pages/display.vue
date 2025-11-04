@@ -1,22 +1,22 @@
 <template>
   <div class="min-h-screen bg-gray-900 text-white">
     <!-- Header -->
-    <div class="bg-gray-800 border-b border-gray-700 px-3 py-2">
+    <div class="bg-gray-800 border-b border-gray-700 px-1.5 py-0.5">
       <div class="flex justify-between items-center">
         <div>
-          <h1 class="text-lg font-bold">OPERATIONS SCHEDULE</h1>
-          <p class="text-gray-400 text-sm">{{ formattedDate }}</p>
+          <h1 class="text-[11px] font-bold">OPERATIONS SCHEDULE</h1>
+          <p class="text-gray-400 text-[9px]">{{ formattedDate }}</p>
         </div>
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-1.5">
           <div class="text-right">
-            <p class="text-xs text-gray-400">Last Updated</p>
-            <p class="text-sm font-semibold">{{ lastUpdated }}</p>
+            <p class="text-[8px] text-gray-400">Last Updated</p>
+            <p class="text-[9px] font-semibold">{{ lastUpdated }}</p>
           </div>
           <button
             @click="refreshData"
-            class="bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded-md transition flex items-center text-xs"
+            class="bg-gray-700 hover:bg-gray-600 px-1 py-0.5 rounded transition flex items-center text-[8px]"
           >
-            <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-2.5 h-2.5 mr-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
             Refresh
@@ -26,19 +26,19 @@
     </div>
 
     <!-- Loading State -->
-    <div v-if="loading" class="flex items-center justify-center h-64">
-      <p class="text-gray-400 text-xl">Loading schedule...</p>
+    <div v-if="loading" class="flex items-center justify-center h-32">
+      <p class="text-gray-400 text-sm">Loading schedule...</p>
     </div>
 
     <!-- Schedule Content -->
-    <div v-else class="p-2 space-y-2">
+    <div v-else class="p-0.5 space-y-0">
       <!-- Each Shift -->
       <div
         v-for="shift in shiftsWithAssignments"
         :key="shift.id"
-        class="bg-gray-800 rounded-md border border-gray-700 p-2"
+        class="bg-gray-800 rounded border border-gray-700 p-0.5"
       >
-        <h2 class="text-sm font-semibold mb-1 pb-1 border-b border-gray-700">
+        <h2 class="text-[9px] font-semibold mb-0 pb-0 border-b border-gray-700">
           {{ shift.name }}
         </h2>
 
@@ -47,19 +47,19 @@
           <div
             v-for="employee in shift.employees"
             :key="employee.id"
-            class="flex items-center gap-2 py-1"
+            class="flex items-center gap-0.5 py-0"
           >
             <!-- Employee name -->
-            <div class="w-40 text-white text-xs font-medium truncate">
+            <div class="w-28 text-white text-[8px] font-medium truncate flex-shrink-0">
               {{ employee.last_name }}, {{ employee.first_name }}
             </div>
             
             <!-- Inline assignment pills and break/lunch blocks -->
-            <div class="flex flex-wrap gap-1">
+            <div class="flex flex-wrap gap-0.5">
               <div
                 v-for="item in getEmployeeScheduleItems(employee)"
                 :key="item.id"
-                class="rounded-sm px-1 py-0.5 text-[9px] border border-opacity-50"
+                class="rounded px-0.5 py-0 text-[7px] border border-opacity-50 w-20 flex-shrink-0 flex items-center justify-center"
                 :style="item.isBreak ? {
                   backgroundColor: '#4B5563', // Dark gray for breaks/lunch
                   borderColor: '#6B7280',
@@ -70,30 +70,32 @@
                   color: getTextColor(item.assignment.job_function.color_code)
                 }"
               >
-                <span class="font-semibold mr-1">{{ item.isBreak ? item.label : item.assignment.job_function.name }}</span>
-                <span class="opacity-90">{{ item.timeRange }}</span>
+                <div class="flex flex-col items-center justify-center min-h-[14px]">
+                  <span class="font-semibold truncate leading-none">{{ item.isBreak ? item.label : item.assignment.job_function.name }}</span>
+                  <span class="opacity-90 text-[6px] truncate leading-none">{{ item.timeRange }}</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
         <!-- No employees message -->
-        <div v-else class="text-center py-4 text-gray-500 text-sm">
+        <div v-else class="text-center py-1 text-gray-500 text-[9px]">
           No staff scheduled for this shift
         </div>
       </div>
 
       <!-- No schedule message -->
-      <div v-if="shiftsWithAssignments.length === 0" class="text-center py-16">
-        <p class="text-gray-400 text-xl">No schedule available for today</p>
-        <NuxtLink to="/" class="text-blue-400 hover:text-blue-300 mt-4 inline-block">
+      <div v-if="shiftsWithAssignments.length === 0" class="text-center py-8">
+        <p class="text-gray-400 text-sm">No schedule available for today</p>
+        <NuxtLink to="/" class="text-blue-400 hover:text-blue-300 mt-2 inline-block text-[9px]">
           Go to Home Page
         </NuxtLink>
       </div>
     </div>
 
     <!-- Auto-refresh indicator -->
-    <div class="fixed bottom-2 right-2 bg-gray-800 px-2 py-1 rounded text-xs text-gray-400 border border-gray-700">
+    <div class="fixed bottom-0.5 right-0.5 bg-gray-800 px-0.5 py-0 rounded text-[7px] text-gray-400 border border-gray-700">
       Auto-refreshing every 2 minutes
     </div>
   </div>
