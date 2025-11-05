@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col relative">
+  <div class="h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col relative overflow-hidden">
     <!-- Logout Button -->
     <div class="absolute top-4 right-4 z-10">
       <button
@@ -12,19 +12,19 @@
         Logout
       </button>
     </div>
-    <div class="container mx-auto px-4 py-6 flex-1 flex flex-col items-center justify-center">
+    <div class="container mx-auto px-4 py-4 sm:py-6 flex-1 flex flex-col items-center justify-center">
       <!-- Header -->
-      <div class="text-center mb-4 flex-shrink-0">
-        <h1 class="text-3xl md:text-4xl font-bold text-gray-800 mb-2">
+      <div class="text-center mb-4 sm:mb-6 flex-shrink-0">
+        <h1 class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-800 mb-2">
           Operations Scheduling Tool
         </h1>
-        <p class="text-base md:text-lg text-gray-600">
+        <p class="text-sm sm:text-base md:text-lg text-gray-600">
           Distribution Center Schedule Management
         </p>
       </div>
 
       <!-- Main Menu Buttons -->
-      <div class="max-w-2xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div class="max-w-2xl w-full mx-auto grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 flex-shrink-0">
         <!-- Update Training Button -->
         <NuxtLink
           to="/training"
