@@ -150,33 +150,102 @@ export const useEmployees = () => {
     error.value = null
     
     try {
-      // Delete existing training records
-      const { error: deleteError } = await $supabase
-        .from('employee_training')
-        .delete()
-        .eq('employee_id', employeeId)
+      // Clean the array (remove duplicates, nulls, and invalid IDs)
+      const cleanJobFunctionIds = Array.from(new Set(jobFunctionIds.filter(id => id && id !== 'meter-group')))
       
-      if (deleteError) throw deleteError
+      // Try stored procedure first, fallback to direct approach if it fails
+      let useDirectMethod = false
       
-      // Insert new training records
-      if (jobFunctionIds.length > 0) {
-        const trainingRecords = jobFunctionIds.map(jfId => ({
-          employee_id: employeeId,
-          job_function_id: jfId
-        }))
+      try {
+        const { data, error: rpcError } = await $supabase.rpc('update_employee_training', {
+          p_employee_id: employeeId,
+          p_job_function_ids: cleanJobFunctionIds
+        })
         
-        const { error: insertError } = await $supabase
+        if (rpcError) {
+          console.error('RPC error, falling back to direct method:', rpcError)
+          useDirectMethod = true
+        } else if (data === null || data === false) {
+          console.error('Stored procedure returned false/null, falling back to direct method')
+          useDirectMethod = true
+        }
+      } catch (rpcException) {
+        console.error('RPC exception, falling back to direct method:', rpcException)
+        useDirectMethod = true
+      }
+      
+      // Fallback to direct method if RPC failed
+      if (useDirectMethod) {
+        // Delete all existing training records
+        const { error: deleteError } = await $supabase
           .from('employee_training')
-          .insert(trainingRecords)
+          .delete()
+          .eq('employee_id', employeeId)
         
-        if (insertError) throw insertError
+        if (deleteError) {
+          console.error('Delete error:', deleteError)
+          throw deleteError
+        }
+        
+        // Insert new training records
+        if (cleanJobFunctionIds.length > 0) {
+          const trainingRecords = cleanJobFunctionIds.map(jfId => ({
+            employee_id: employeeId,
+            job_function_id: jfId
+          }))
+          
+          const { error: insertError } = await $supabase
+            .from('employee_training')
+            .insert(trainingRecords)
+        
+          if (insertError) {
+            console.error('Insert error:', insertError)
+            throw insertError
+          }
+        }
+      }
+      
+      // Verify the save by fetching back (with retry for eventual consistency)
+      let verificationPassed = false
+      let retryCount = 0
+      const maxRetries = 3
+      
+      while (!verificationPassed && retryCount < maxRetries) {
+        if (retryCount > 0) {
+          await new Promise(resolve => setTimeout(resolve, 200 * retryCount))
+        }
+        
+        const { data: verifyData, error: verifyError } = await $supabase
+          .from('employee_training')
+          .select('job_function_id')
+          .eq('employee_id', employeeId)
+        
+        if (verifyError) {
+          console.error('Verify error:', verifyError)
+          throw verifyError
+        }
+        
+        const insertedIds = verifyData.map(r => r.job_function_id)
+        const expectedSet = new Set(cleanJobFunctionIds)
+        const actualSet = new Set(insertedIds)
+        
+        verificationPassed = expectedSet.size === actualSet.size && 
+          Array.from(expectedSet).every(id => actualSet.has(id))
+        
+        if (verificationPassed) {
+          break
+        }
+        retryCount++
+      }
+      
+      if (!verificationPassed) {
+        throw new Error(`Training verification failed after ${maxRetries} attempts. Expected ${cleanJobFunctionIds.length} records.`)
       }
       
       return true
     } catch (e) {
       error.value = e.message
       console.error('Error updating employee training:', e)
-      // Throw the error so the caller knows it failed
       throw e
     } finally {
       loading.value = false

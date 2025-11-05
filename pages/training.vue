@@ -291,15 +291,11 @@ const reloadTrainingData = async () => {
 onMounted(async () => {
   try {
     // Load core data in parallel for immediate UI display
-    const [employeesResult, jobFunctionsResult, shiftsResult] = await Promise.all([
+    await Promise.all([
       fetchEmployees(),
       fetchJobFunctions(),
       fetchShifts()
     ])
-    
-    console.log('Loaded employees:', employeesResult?.length || 0)
-    console.log('Loaded job functions:', jobFunctionsResult?.length || 0)
-    console.log('Loaded shifts:', shiftsResult?.length || 0)
     
     // Load training data and employee shifts - wait for them to complete
     // This ensures data is loaded before allowing edits
@@ -311,8 +307,6 @@ onMounted(async () => {
         console.error('Error loading employee shifts:', error)
       })
     ])
-    
-    console.log('Training data loaded:', Object.keys(employeeTraining.value).length, 'employees')
   } catch (error) {
     console.error('Error loading initial data:', error)
   }
@@ -321,7 +315,6 @@ onMounted(async () => {
 // Reload training data when employees list changes
 watch(() => employees.value.length, async (newLength, oldLength) => {
   if (newLength > 0 && newLength !== oldLength) {
-    console.log('Employees list changed, reloading training data...')
     await reloadTrainingData()
   }
 })
@@ -345,7 +338,6 @@ onBeforeRouteLeave((to, from, next) => {
 
 const loadTrainingData = async () => {
   if (employees.value.length === 0) {
-    console.log('No employees to load training data for')
     return
   }
   
@@ -354,11 +346,7 @@ const loadTrainingData = async () => {
   try {
     // Use bulk fetch for much faster loading
     const employeeIds = employees.value.map(emp => emp.id)
-    console.log('Loading training data for employees:', employeeIds.length)
-    
     const training = await getAllEmployeeTraining(employeeIds)
-    
-    console.log('Training data loaded:', Object.keys(training).length, 'employees with training records')
     
     // Clean and normalize the training data (remove any null/undefined values)
     const cleanedTraining: Record<string, string[]> = {}
@@ -368,10 +356,8 @@ const loadTrainingData = async () => {
     
     employeeTraining.value = cleanedTraining
     originalTraining.value = JSON.parse(JSON.stringify(cleanedTraining))
-    
-    console.log('Training data normalized and stored')
   } catch (error) {
-    console.error('Error in loadTrainingData:', error)
+    console.error('Error loading training data:', error)
     throw error
   } finally {
     trainingDataLoading.value = false
@@ -501,8 +487,6 @@ const toggleTraining = (employeeId: string, jobFunctionId: string, event?: Event
   const cleanTraining = Array.from(new Set(currentTraining.filter(id => id && id !== 'meter-group')))
   pendingChanges.set(employeeId, cleanTraining)
   
-  console.log(`Training toggle for ${employeeId}: ${jobFunctionId} = ${isNowChecked}, total: ${cleanTraining.length} items`)
-  
   // Update save button state
   updateSaveButtonState(employeeId)
 }
@@ -568,8 +552,6 @@ const saveEmployeeTraining = async (employeeId: string) => {
     // Ensure we have a clean array of IDs (no duplicates, no nulls)
     const cleanTraining = Array.from(new Set(newTraining.filter(id => id && id !== 'meter-group')))
     
-    console.log(`Saving training for employee ${employeeId}:`, cleanTraining)
-    
     const result = await updateEmployeeTraining(employeeId, cleanTraining)
     
     // Verify the save actually succeeded
@@ -577,43 +559,15 @@ const saveEmployeeTraining = async (employeeId: string) => {
       throw new Error('Save operation returned false')
     }
     
-    // Wait a moment for database to commit
-    await new Promise(resolve => setTimeout(resolve, 100))
+    // Reload training data from database to ensure consistency
+    await loadTrainingData()
     
-    // Verify the save by fetching the updated training data
-    const updatedTraining = await getEmployeeTraining(employeeId)
-    const cleanUpdatedTraining = Array.from(new Set(updatedTraining.filter(id => id)))
+    // Update reactive state with what was actually saved (from database)
+    const finalTraining = employeeTraining.value[employeeId] || []
     
-    // Compare as sets (order doesn't matter)
-    const savedSet = new Set(cleanTraining)
-    const fetchedSet = new Set(cleanUpdatedTraining)
-    
-    const trainingMatches = savedSet.size === fetchedSet.size && 
-      Array.from(savedSet).every(id => fetchedSet.has(id))
-    
-    if (!trainingMatches) {
-      console.error('Training data mismatch after save:', {
-        saved: Array.from(savedSet).sort(),
-        fetched: Array.from(fetchedSet).sort(),
-        savedCount: savedSet.size,
-        fetchedCount: fetchedSet.size
-      })
-      
-      // Reload training data to get the actual state
-      await loadTrainingData()
-      
-      // Update the reactive state with what was actually saved
-      employeeTraining.value[employeeId] = cleanUpdatedTraining
-      originalTraining.value[employeeId] = [...cleanUpdatedTraining]
-      
-      throw new Error(`Training data did not save correctly. Expected ${savedSet.size} items, got ${fetchedSet.size}. Please try again.`)
-    }
-    
-    console.log(`Training saved successfully for employee ${employeeId}`)
-    
-    // Update reactive state only after successful save
-    employeeTraining.value[employeeId] = [...cleanTraining]
-    originalTraining.value[employeeId] = [...cleanTraining]
+    // Update reactive state
+    employeeTraining.value[employeeId] = finalTraining
+    originalTraining.value[employeeId] = [...finalTraining]
     
     // Clear pending changes
     pendingChanges.delete(employeeId)
