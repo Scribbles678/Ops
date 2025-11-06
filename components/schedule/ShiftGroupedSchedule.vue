@@ -144,32 +144,32 @@
 
     <!-- Assignment Modal -->
     <div v-if="showAssignmentModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg p-6 w-full mx-4 max-w-2xl max-h-[90vh] overflow-y-auto">
-        <h3 class="text-xl font-bold mb-4">
+      <div class="bg-white rounded-lg p-4 w-full mx-4 max-w-2xl max-h-[90vh] overflow-y-auto">
+        <h3 class="text-lg font-bold mb-2">
           Assign Task to {{ selectedEmployee?.last_name }}, {{ selectedEmployee?.first_name }}
         </h3>
-        <p class="text-gray-600 mb-4">
+        <p class="text-sm text-gray-600 mb-3">
           Time: {{ selectedTimeBlock?.display }} ({{ selectedTimeBlock?.time }})
         </p>
         
         <!-- Job Function Selection -->
-        <div class="space-y-3 mb-6">
-          <label class="block text-sm font-medium text-gray-700">Select Job Function:</label>
-          <div class="grid grid-cols-2 gap-2">
+        <div class="space-y-2 mb-4">
+          <label class="block text-xs font-medium text-gray-700">Select Job Function:</label>
+          <div class="grid grid-cols-2 gap-1.5">
             <button
               v-for="jobFunction in availableJobFunctions"
               :key="jobFunction.id"
               @click="selectJobFunction(jobFunction)"
-              class="p-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-left"
-              :class="{ 'bg-blue-100 border-blue-500': selectedJobFunction?.id === jobFunction.id }"
+              class="p-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-left"
+              :class="{ 'bg-blue-600 border-blue-700 text-white': selectedJobFunction?.id === jobFunction.id }"
             >
               <div class="flex items-center justify-between">
                 <div class="flex items-center space-x-2">
                   <div 
-                    class="w-4 h-4 rounded border border-gray-300" 
+                    class="w-3 h-3 rounded border border-gray-300" 
                     :style="{ backgroundColor: jobFunction.color_code }"
                   ></div>
-                  <span class="text-sm font-medium">{{ jobFunction.name }}</span>
+                  <span class="text-xs font-medium">{{ jobFunction.name }}</span>
                 </div>
                 <div v-if="selectedEmployee && preferredAssignmentsMap?.[selectedEmployee.id]?.[jobFunction.id]" class="flex items-center space-x-1">
                   <span 
@@ -200,31 +200,31 @@
         </div>
 
         <!-- Meter Number Selection (only show when Meter is selected) -->
-        <div v-if="selectedJobFunction?.id === 'meter-group' || selectedJobFunction?.name === 'Meter'" class="space-y-3 mb-6">
-          <label class="block text-sm font-medium text-gray-700">Select Meter Number:</label>
-          <div v-if="allIndividualMeters.length > 0" class="grid grid-cols-4 gap-2">
+        <div v-if="selectedJobFunction?.id === 'meter-group' || selectedJobFunction?.name === 'Meter'" class="space-y-2 mb-4">
+          <label class="block text-xs font-medium text-gray-700">Select Meter Number:</label>
+          <div v-if="allIndividualMeters.length > 0" class="grid grid-cols-4 gap-1.5">
             <button
               v-for="meter in allIndividualMeters"
               :key="meter.id"
               @click="selectMeterNumber(meter)"
-              class="p-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-center"
-              :class="{ 'bg-blue-100 border-blue-500': selectedMeterNumber === meter.id }"
+              class="p-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-center"
+              :class="{ 'bg-blue-600 border-blue-700 text-white': selectedMeterNumber === meter.id }"
             >
-              <span class="text-sm font-medium">{{ meter.name }}</span>
+              <span class="text-xs font-medium">{{ meter.name }}</span>
             </button>
           </div>
-          <div v-else class="text-center py-4 text-gray-500">
-            <p class="text-sm">No individual meter entries found in database.</p>
-            <p class="text-xs mt-1">Please run the database migration to create Meter 1-20 entries.</p>
-            <div class="mt-3 grid grid-cols-4 gap-2">
+          <div v-else class="text-center py-3 text-gray-500">
+            <p class="text-xs">No individual meter entries found in database.</p>
+            <p class="text-[10px] mt-1">Please run the database migration to create Meter 1-20 entries.</p>
+            <div class="mt-2 grid grid-cols-4 gap-1.5">
               <button
                 v-for="meter in placeholderMeters"
                 :key="meter.id"
                 @click="selectMeterNumber(meter)"
-                class="p-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-center"
-                :class="{ 'bg-blue-100 border-blue-500': selectedMeterNumber === meter.id }"
+                class="p-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-center"
+                :class="{ 'bg-blue-600 border-blue-700 text-white': selectedMeterNumber === meter.id }"
               >
-                <span class="text-sm font-medium">{{ meter.name }}</span>
+                <span class="text-xs font-medium">{{ meter.name }}</span>
               </button>
             </div>
           </div>
@@ -232,46 +232,46 @@
         
 
         <!-- Time Range Selection -->
-        <div class="space-y-3 mb-6">
-          <div class="grid grid-cols-2 gap-4">
+        <div class="space-y-2 mb-4">
+          <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Start Time:</label>
+              <label class="block text-xs font-medium text-gray-700 mb-1">Start Time:</label>
               <input 
                 v-model="assignmentStartTime" 
                 type="time" 
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">End Time:</label>
+              <label class="block text-xs font-medium text-gray-700 mb-1">End Time:</label>
               <input 
                 v-model="assignmentEndTime" 
                 type="time" 
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
         </div>
 
         <!-- Action Buttons -->
-        <div class="flex justify-end space-x-3">
+        <div class="flex justify-end space-x-2">
           <button
             @click="closeAssignmentModal"
-            class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+            class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
           >
             Cancel
           </button>
           <button
             v-if="getAssignment(selectedEmployee?.id, selectedTimeBlock?.time)"
             @click="removeAssignment"
-            class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+            class="px-3 py-1.5 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700"
           >
             Remove Assignment
           </button>
           <button
             v-if="selectedJobFunction && assignmentStartTime && assignmentEndTime && (selectedJobFunction.id !== 'meter-group' || selectedMeterNumber || selectedJobFunction.name === 'Meter')"
             @click="saveAssignment"
-            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
             {{ getAssignment(selectedEmployee?.id, selectedTimeBlock?.time) ? 'Update Assignment' : 'Assign Task' }}
           </button>
