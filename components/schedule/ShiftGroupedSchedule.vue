@@ -5,7 +5,7 @@
       v-for="shift in shiftsWithEmployees"
       :key="shift.id"
       class="shift-group mb-3"
-      :style="{ width: `${24 + 224 + (getShiftTimeBlocks(shift).length * 48)}px`, maxWidth: '100%' }"
+      :style="{ width: `${16 + EMPLOYEE_COLUMN_WIDTH + (getShiftTimeBlocks(shift).length * BLOCK_WIDTH)}px`, maxWidth: '100%' }"
     >
       <!-- Shift Header -->
       <div class="shift-header">
@@ -287,6 +287,9 @@ import { ref, computed, watch, onMounted } from 'vue'
 const { getEmployeeTraining } = useEmployees()
 const { getGroupedJobFunctions, isMeterJobFunction } = useJobFunctions()
 const { isPreferredAssignment, getAssignmentPriority, isRequiredAssignment } = usePreferredAssignments()
+
+const BLOCK_WIDTH = 28
+const EMPLOYEE_COLUMN_WIDTH = 200
 
 // Optimize meter job functions with computed property to avoid repeated filtering
 const allIndividualMeters = computed(() => {
@@ -600,7 +603,7 @@ const getTextColor = (hex: string): string => {
 const getGridTemplateColumns = (shift: any) => {
   const cols = getShiftTimeBlocks(shift).length
   // Fixed column width for crisp alignment and predictable wrapping
-  return `repeat(${cols}, 48px)`
+  return `repeat(${cols}, ${BLOCK_WIDTH}px)`
 }
 
 const timeToColumnIndex = (time: string, shift: any) => {
@@ -616,6 +619,7 @@ const getEmployeeAssignmentRanges = (employeeId: string, shift: any) => {
 
   let currentLabel = ''
   let currentStart = -1
+  let currentEnd = -1
 
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]
@@ -627,23 +631,27 @@ const getEmployeeAssignmentRanges = (employeeId: string, shift: any) => {
       if (currentLabel === '') {
         currentLabel = label
         currentStart = i + 1 // 1-based start
+        currentEnd = i + 2
       } else if (label !== currentLabel) {
-        // close previous and start new
-        ranges.push({ start: currentStart, end: i + 1, label: currentLabel })
+        ranges.push({ start: currentStart, end: currentEnd, label: currentLabel })
         currentLabel = label
         currentStart = i + 1
+        currentEnd = i + 2
+      } else {
+        currentEnd = i + 2
       }
     } else {
       if (currentLabel !== '') {
-        ranges.push({ start: currentStart, end: i + 1, label: currentLabel })
+        ranges.push({ start: currentStart, end: currentEnd, label: currentLabel })
         currentLabel = ''
         currentStart = -1
+        currentEnd = -1
       }
     }
   }
 
   if (currentLabel !== '') {
-    ranges.push({ start: currentStart, end: blocks.length + 1, label: currentLabel })
+    ranges.push({ start: currentStart, end: currentEnd === -1 ? blocks.length + 1 : currentEnd, label: currentLabel })
   }
 
   return ranges
@@ -1112,13 +1120,12 @@ initializeScheduleData()
 }
 
 .employee-name-header {
-  @apply px-2 py-1.5 text-xs font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
+  @apply px-2 py-1 text-[11px] font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
   background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
   box-shadow: inset 0 -1px 0 0 rgba(0, 0, 0, 0.06);
-  /* Exact width: 224px (14rem) to match employee-name */
-  width: 224px;
-  min-width: 224px;
-  max-width: 224px;
+  width: 200px;
+  min-width: 200px;
+  max-width: 200px;
   box-sizing: border-box;
 }
 
@@ -1171,12 +1178,11 @@ initializeScheduleData()
 }
 
 .employee-name {
-  @apply px-2 py-1.5 text-xs font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
+  @apply px-2 py-1 text-[11px] font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
   background: rgba(249, 250, 251, 0.5);
-  /* Exact width: 224px (14rem) to match employee-name-header */
-  width: 224px;
-  min-width: 224px;
-  max-width: 224px;
+  width: 200px;
+  min-width: 200px;
+  max-width: 200px;
   box-sizing: border-box;
 }
 
@@ -1227,7 +1233,7 @@ initializeScheduleData()
 }
 
 .break-cell-full {
-  @apply w-full h-full px-1.5 text-[10px] font-medium text-center cursor-not-allowed flex items-center justify-center;
+  @apply w-full h-full px-1.5 text-[8px] md:text-[9px] font-medium text-center cursor-not-allowed flex items-center justify-center;
   /* Match assignment block styling for consistent height */
 }
 

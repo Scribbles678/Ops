@@ -1495,21 +1495,23 @@ const saveSchedule = async () => {
             continue
           }
 
-          if (
-            currentLabel === label &&
-            currentShift && currentShift.id === shift.id &&
-            currentJobFunctionId === jobFunction.id
-          ) {
-            // Continue the current range
+          const normalizedLabel = label.toLowerCase()
+          const normalizedCurrent = currentLabel.toLowerCase()
+
+          const canMerge =
+            normalizedLabel === normalizedCurrent ||
+            (normalizedLabel.startsWith('lunch') && normalizedCurrent.startsWith('lunch')) ||
+            (normalizedLabel.startsWith('break') && normalizedCurrent.startsWith('break'))
+
+          if (canMerge && currentShift && currentShift.id === shift.id && currentJobFunctionId === jobFunction.id) {
             continue
-          } else {
-            // Start a new range, close previous
-            if (currentLabel) flushRange(slot)
-            currentLabel = label
-            currentStartTime = slot
-            currentShift = shift
-            currentJobFunctionId = jobFunction.id
           }
+
+          if (currentLabel) flushRange(slot)
+          currentLabel = label
+          currentStartTime = slot
+          currentShift = shift
+          currentJobFunctionId = jobFunction.id
         } else {
           // Empty slot — close current range if any
           if (currentLabel) flushRange(slot)
