@@ -1,22 +1,22 @@
 <template>
-  <div class="min-h-screen bg-gray-50">
-    <div class="container mx-auto px-4 py-8">
+  <div class="details-page min-h-screen bg-gray-50">
+    <div class="container mx-auto px-4 py-6 md:py-8">
       <!-- Header -->
-      <div class="flex items-center justify-between mb-8">
-        <h1 class="text-4xl font-bold text-gray-800">Details & Settings</h1>
+      <div class="flex items-center justify-between mb-5">
+        <h1 class="text-2xl md:text-3xl font-semibold text-gray-800">Details & Settings</h1>
         <NuxtLink to="/" class="btn-secondary">
           ← Back to Home
         </NuxtLink>
       </div>
 
       <!-- Tabs -->
-      <div class="mb-6">
+      <div class="mb-5">
         <div class="border-b border-gray-200">
-          <nav class="-mb-px flex space-x-8">
+          <nav class="-mb-px flex flex-wrap gap-2 md:gap-4">
             <button
               @click="activeTab = 'job-functions'"
               :class="[
-                'py-4 px-1 border-b-2 font-medium text-sm transition',
+                'py-2 md:py-3 px-1 border-b-2 font-medium text-sm transition',
                 activeTab === 'job-functions'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -27,7 +27,7 @@
             <button
               @click="activeTab = 'shifts'"
               :class="[
-                'py-4 px-1 border-b-2 font-medium text-sm transition',
+                'py-2 md:py-3 px-1 border-b-2 font-medium text-sm transition',
                 activeTab === 'shifts'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -38,7 +38,7 @@
             <button
               @click="activeTab = 'productivity'"
               :class="[
-                'py-4 px-1 border-b-2 font-medium text-sm transition',
+                'py-2 md:py-3 px-1 border-b-2 font-medium text-sm transition',
                 activeTab === 'productivity'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -49,7 +49,7 @@
             <button
               @click="activeTab = 'cleanup'"
               :class="[
-                'py-4 px-1 border-b-2 font-medium text-sm transition',
+                'py-2 md:py-3 px-1 border-b-2 font-medium text-sm transition',
                 activeTab === 'cleanup'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -60,7 +60,7 @@
             <button
               @click="activeTab = 'target-hours'"
               :class="[
-                'py-4 px-1 border-b-2 font-medium text-sm transition',
+                'py-2 md:py-3 px-1 border-b-2 font-medium text-sm transition',
                 activeTab === 'target-hours'
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -76,41 +76,41 @@
       <div class="card">
         <!-- Job Functions Tab -->
         <div v-if="activeTab === 'job-functions'">
-          <div class="p-6">
-            <div class="flex justify-between items-center mb-6">
-              <h2 class="text-2xl font-bold text-gray-800">Job Functions</h2>
+          <div class="p-4 md:p-5">
+            <div class="flex justify-between items-center mb-4">
+              <h2 class="text-xl md:text-2xl font-semibold text-gray-800">Job Functions</h2>
               <button @click="openAddJobFunctionModal" class="btn-primary">
                 + Add New Job Function
               </button>
             </div>
 
             <!-- Loading State -->
-            <div v-if="loading" class="text-center py-8">
+            <div v-if="loading" class="text-center py-6">
               <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
               <p class="mt-2 text-gray-600">Loading job functions...</p>
             </div>
 
             <!-- Error State -->
-            <div v-else-if="error" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <div v-else-if="error" class="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm">
               <p class="text-red-600">Error loading job functions: {{ error }}</p>
             </div>
 
             <!-- Job Functions List -->
-            <div v-else class="space-y-4">
+            <div v-else class="space-y-3">
               <div 
                 v-for="jobFunction in jobFunctions" 
                 :key="jobFunction.id"
-                class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition"
+                class="border border-gray-200 rounded-lg p-3 md:p-4 hover:shadow-md transition"
               >
                 <div class="flex items-center justify-between">
-                  <div class="flex items-center space-x-4">
+                  <div class="flex items-center space-x-3 md:space-x-4">
                     <div 
-                      class="w-12 h-12 rounded border border-gray-300" 
+                      class="w-10 h-10 md:w-12 md:h-12 rounded border border-gray-300" 
                       :style="{ backgroundColor: jobFunction.color_code }"
                     ></div>
                     <div>
-                      <h3 class="text-lg font-semibold text-gray-800">{{ jobFunction.name }}</h3>
-                      <p class="text-sm text-gray-600">
+                      <h3 class="text-base md:text-lg font-semibold text-gray-800">{{ jobFunction.name }}</h3>
+                      <p class="text-xs md:text-sm text-gray-600">
                         Rate: {{ jobFunction.productivity_rate || 'N/A' }} 
                         {{ jobFunction.unit_of_measure ? jobFunction.unit_of_measure : '' }}
                       </p>
@@ -119,13 +119,13 @@
                   <div class="flex space-x-2">
                     <button 
                       @click="openEditJobFunctionModal(jobFunction)"
-                      class="px-4 py-2 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition"
+                      class="px-3 py-1.5 text-sm bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition"
                     >
                       Edit
                     </button>
                     <button 
                       @click="deleteJobFunctionHandler(jobFunction.id)"
-                      class="px-4 py-2 bg-red-100 text-red-600 rounded hover:bg-red-200 transition"
+                      class="px-3 py-1.5 text-sm bg-red-100 text-red-600 rounded hover:bg-red-200 transition"
                     >
                       Delete
                     </button>
@@ -138,36 +138,36 @@
 
         <!-- Shift Management Tab -->
         <div v-else-if="activeTab === 'shifts'">
-          <div class="p-6">
-            <div class="flex justify-between items-center mb-6">
-              <h2 class="text-2xl font-bold text-gray-800">Shift Management</h2>
+          <div class="p-4 md:p-5">
+            <div class="flex justify-between items-center mb-4">
+              <h2 class="text-xl md:text-2xl font-semibold text-gray-800">Shift Management</h2>
               <button @click="openAddShiftModal" class="btn-primary">
                 + Add New Shift
               </button>
             </div>
 
             <!-- Loading State -->
-            <div v-if="loading" class="text-center py-8">
+            <div v-if="loading" class="text-center py-6">
               <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
               <p class="mt-2 text-gray-600">Loading shifts...</p>
             </div>
 
             <!-- Error State -->
-            <div v-else-if="error" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <div v-else-if="error" class="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm">
               <p class="text-red-600">Error loading shifts: {{ error }}</p>
             </div>
 
             <!-- Shifts List -->
-            <div v-else class="space-y-4">
+            <div v-else class="space-y-3">
               <div 
                 v-for="shift in shifts" 
                 :key="shift.id"
-                class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition"
+                class="border border-gray-200 rounded-lg p-3 md:p-4 hover:shadow-md transition"
               >
                 <div class="flex justify-between items-start">
                   <div class="flex-1">
-                    <h3 class="text-lg font-semibold text-gray-800 mb-3">{{ shift.name }}</h3>
-                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                    <h3 class="text-base md:text-lg font-semibold text-gray-800 mb-2">{{ shift.name }}</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs md:text-sm">
                       <div>
                         <span class="font-medium text-gray-700">Start Time:</span>
                         <span class="text-gray-600 ml-2">{{ shift.start_time }}</span>
@@ -193,13 +193,13 @@
                   <div class="flex space-x-2 ml-4">
                     <button 
                       @click="openEditShiftModal(shift)"
-                      class="px-4 py-2 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition"
+                      class="px-3 py-1.5 text-sm bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition"
                     >
                       Edit
                     </button>
                     <button 
                       @click="deleteShiftHandler(shift.id)"
-                      class="px-4 py-2 bg-red-100 text-red-600 rounded hover:bg-red-200 transition"
+                      class="px-3 py-1.5 text-sm bg-red-100 text-red-600 rounded hover:bg-red-200 transition"
                     >
                       Delete
                     </button>
@@ -212,22 +212,22 @@
 
         <!-- Productivity Rates Tab -->
         <div v-else-if="activeTab === 'productivity'">
-          <div class="p-6">
-            <div class="flex justify-between items-center mb-6">
-              <h2 class="text-2xl font-bold text-gray-800">Productivity Rates</h2>
+          <div class="p-4 md:p-5">
+            <div class="flex justify-between items-center mb-4">
+              <h2 class="text-xl md:text-2xl font-semibold text-gray-800">Productivity Rates</h2>
               <button class="btn-primary">
                 Save Changes
               </button>
             </div>
 
             <!-- Loading State -->
-            <div v-if="loading" class="text-center py-8">
+            <div v-if="loading" class="text-center py-6">
               <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
               <p class="mt-2 text-gray-600">Loading productivity rates...</p>
             </div>
 
             <!-- Error State -->
-            <div v-else-if="error" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <div v-else-if="error" class="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm">
               <p class="text-red-600">Error loading productivity rates: {{ error }}</p>
             </div>
 
@@ -235,17 +235,17 @@
             <div v-else class="overflow-x-auto">
               <table class="w-full border-collapse">
                 <thead>
-                  <tr class="bg-gray-50">
-                    <th class="border border-gray-200 px-4 py-3 text-left text-sm font-medium text-gray-700">Job Function</th>
-                    <th class="border border-gray-200 px-4 py-3 text-left text-sm font-medium text-gray-700">Productivity Rate</th>
-                    <th class="border border-gray-200 px-4 py-3 text-left text-sm font-medium text-gray-700">Unit of Measure</th>
-                    <th class="border border-gray-200 px-4 py-3 text-left text-sm font-medium text-gray-700">Custom Unit</th>
+                  <tr class="bg-gray-50 text-xs md:text-sm">
+                    <th class="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700">Job Function</th>
+                    <th class="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700">Productivity Rate</th>
+                    <th class="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700">Unit of Measure</th>
+                    <th class="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700">Custom Unit</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-for="jobFunction in jobFunctions" :key="jobFunction.id">
-                    <td class="border border-gray-200 px-4 py-3">
-                      <div class="flex items-center space-x-3">
+                    <td class="border border-gray-200 px-3 py-2">
+                      <div class="flex items-center space-x-2 md:space-x-3">
                         <div 
                           class="w-4 h-4 rounded border border-gray-300" 
                           :style="{ backgroundColor: jobFunction.color_code }"
@@ -253,19 +253,19 @@
                         <span class="font-medium text-gray-800">{{ jobFunction.name }}</span>
                       </div>
                     </td>
-                    <td class="border border-gray-200 px-4 py-3">
+                    <td class="border border-gray-200 px-3 py-2">
                       <input 
                         type="number" 
                         :value="jobFunction.productivity_rate" 
                         @change="updateProductivityRate(jobFunction.id, $event.target.value)"
-                        class="w-20 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        class="w-20 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
                       />
                     </td>
-                    <td class="border border-gray-200 px-4 py-3">
+                    <td class="border border-gray-200 px-3 py-2">
                       <select 
                         :value="jobFunction.unit_of_measure" 
                         @change="updateUnitOfMeasure(jobFunction.id, $event.target.value)"
-                        class="px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        class="px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
                       >
                         <option value="">Select unit</option>
                         <option value="cartons/hour">Cartons/Hour</option>
@@ -279,13 +279,13 @@
                         <option value="custom">Custom</option>
                       </select>
                     </td>
-                    <td class="border border-gray-200 px-4 py-3">
+                    <td class="border border-gray-200 px-3 py-2">
                       <input 
                         type="text" 
                         :value="jobFunction.custom_unit" 
                         @change="updateCustomUnit(jobFunction.id, $event.target.value)"
                         placeholder="Custom unit" 
-                        class="w-32 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        class="w-32 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
                       />
                     </td>
                   </tr>
@@ -297,7 +297,7 @@
 
         <!-- Database Cleanup Tab -->
         <div v-else-if="activeTab === 'cleanup'">
-          <div class="p-6">
+          <div class="p-4 md:p-5">
             <div class="flex justify-between items-center mb-6">
               <h2 class="text-2xl font-bold text-gray-800">Database Cleanup</h2>
               <button 
@@ -313,15 +313,15 @@
             </div>
 
             <!-- Cleanup Statistics -->
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6">
               <div class="card">
                 <div class="flex items-center justify-between">
                   <div>
-                    <p class="text-sm font-medium text-gray-600">Current Schedules</p>
-                    <p class="text-2xl font-bold text-gray-900">{{ cleanupStats?.total_assignments || 0 }}</p>
+                    <p class="text-xs md:text-sm font-medium text-gray-600">Current Schedules</p>
+                    <p class="text-xl md:text-2xl font-bold text-gray-900">{{ cleanupStats?.total_assignments || 0 }}</p>
                   </div>
-                  <div class="bg-blue-100 rounded-full p-3">
-                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div class="bg-blue-100 rounded-full p-2.5 md:p-3">
+                    <svg class="w-5 h-5 md:w-6 md:h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                     </svg>
                   </div>
@@ -331,11 +331,11 @@
               <div class="card">
                 <div class="flex items-center justify-between">
                   <div>
-                    <p class="text-sm font-medium text-gray-600">Archived Schedules</p>
-                    <p class="text-2xl font-bold text-gray-900">{{ cleanupStats?.total_archived_assignments || 0 }}</p>
+                    <p class="text-xs md:text-sm font-medium text-gray-600">Archived Schedules</p>
+                    <p class="text-xl md:text-2xl font-bold text-gray-900">{{ cleanupStats?.total_archived_assignments || 0 }}</p>
                   </div>
-                  <div class="bg-yellow-100 rounded-full p-3">
-                    <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div class="bg-yellow-100 rounded-full p-2.5 md:p-3">
+                    <svg class="w-5 h-5 md:w-6 md:h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8l4 4-4 4m5-4h6" />
                     </svg>
                   </div>
@@ -345,11 +345,11 @@
               <div class="card">
                 <div class="flex items-center justify-between">
                   <div>
-                    <p class="text-sm font-medium text-gray-600">To Cleanup</p>
-                    <p class="text-2xl font-bold text-red-600">{{ cleanupStats?.assignments_to_cleanup || 0 }}</p>
+                    <p class="text-xs md:text-sm font-medium text-gray-600">To Cleanup</p>
+                    <p class="text-xl md:text-2xl font-bold text-red-600">{{ cleanupStats?.assignments_to_cleanup || 0 }}</p>
                   </div>
-                  <div class="bg-red-100 rounded-full p-3">
-                    <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div class="bg-red-100 rounded-full p-2.5 md:p-3">
+                    <svg class="w-5 h-5 md:w-6 md:h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                   </div>
@@ -359,13 +359,13 @@
               <div class="card">
                 <div class="flex items-center justify-between">
                   <div>
-                    <p class="text-sm font-medium text-gray-600">Date Range</p>
-                    <p class="text-sm font-bold text-gray-900">
+                    <p class="text-xs md:text-sm font-medium text-gray-600">Date Range</p>
+                    <p class="text-xs md:text-sm font-bold text-gray-900">
                       {{ formatDate(cleanupStats?.oldest_schedule_date) }} - {{ formatDate(cleanupStats?.newest_schedule_date) }}
                     </p>
                   </div>
-                  <div class="bg-green-100 rounded-full p-3">
-                    <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div class="bg-green-100 rounded-full p-2.5 md:p-3">
+                    <svg class="w-5 h-5 md:w-6 md:h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                   </div>
@@ -506,7 +506,7 @@
 
         <!-- Target Hours Tab -->
         <div v-else-if="activeTab === 'target-hours'">
-          <div class="p-6">
+          <div class="p-4 md:p-5">
             <div class="flex justify-between items-center mb-6">
               <h2 class="text-2xl font-bold text-gray-800">Target Hours</h2>
               <button 
@@ -591,7 +591,7 @@
 
     <!-- Notification Modal -->
     <div v-if="showNotificationModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+      <div class="bg-white rounded-lg p-4 md:p-5 max-w-md w-full mx-4 shadow-xl">
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-xl font-bold text-gray-800">{{ notificationType === 'success' ? '✅ Success' : '❌ Error' }}</h3>
           <button @click="closeNotificationModal" class="text-gray-400 hover:text-gray-600">
@@ -616,7 +616,7 @@
 
     <!-- Job Function Modal -->
     <div v-if="showJobFunctionModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+      <div class="bg-white rounded-lg p-4 md:p-5 max-w-md w-full mx-4">
         <h3 class="text-xl font-bold mb-4">
           {{ editingJobFunction ? 'Edit Job Function' : 'Add New Job Function' }}
         </h3>
@@ -706,7 +706,7 @@
 
     <!-- Shift Modal -->
     <div v-if="showShiftModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg p-6 max-w-lg w-full mx-4">
+      <div class="bg-white rounded-lg p-4 md:p-5 max-w-lg w-full mx-4">
         <h3 class="text-xl font-bold mb-4">
           {{ editingShift ? 'Edit Shift' : 'Add New Shift' }}
         </h3>

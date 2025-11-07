@@ -1,24 +1,24 @@
 <template>
   <div>
-    <div class="flex justify-between items-center mb-6">
-      <h2 class="text-2xl font-bold text-gray-800">Shift Management</h2>
+    <div class="flex justify-between items-center mb-3">
+      <h2 class="text-lg md:text-xl font-semibold text-gray-800">Shift Management</h2>
       <button @click="openAddModal" class="btn-primary">
         + Add New Shift
       </button>
     </div>
 
     <!-- Sample Shifts (for testing without database) -->
-    <div class="space-y-4">
+    <div class="space-y-2.5">
       <div
         v-for="shift in sampleShifts"
         :key="shift.id"
-        class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition"
+        class="border border-gray-200 rounded-lg p-2.5 md:p-3.5 hover:shadow-md transition"
       >
         <div class="flex justify-between items-start">
           <div class="flex-1">
-            <h3 class="text-lg font-semibold text-gray-800 mb-3">{{ shift.name }}</h3>
+            <h3 class="text-sm md:text-base font-semibold text-gray-800 mb-1.5">{{ shift.name }}</h3>
             
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-2.5 text-[11px] md:text-xs">
               <div>
                 <span class="font-medium text-gray-700">Start Time:</span>
                 <span class="text-gray-600 ml-2">{{ shift.start_time }}</span>
@@ -54,13 +54,13 @@
           <div class="flex space-x-2 ml-4">
             <button
               @click="openEditModal(shift)"
-              class="px-4 py-2 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition"
+              class="px-2.5 py-1 text-xs md:text-sm bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition"
             >
               Edit
             </button>
             <button
               @click="handleDelete(shift.id)"
-              class="px-4 py-2 bg-red-100 text-red-600 rounded hover:bg-red-200 transition"
+              class="px-2.5 py-1 text-xs md:text-sm bg-red-100 text-red-600 rounded hover:bg-red-200 transition"
             >
               Delete
             </button>
@@ -71,14 +71,14 @@
 
     <!-- Add/Edit Modal -->
     <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
-        <h3 class="text-xl font-bold mb-4">
+      <div class="bg-white rounded-lg p-4 md:p-5 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <h3 class="text-base md:text-lg font-semibold mb-3">
           {{ editingShift ? 'Edit Shift' : 'Add New Shift' }}
         </h3>
         
-        <form @submit.prevent="handleSubmit" class="space-y-4">
+        <form @submit.prevent="handleSubmit" class="space-y-3 text-xs md:text-sm">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Shift Name</label>
+            <label class="block font-medium text-gray-700 mb-1">Shift Name</label>
             <input
               v-model="formData.name"
               type="text"
@@ -88,9 +88,9 @@
             />
           </div>
 
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-2 gap-2.5">
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+              <label class="block font-medium text-gray-700 mb-1">Start Time</label>
               <input
                 v-model="formData.start_time"
                 type="time"
@@ -99,7 +99,7 @@
               />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+              <label class="block font-medium text-gray-700 mb-1">End Time</label>
               <input
                 v-model="formData.end_time"
                 type="time"
@@ -109,12 +109,12 @@
             </div>
           </div>
 
-          <div class="border-t pt-4">
-            <h4 class="font-medium text-gray-700 mb-3">Break Times (Optional)</h4>
+          <div class="border-t pt-3">
+            <h4 class="font-medium text-gray-700 mb-2 text-xs md:text-sm">Break Times (Optional)</h4>
             
-            <div class="grid grid-cols-2 gap-4 mb-3">
+            <div class="grid grid-cols-2 gap-2.5 mb-3">
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Break 1 Start</label>
+                <label class="block font-medium text-gray-700 mb-1">Break 1 Start</label>
                 <input
                   v-model="formData.break_1_start"
                   type="time"
@@ -122,7 +122,7 @@
                 />
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Break 1 End</label>
+                <label class="block font-medium text-gray-700 mb-1">Break 1 End</label>
                 <input
                   v-model="formData.break_1_end"
                   type="time"
@@ -131,9 +131,9 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-4 mb-3">
+            <div class="grid grid-cols-2 gap-2.5 mb-3">
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Break 2 Start</label>
+                <label class="block font-medium text-gray-700 mb-1">Break 2 Start</label>
                 <input
                   v-model="formData.break_2_start"
                   type="time"
@@ -141,7 +141,7 @@
                 />
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Break 2 End</label>
+                <label class="block font-medium text-gray-700 mb-1">Break 2 End</label>
                 <input
                   v-model="formData.break_2_end"
                   type="time"
@@ -150,9 +150,9 @@
               </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-2 gap-2.5">
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Lunch Start</label>
+                <label class="block font-medium text-gray-700 mb-1">Lunch Start</label>
                 <input
                   v-model="formData.lunch_start"
                   type="time"
@@ -160,7 +160,7 @@
                 />
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Lunch End</label>
+                <label class="block font-medium text-gray-700 mb-1">Lunch End</label>
                 <input
                   v-model="formData.lunch_end"
                   type="time"
@@ -170,11 +170,11 @@
             </div>
           </div>
 
-          <div class="flex justify-end space-x-3 pt-4">
+          <div class="flex justify-end space-x-2.5 pt-3">
             <button
               type="button"
               @click="closeModal"
-              class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              class="px-3 py-1.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
             >
               Cancel
             </button>

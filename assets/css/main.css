@@ -13,7 +13,7 @@
   }
   
   .card {
-    @apply bg-white rounded-lg shadow-md p-6 border border-gray-200;
+    @apply bg-white rounded-lg shadow-md p-4 md:p-6 border border-gray-200;
   }
   
   .schedule-cell {
@@ -27,5 +27,34 @@
   .break-cell {
     @apply bg-gray-200 text-gray-600 cursor-not-allowed;
   }
+}
+
+.details-page {
+  @apply text-xs md:text-sm;
+}
+
+.details-page h1 {
+  @apply text-xl md:text-2xl font-semibold;
+}
+
+.details-page h2 {
+  @apply text-lg font-semibold md:text-xl;
+}
+
+.details-page h3 {
+  @apply text-sm md:text-base font-semibold;
+}
+
+.details-page .card {
+  @apply p-3 md:p-4;
+}
+
+.details-page table th,
+.details-page table td {
+  @apply px-2.5 md:px-3.5 py-1.5 md:py-2;
+}
+
+.details-page button {
+  @apply text-xs md:text-sm;
 }
 
