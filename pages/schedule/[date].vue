@@ -435,8 +435,12 @@
       <!-- PTO Modal -->
       <div v-if="showPTOModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
-          <h3 class="text-xl font-bold mb-4">Add PTO</h3>
+          <h3 class="text-xl font-bold mb-4">Add Absence</h3>
           <div class="space-y-3">
+            <div v-if="existingPTORecord" class="p-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800">
+              Absence already exists for this employee on {{ formatDate(scheduleDate) }}.
+              Update the details below or remove it.
+            </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
               <input v-model="ptoForm.pto_date" type="date" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
@@ -455,21 +459,14 @@
                 <input v-model="ptoForm.end_time" type="time" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
               </div>
             </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
-              <select v-model="ptoForm.pto_type" class="w-full px-3 py-2 border border-gray-300 rounded-md">
-                <option value="vacation">Vacation</option>
-                <option value="sick">Sick</option>
-                <option value="leave">Leave</option>
-              </select>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
-              <input v-model="ptoForm.notes" type="text" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
-            </div>
-            <div class="flex justify-end gap-2 pt-2">
-              <button @click="closePTOModal" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-              <button @click="savePTO" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save PTO</button>
+            <div class="flex justify-between gap-2 pt-2">
+              <button v-if="existingPTORecord" @click="deleteCurrentPTO" class="px-4 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200">
+                Remove PTO
+              </button>
+              <div class="flex gap-2 ml-auto">
+                <button @click="closePTOModal" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
+                <button @click="savePTO" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save PTO</button>
+              </div>
             </div>
           </div>
         </div>
@@ -612,7 +609,8 @@ const {
   pto,
   ptoByEmployeeId,
   fetchPTOForDate,
-  createPTO
+  createPTO,
+  deletePTO
 } = usePTO()
 
 const {
@@ -1473,10 +1471,23 @@ const saveSchedule = async () => {
 
         if (label) {
           const jobFunction = jobFunctions.value.find((jf: any) => jf.name === label)
-          const shift = shifts.value.find((s: any) => {
-            const t = timeToMinutes(slot)
-            return t >= timeToMinutes(s.start_time) && t < timeToMinutes(s.end_time)
-          })
+
+          const slotMinutes = timeToMinutes(slot)
+          const employee = (employees.value as any[] | undefined)?.find((e: any) => e.id === employeeId) as any
+          const swap = (swapByEmployeeId.value as Record<string, any> | undefined)?.[employeeId]
+
+          let targetShiftId = swap ? swap.swapped_shift_id : (employee ? employee.shift_id : null)
+          let shift = targetShiftId 
+            ? (shifts.value as any[] | undefined)?.find((s: any) => s.id === targetShiftId) ?? null
+            : null
+
+          if (!shift) {
+            shift = (shifts.value as any[] | undefined)?.find((s: any) => {
+              const start = timeToMinutes(String(s.start_time ?? '').substring(0, 5))
+              const end = timeToMinutes(String(s.end_time ?? '').substring(0, 5))
+              return slotMinutes >= start && slotMinutes < end
+            }) || null
+          }
 
           if (!jobFunction || !shift) {
             // Cannot place this slot — end any current range and skip
@@ -1593,34 +1604,56 @@ const closeNotificationModal = () => {
 }
 
 const showPTOModal = ref(false)
+const existingPTORecord = ref<any>(null)
 const ptoForm = ref({
   employee_id: '',
   pto_date: '',
   full_day: true,
   start_time: '08:00',
-  end_time: '17:00',
-  pto_type: 'vacation',
-  notes: ''
+  end_time: '17:00'
 })
 
 const openPTOModal = (employee: any) => {
   ptoForm.value.employee_id = employee?.id || ''
   ptoForm.value.pto_date = scheduleDate.value
-  ptoForm.value.full_day = true
-  ptoForm.value.start_time = '08:00'
-  ptoForm.value.end_time = '17:00'
-  ptoForm.value.pto_type = 'vacation'
-  ptoForm.value.notes = ''
+  const existingRecord = ptoByEmployeeId.value?.[employee?.id || '']?.find(
+    (record: any) => record.pto_date === scheduleDate.value
+  ) || null
+  existingPTORecord.value = existingRecord
+
+  if (existingRecord) {
+    const isFullDay = !existingRecord.start_time && !existingRecord.end_time
+    ptoForm.value.full_day = isFullDay
+    ptoForm.value.start_time = existingRecord.start_time
+      ? existingRecord.start_time.substring(0, 5)
+      : '08:00'
+    ptoForm.value.end_time = existingRecord.end_time
+      ? existingRecord.end_time.substring(0, 5)
+      : '17:00'
+  } else {
+    ptoForm.value.full_day = true
+    ptoForm.value.start_time = '08:00'
+    ptoForm.value.end_time = '17:00'
+  }
   showPTOModal.value = true
 }
 
 const savePTO = async () => {
   if (!ptoForm.value.employee_id || !ptoForm.value.pto_date) return
+  if (!ptoForm.value.full_day && (!ptoForm.value.start_time || !ptoForm.value.end_time)) {
+    showNotification('Please provide start and end times for partial-day PTO.', 'error')
+    return
+  }
+  if (existingPTORecord.value?.id) {
+    const removed = await deletePTO(existingPTORecord.value.id)
+    if (!removed) {
+      showNotification('Failed to update PTO. Please try again.', 'error')
+      return
+    }
+  }
   const record: any = {
     employee_id: ptoForm.value.employee_id,
-    pto_date: ptoForm.value.pto_date,
-    pto_type: ptoForm.value.pto_type,
-    notes: ptoForm.value.notes || null
+    pto_date: ptoForm.value.pto_date
   }
   if (!ptoForm.value.full_day) {
     record.start_time = ptoForm.value.start_time + ':00'
@@ -1632,7 +1665,9 @@ const savePTO = async () => {
   const ok = await createPTO(record)
   if (ok) {
     await fetchPTOForDate(scheduleDate.value)
+    existingPTORecord.value = null
     showPTOModal.value = false
+    showNotification('PTO saved successfully.', 'success')
   } else {
     showNotification('Failed to create PTO. Please try again.', 'error')
   }
@@ -1640,6 +1675,20 @@ const savePTO = async () => {
 
 const closePTOModal = () => {
   showPTOModal.value = false
+  existingPTORecord.value = null
+}
+
+const deleteCurrentPTO = async () => {
+  if (!existingPTORecord.value?.id) return
+  const ok = await deletePTO(existingPTORecord.value.id)
+  if (ok) {
+    await fetchPTOForDate(scheduleDate.value)
+    existingPTORecord.value = null
+    showPTOModal.value = false
+    showNotification('PTO removed.', 'success')
+  } else {
+    showNotification('Failed to remove PTO. Please try again.', 'error')
+  }
 }
 
 // Shift Swap Modal state and actions

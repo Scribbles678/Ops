@@ -1431,8 +1431,20 @@ const minutesToTime = (minutes: number): string => {
 
 const applyAISchedule = async (schedule: any[]) => {
   try {
-    // Get shifts data
-    const shiftsData = await fetchShifts()
+    // Load reference data needed to derive shift assignments
+    const [shiftsData, employeesData] = await Promise.all([
+      fetchShifts(),
+      fetchEmployees()
+    ])
+
+    const employeeShiftMap = new Map<string, string | null>()
+    if (Array.isArray(employeesData)) {
+      employeesData.forEach((emp: any) => {
+        if (emp && emp.id) {
+          employeeShiftMap.set(emp.id, emp.shift_id || null)
+        }
+      })
+    }
     
     // Merge contiguous per-slot assignments into ranges by employee/job/shift
     const timeAsc = (a: string, b: string) => timeToMinutes(a) - timeToMinutes(b)
@@ -1443,10 +1455,19 @@ const applyAISchedule = async (schedule: any[]) => {
       .map(a => {
         const jf = jobFunctions.value.find((jf: any) => jf.name === a.job_function) as any
         if (!jf) return null
-        const shift = (shiftsData || []).find((s: any) => {
-          const t = timeToMinutes(a.start_time)
-          return t >= timeToMinutes(s.start_time) && t < timeToMinutes(s.end_time)
-        }) as any
+
+        const preferredShiftId = employeeShiftMap.get(a.employee_id) || null
+        let shift = preferredShiftId
+          ? (shiftsData || []).find((s: any) => s.id === preferredShiftId)
+          : null
+
+        if (!shift) {
+          shift = (shiftsData || []).find((s: any) => {
+            const t = timeToMinutes(a.start_time)
+            return t >= timeToMinutes(s.start_time) && t < timeToMinutes(s.end_time)
+          }) as any
+        }
+
         if (!shift) return null
         return { ...a, job_function_id: jf.id, shift_id: shift.id }
       })

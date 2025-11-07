@@ -207,7 +207,9 @@ const shiftsWithAssignments = computed(() => {
       if (hasAnyPTO) return
 
       // Get assignments for this employee and filter out those overlapping PTO
-      const employeeAssignmentsList = (employeeAssignments.get(employee.id) || []).filter((a: any) => !overlapsPTO(employee.id, String(a.start_time), String(a.end_time)))
+      const employeeAssignmentsList = (employeeAssignments.get(employee.id) || [])
+        .filter((a: any) => a.shift_id === targetShiftId)
+        .filter((a: any) => !overlapsPTO(employee.id, String(a.start_time), String(a.end_time)))
       
       // Create employee object with assignments
       const employeeWithAssignments = {
@@ -257,6 +259,7 @@ const consolidateAssignments = (assignments: any[]) => {
     } else if (
       currentBlock.employee_id === assignment.employee_id &&
       currentBlock.job_function_id === assignment.job_function_id &&
+      currentBlock.shift_id === assignment.shift_id &&
       currentBlock.end_time === assignment.start_time
     ) {
       // Extend the current block
