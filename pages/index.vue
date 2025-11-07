@@ -12,7 +12,7 @@
         Logout
       </button>
     </div>
-    <div class="container mx-auto px-4 py-6 sm:py-8 flex-1 flex flex-col items-center justify-center gap-6">
+    <div class="container mx-auto px-4 py-8 sm:py-10 flex-1 flex flex-col items-center justify-start">
       <!-- Header -->
       <div class="text-center mb-4 sm:mb-6 flex-shrink-0">
         <h1 class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-800 mb-2">
@@ -24,11 +24,11 @@
       </div>
 
       <!-- Main Menu Buttons -->
-      <div class="max-w-2xl w-full mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+      <div class="max-w-3xl w-full mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
         <!-- Update Training Button -->
         <NuxtLink
           to="/training"
-          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 aspect-[4/3] md:aspect-square flex items-center justify-center"
+          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 flex items-center justify-center"
         >
           <div class="flex flex-col items-center justify-center">
             <div class="bg-blue-100 rounded-full p-2 mb-2">
@@ -46,7 +46,7 @@
         <!-- Details Button -->
         <NuxtLink
           to="/details"
-          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 aspect-[4/3] md:aspect-square flex items-center justify-center"
+          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 flex items-center justify-center"
         >
           <div class="flex flex-col items-center justify-center">
             <div class="bg-purple-100 rounded-full p-2 mb-2">
@@ -65,7 +65,7 @@
         <!-- View/Edit Schedule Button -->
         <NuxtLink
           :to="`/schedule/${today}`"
-          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 aspect-[4/3] md:aspect-square flex items-center justify-center"
+          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 flex items-center justify-center"
         >
           <div class="flex flex-col items-center justify-center">
             <div class="bg-green-100 rounded-full p-2 mb-2">
@@ -83,7 +83,7 @@
         <!-- Make Tomorrow's Schedule Button -->
         <NuxtLink
           to="/schedule/tomorrow"
-          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 aspect-[4/3] md:aspect-square flex items-center justify-center"
+          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 flex items-center justify-center"
         >
           <div class="flex flex-col items-center justify-center">
             <div class="bg-orange-100 rounded-full p-2 mb-2">
