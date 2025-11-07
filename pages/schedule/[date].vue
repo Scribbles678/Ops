@@ -1403,15 +1403,12 @@ const minutesToTime = (minutes: number): string => {
 
 const clearAssignmentsForDate = async (date: string) => {
   try {
-    // Get all assignments for this date
-    const assignmentsToDelete = scheduleAssignments.value.filter(assignment => 
-      assignment.schedule_date === date
-    )
-    
-    // Delete each assignment
-    for (const assignment of assignmentsToDelete) {
-      await deleteAssignment(assignment.id)
-    }
+    const { error } = await $supabase
+      .from('schedule_assignments')
+      .delete()
+      .eq('schedule_date', date)
+
+    if (error) throw error
   } catch (error) {
     console.error('Error clearing assignments:', error)
     throw error
