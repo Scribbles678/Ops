@@ -1,5 +1,5 @@
 <template>
-  <div class="h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col relative overflow-hidden">
+  <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col relative overflow-x-hidden overflow-y-auto">
     <!-- Logout Button -->
     <div class="absolute top-4 right-4 z-10">
       <button
@@ -12,7 +12,7 @@
         Logout
       </button>
     </div>
-    <div class="container mx-auto px-4 py-4 sm:py-6 flex-1 flex flex-col items-center justify-center">
+    <div class="container mx-auto px-4 py-6 sm:py-8 flex-1 flex flex-col items-center justify-center gap-6">
       <!-- Header -->
       <div class="text-center mb-4 sm:mb-6 flex-shrink-0">
         <h1 class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-800 mb-2">
@@ -24,11 +24,11 @@
       </div>
 
       <!-- Main Menu Buttons -->
-      <div class="max-w-2xl w-full mx-auto grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 flex-shrink-0">
+      <div class="max-w-2xl w-full mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
         <!-- Update Training Button -->
         <NuxtLink
           to="/training"
-          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-4 aspect-square flex items-center justify-center"
+          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 aspect-[4/3] md:aspect-square flex items-center justify-center"
         >
           <div class="flex flex-col items-center justify-center">
             <div class="bg-blue-100 rounded-full p-2 mb-2">
@@ -46,7 +46,7 @@
         <!-- Details Button -->
         <NuxtLink
           to="/details"
-          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-4 aspect-square flex items-center justify-center"
+          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 aspect-[4/3] md:aspect-square flex items-center justify-center"
         >
           <div class="flex flex-col items-center justify-center">
             <div class="bg-purple-100 rounded-full p-2 mb-2">
@@ -65,7 +65,7 @@
         <!-- View/Edit Schedule Button -->
         <NuxtLink
           :to="`/schedule/${today}`"
-          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-4 aspect-square flex items-center justify-center"
+          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 aspect-[4/3] md:aspect-square flex items-center justify-center"
         >
           <div class="flex flex-col items-center justify-center">
             <div class="bg-green-100 rounded-full p-2 mb-2">
@@ -83,7 +83,7 @@
         <!-- Make Tomorrow's Schedule Button -->
         <NuxtLink
           to="/schedule/tomorrow"
-          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-4 aspect-square flex items-center justify-center"
+          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 aspect-[4/3] md:aspect-square flex items-center justify-center"
         >
           <div class="flex flex-col items-center justify-center">
             <div class="bg-orange-100 rounded-full p-2 mb-2">
@@ -100,7 +100,7 @@
       </div>
 
       <!-- Display Mode Link -->
-      <div class="text-center mt-4 md:mt-6 flex-shrink-0">
+      <div class="text-center mt-6 md:mt-8">
         <NuxtLink
           to="/display"
           class="inline-flex items-center px-6 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
