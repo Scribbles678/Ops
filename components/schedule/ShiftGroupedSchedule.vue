@@ -1225,8 +1225,9 @@ initializeScheduleData()
 
 /* Removed hourly-marker-content - was causing unnecessary blue vertical bars */
 
+/* Base container for every 15-minute block */
 .assignment-cell-full {
-  @apply w-full h-full;
+  @apply w-full h-full min-h-[28px] flex items-stretch;
 }
 
 .assignment-input,
@@ -1263,12 +1264,13 @@ initializeScheduleData()
 }
 
 .break-cell-full {
-  @apply w-full h-full px-1 text-[7px] md:text-[8px] font-medium text-center cursor-not-allowed flex items-center justify-center;
-  /* Match assignment block styling for consistent height */
+  @apply w-full h-full rounded px-1 text-[7px] md:text-[8px] font-semibold text-center cursor-not-allowed flex items-center justify-center text-white shadow-sm;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border: 1px solid rgba(37, 99, 235, 0.2);
 }
 
 .empty-cell-full {
-  @apply w-full h-full px-0 py-0.5 text-[8px] text-center border border-gray-200 min-h-[20px] flex items-center justify-center;
+  @apply w-full h-full rounded border border-gray-200 text-[8px] text-gray-400 flex items-center justify-center;
 }
 
 .break-blocked {

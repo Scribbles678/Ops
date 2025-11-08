@@ -1,103 +1,114 @@
 <template>
-  <div class="min-h-screen bg-gray-50">
-    <div class="container mx-auto px-4 py-8">
+  <div class="business-rules-page min-h-screen bg-gray-50">
+    <div class="container mx-auto px-3 md:px-4 py-4 md:py-6">
       <!-- Header -->
-      <div class="flex items-center justify-between mb-8">
+      <div class="flex items-center justify-between mb-4 md:mb-6">
         <div>
-          <h1 class="text-4xl font-bold text-gray-800">Business Rules</h1>
-          <p class="text-gray-600 mt-2">Configure AI schedule generation rules</p>
+          <h1 class="text-2xl md:text-3xl font-semibold text-gray-800 leading-tight">Business Rules</h1>
+          <p class="text-gray-600 mt-1 text-xs md:text-sm">Configure AI schedule generation rules</p>
         </div>
-        <div class="flex space-x-4">
-          <button @click="handleLogout" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
+        <div class="flex space-x-2 md:space-x-3">
+          <button @click="handleLogout" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs md:text-sm font-medium transition-colors">
             Logout
           </button>
-          <NuxtLink to="/" class="btn-secondary">
+          <NuxtLink to="/" class="btn-secondary-sm md:btn-secondary">
             ← Back to Home
           </NuxtLink>
         </div>
       </div>
 
       <!-- Add New Rule Button and Preferred Assignments Button -->
-      <div class="mb-6 flex space-x-3">
+      <div class="mb-4 flex flex-wrap gap-2">
         <button
           @click="openAddModal"
-          class="btn-primary flex items-center"
+          class="btn-primary-sm md:btn-primary flex items-center"
         >
-          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 md:w-5 md:h-5 mr-1.5 md:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
           </svg>
           Add Business Rule
         </button>
         <button
           @click="openPreferredAssignmentsModal"
-          class="btn-secondary flex items-center"
+          class="btn-secondary-sm md:btn-secondary flex items-center"
         >
-          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 md:w-5 md:h-5 mr-1.5 md:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
           </svg>
           Preferred Assignments
         </button>
       </div>
 
+      <!-- Success Toast -->
+      <div
+        v-if="showSuccessToast"
+        class="fixed top-20 right-6 z-50 bg-green-100 border border-green-200 text-green-700 px-3 py-2 rounded-lg shadow-md flex items-center space-x-2 text-sm md:text-base"
+      >
+        <svg class="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+        </svg>
+        <span class="font-medium">{{ successToastMessage }}</span>
+      </div>
+
       <!-- Rules Table -->
-      <div class="card">
-        <div v-if="loading" class="text-center py-8">
-          <p class="text-gray-600">Loading rules...</p>
+      <div class="card p-3 md:p-4">
+        <div v-if="loading" class="text-center py-5 text-sm text-gray-600">
+          Loading rules...
         </div>
         
-        <div v-else-if="error" class="text-center py-8">
-          <p class="text-red-600">Error: {{ error }}</p>
+        <div v-else-if="error" class="text-center py-5 text-sm text-red-600">
+          Error: {{ error }}
         </div>
 
-        <div v-else-if="businessRules.length === 0" class="text-center py-8">
-          <p class="text-gray-600">No business rules found. Click "Add Business Rule" to create one.</p>
+        <div v-else-if="businessRules.length === 0" class="text-center py-5 text-sm text-gray-600">
+          No business rules found. Click "Add Business Rule" to create one.
         </div>
 
-        <div v-else class="overflow-x-auto">
-          <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
+        <div v-else class="overflow-x-auto -mx-1 md:-mx-2">
+          <table class="min-w-full divide-y divide-gray-200 text-xs md:text-sm">
+            <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
               <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Function</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time Slot</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Min Staff</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Max Staff</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Block Size</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Priority</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Notes</th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th class="px-3 md:px-4 py-2 text-left">Job Function</th>
+                <th class="px-3 md:px-4 py-2 text-left">Time Slot</th>
+                <th class="px-3 md:px-4 py-2 text-left">Min Staff</th>
+                <th class="px-3 md:px-4 py-2 text-left">Max Staff</th>
+                <th class="px-3 md:px-4 py-2 text-left">Block Size</th>
+                <th class="px-3 md:px-4 py-2 text-left">Status</th>
+                <th class="px-3 md:px-4 py-2 text-left">Notes</th>
+                <th class="px-3 md:px-4 py-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
               <tr v-for="rule in sortedRules" :key="rule.id" :class="{ 'bg-gray-50': !rule.is_active }">
-                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ rule.job_function_name }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ rule.time_slot_start }} - {{ rule.time_slot_end }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                <td class="px-3 md:px-4 py-2 whitespace-nowrap font-medium text-gray-900">{{ rule.job_function_name }}</td>
+                <td class="px-3 md:px-4 py-2 whitespace-nowrap text-gray-600">
+                  {{ formatTime(rule.time_slot_start) }} - {{ formatTime(rule.time_slot_end) }}
+                </td>
+                <td class="px-3 md:px-4 py-2 whitespace-nowrap text-gray-600">
                   <span v-if="rule.min_staff !== null">{{ rule.min_staff }}</span>
                   <span v-else class="text-gray-400 italic">Global Max</span>
                 </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ rule.max_staff || '-' }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ rule.block_size_minutes }} min</td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ rule.priority }}</td>
-                <td class="px-6 py-4 whitespace-nowrap">
+                <td class="px-3 md:px-4 py-2 whitespace-nowrap text-gray-600">{{ rule.max_staff || '-' }}</td>
+                <td class="px-3 md:px-4 py-2 whitespace-nowrap text-gray-600">{{ rule.block_size_minutes }} min</td>
+                <td class="px-3 md:px-4 py-2 whitespace-nowrap">
                   <span 
-                    class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full"
-                    :class="rule.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'"
+                    class="px-1.5 py-0.5 inline-flex text-[10px] leading-4 font-semibold rounded-full"
+                    :class="rule.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'"
                   >
                     {{ rule.is_active ? 'Active' : 'Inactive' }}
                   </span>
                 </td>
-                <td class="px-6 py-4 text-sm text-gray-500">{{ rule.notes || '-' }}</td>
-                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                <td class="px-3 md:px-4 py-2 text-gray-600">{{ rule.notes || '-' }}</td>
+                <td class="px-3 md:px-4 py-2 whitespace-nowrap text-right font-medium space-x-2">
                   <button
                     @click="editRule(rule)"
-                    class="text-blue-600 hover:text-blue-900 mr-4"
+                    class="text-blue-600 hover:text-blue-800 text-xs"
                   >
                     Edit
                   </button>
                   <button
                     @click="deleteRule(rule.id)"
-                    class="text-red-600 hover:text-red-900"
+                    class="text-red-600 hover:text-red-800 text-xs"
                   >
                     Delete
                   </button>
@@ -110,18 +121,18 @@
 
       <!-- Add/Edit Modal -->
       <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-          <h3 class="text-xl font-bold mb-4">
+        <div class="bg-white rounded-lg p-4 md:p-5 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <h3 class="text-lg md:text-xl font-semibold mb-3">
             {{ editingRule ? 'Edit Business Rule' : 'Add Business Rule' }}
           </h3>
 
-          <div class="space-y-4">
+          <div class="space-y-3">
             <!-- Job Function -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Job Function Name</label>
+              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Job Function Name</label>
               <select
                 v-model="ruleForm.job_function_name"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 :disabled="editingRule !== null"
               >
                 <option value="">Select a job function...</option>
@@ -135,21 +146,21 @@
             </div>
 
             <!-- Time Slot -->
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-2 gap-3">
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Start Time</label>
                 <input
                   v-model="ruleForm.time_slot_start"
                   type="time"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 />
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">End Time</label>
+                <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">End Time</label>
                 <input
                   v-model="ruleForm.time_slot_end"
                   type="time"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 />
               </div>
             </div>
@@ -162,28 +173,28 @@
                   type="checkbox"
                   class="h-4 w-4 text-blue-600 border-gray-300 rounded"
                 />
-                <span class="ml-2 text-sm text-gray-700">Global Max Limit (no minimum staff)</span>
+                <span class="ml-2 text-xs md:text-sm text-gray-700">Global Max Limit (no minimum staff)</span>
               </label>
             </div>
 
             <!-- Min/Max Staff -->
-            <div class="grid grid-cols-2 gap-4" v-if="!isGlobalMax">
+            <div class="grid grid-cols-2 gap-3" v-if="!isGlobalMax">
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Min Staff</label>
+              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Min Staff</label>
                 <input
                   v-model.number="ruleForm.min_staff"
                   type="number"
                   min="0"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 />
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Max Staff (optional)</label>
+              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Max Staff (optional)</label>
                 <input
                   v-model.number="ruleForm.max_staff"
                   type="number"
                   min="0"
-                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                   placeholder="Leave empty for no limit"
                 />
               </div>
@@ -191,36 +202,36 @@
 
             <!-- Max Staff Only (for Global Max) -->
             <div v-if="isGlobalMax">
-              <label class="block text-sm font-medium text-gray-700 mb-1">Max Staff</label>
+              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Max Staff</label>
               <input
                 v-model.number="ruleForm.max_staff"
                 type="number"
                 min="1"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
               <p class="mt-1 text-xs text-gray-500">Global maximum staff for this job function across all time slots</p>
             </div>
 
             <!-- Block Size -->
             <div v-if="!isGlobalMax">
-              <label class="block text-sm font-medium text-gray-700 mb-1">Block Size (minutes)</label>
+              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Block Size (minutes)</label>
               <input
                 v-model.number="ruleForm.block_size_minutes"
                 type="number"
                 min="0"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 placeholder="e.g., 390 for 6.5 hours"
               />
             </div>
 
             <!-- Priority -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Priority</label>
               <input
                 v-model.number="ruleForm.priority"
                 type="number"
                 min="0"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
               <p class="mt-1 text-xs text-gray-500">Lower numbers are processed first. 0 = highest priority.</p>
             </div>
@@ -238,28 +249,28 @@
 
             <!-- Notes -->
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
               <textarea
                 v-model="ruleForm.notes"
                 rows="2"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 placeholder="e.g., Morning pick coverage"
               ></textarea>
             </div>
           </div>
 
           <!-- Modal Actions -->
-          <div class="flex justify-end space-x-3 mt-6">
+          <div class="flex justify-end space-x-2 mt-4">
             <button
               @click="closeModal"
-              class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              class="px-3 py-1.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm"
             >
               Cancel
             </button>
             <button
               @click="saveRule"
               :disabled="!ruleForm.job_function_name || (!isGlobalMax && (!ruleForm.min_staff || ruleForm.min_staff < 0)) || (isGlobalMax && !ruleForm.max_staff)"
-              class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
               {{ editingRule ? 'Update Rule' : 'Create Rule' }}
             </button>
@@ -513,6 +524,9 @@ const preferredAssignmentFormData = ref({
   notes: ''
 })
 const showSavedIcon = ref(false)
+const showSuccessToast = ref(false)
+const successToastMessage = ref('')
+let successTimeout: ReturnType<typeof setTimeout> | null = null
 
 const ruleForm = ref({
   job_function_name: '',
@@ -537,6 +551,18 @@ const sortedRules = computed(() => {
     return a.time_slot_start.localeCompare(b.time_slot_start)
   })
 })
+
+const formatTime = (time: string | null | undefined) => {
+  if (!time) return '-'
+  const [hourPart = '0', minutePart = '00'] = String(time).split(':')
+  let hour = parseInt(hourPart, 10)
+  if (Number.isNaN(hour)) return '-'
+  const minutes = minutePart.slice(0, 2)
+  const period = hour >= 12 ? 'PM' : 'AM'
+  hour = hour % 12
+  if (hour === 0) hour = 12
+  return `${hour}:${minutes} ${period}`
+}
 
 const sortedJobFunctions = computed(() => {
   return [...(jobFunctions.value || [])]
@@ -617,10 +643,10 @@ const saveRule = async () => {
   try {
     if (editingRule.value) {
       await updateBusinessRule(editingRule.value.id, ruleData)
-      alert('Business rule updated successfully!')
+      showSuccessIndicator('Business rule updated')
     } else {
       await createBusinessRule(ruleData)
-      alert('Business rule created successfully!')
+      showSuccessIndicator('Business rule created')
     }
     closeModal()
   } catch (e: any) {
@@ -629,20 +655,28 @@ const saveRule = async () => {
 }
 
 const deleteRule = async (id: string) => {
-  if (!confirm('Are you sure you want to delete this business rule?')) {
-    return
-  }
-
   try {
     const success = await deleteBusinessRule(id)
-    if (success) {
-      alert('Business rule deleted successfully!')
-    } else {
+    if (!success) {
       alert('Error deleting rule. Please try again.')
+      return
     }
+    businessRules.value = businessRules.value.filter(rule => rule.id !== id)
+    showSuccessIndicator('Business rule deleted')
   } catch (e: any) {
     alert(`Error deleting rule: ${e.message || 'Unknown error'}`)
   }
+}
+
+const showSuccessIndicator = (message: string) => {
+  successToastMessage.value = message
+  showSuccessToast.value = true
+  if (successTimeout) {
+    clearTimeout(successTimeout)
+  }
+  successTimeout = setTimeout(() => {
+    showSuccessToast.value = false
+  }, 2000)
 }
 
 const handleLogout = async () => {
@@ -733,6 +767,12 @@ onMounted(async () => {
     fetchJobFunctions(),
     fetchEmployees(false) // Get all employees including inactive
   ])
+})
+
+onBeforeUnmount(() => {
+  if (successTimeout) {
+    clearTimeout(successTimeout)
+  }
 })
 </script>
 
