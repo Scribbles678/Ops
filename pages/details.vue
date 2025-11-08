@@ -36,17 +36,6 @@
               Shift Management
             </button>
             <button
-              @click="activeTab = 'productivity'"
-              :class="[
-                'py-2 md:py-3 px-1 border-b-2 font-medium text-sm transition',
-                activeTab === 'productivity'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              ]"
-            >
-              Productivity Rates
-            </button>
-            <button
               @click="activeTab = 'cleanup'"
               :class="[
                 'py-2 md:py-3 px-1 border-b-2 font-medium text-sm transition',
@@ -111,8 +100,14 @@
                     <div>
                       <h3 class="text-base md:text-lg font-semibold text-gray-800">{{ jobFunction.name }}</h3>
                       <p class="text-xs md:text-sm text-gray-600">
-                        Rate: {{ jobFunction.productivity_rate || 'N/A' }} 
-                        {{ jobFunction.unit_of_measure ? jobFunction.unit_of_measure : '' }}
+                        <span class="font-medium text-gray-700">Rate:</span>
+                        <span v-if="jobFunction.productivity_rate !== null && jobFunction.productivity_rate !== undefined">
+                          {{ jobFunction.productivity_rate }}
+                        </span>
+                        <span v-else>N/A</span>
+                        <span v-if="getJobFunctionUnitLabel(jobFunction)" class="ml-1">
+                          {{ getJobFunctionUnitLabel(jobFunction) }}
+                        </span>
                       </p>
                     </div>
                   </div>
@@ -206,91 +201,6 @@
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Productivity Rates Tab -->
-        <div v-else-if="activeTab === 'productivity'">
-          <div class="p-4 md:p-5">
-            <div class="flex justify-between items-center mb-4">
-              <h2 class="text-xl md:text-2xl font-semibold text-gray-800">Productivity Rates</h2>
-              <button class="btn-primary">
-                Save Changes
-              </button>
-            </div>
-
-            <!-- Loading State -->
-            <div v-if="loading" class="text-center py-6">
-              <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              <p class="mt-2 text-gray-600">Loading productivity rates...</p>
-            </div>
-
-            <!-- Error State -->
-            <div v-else-if="error" class="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-sm">
-              <p class="text-red-600">Error loading productivity rates: {{ error }}</p>
-            </div>
-
-            <!-- Productivity Rates Table -->
-            <div v-else class="overflow-x-auto">
-              <table class="w-full border-collapse">
-                <thead>
-                  <tr class="bg-gray-50 text-xs md:text-sm">
-                    <th class="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700">Job Function</th>
-                    <th class="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700">Productivity Rate</th>
-                    <th class="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700">Unit of Measure</th>
-                    <th class="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700">Custom Unit</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="jobFunction in jobFunctions" :key="jobFunction.id">
-                    <td class="border border-gray-200 px-3 py-2">
-                      <div class="flex items-center space-x-2 md:space-x-3">
-                        <div 
-                          class="w-4 h-4 rounded border border-gray-300" 
-                          :style="{ backgroundColor: jobFunction.color_code }"
-                        ></div>
-                        <span class="font-medium text-gray-800">{{ jobFunction.name }}</span>
-                      </div>
-                    </td>
-                    <td class="border border-gray-200 px-3 py-2">
-                      <input 
-                        type="number" 
-                        :value="jobFunction.productivity_rate" 
-                        @change="updateProductivityRate(jobFunction.id, $event.target.value)"
-                        class="w-20 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
-                      />
-                    </td>
-                    <td class="border border-gray-200 px-3 py-2">
-                      <select 
-                        :value="jobFunction.unit_of_measure" 
-                        @change="updateUnitOfMeasure(jobFunction.id, $event.target.value)"
-                        class="px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
-                      >
-                        <option value="">Select unit</option>
-                        <option value="cartons/hour">Cartons/Hour</option>
-                        <option value="boxes/hour">Boxes/Hour</option>
-                        <option value="units/hour">Units/Hour</option>
-                        <option value="pieces/hour">Pieces/Hour</option>
-                        <option value="orders/hour">Orders/Hour</option>
-                        <option value="pallets/hour">Pallets/Hour</option>
-                        <option value="cases/hour">Cases/Hour</option>
-                        <option value="items/hour">Items/Hour</option>
-                        <option value="custom">Custom</option>
-                      </select>
-                    </td>
-                    <td class="border border-gray-200 px-3 py-2">
-                      <input 
-                        type="text" 
-                        :value="jobFunction.custom_unit" 
-                        @change="updateCustomUnit(jobFunction.id, $event.target.value)"
-                        placeholder="Custom unit" 
-                        class="w-32 px-2 py-1 border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
-                      />
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
             </div>
           </div>
         </div>
@@ -641,7 +551,7 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Productivity Rate</label>
             <input
-              v-model="jobFunctionFormData.productivity_rate"
+              v-model.number="jobFunctionFormData.productivity_rate"
               type="number"
               min="0"
               class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -904,6 +814,14 @@ const jobFunctionFormData = ref({
   sort_order: 0
 })
 
+const getJobFunctionUnitLabel = (jobFunction) => {
+  if (!jobFunction) return ''
+  if (jobFunction.unit_of_measure === 'custom') {
+    return jobFunction.custom_unit || ''
+  }
+  return jobFunction.unit_of_measure || ''
+}
+
 const shiftFormData = ref({
   name: '',
   start_time: '',
@@ -958,6 +876,9 @@ const closeJobFunctionModal = () => {
 
 const handleJobFunctionSubmit = async () => {
   try {
+    if (jobFunctionFormData.value.unit_of_measure !== 'custom') {
+      jobFunctionFormData.value.custom_unit = ''
+    }
     if (editingJobFunction.value) {
       await updateJobFunction(editingJobFunction.value.id, jobFunctionFormData.value)
     } else {
@@ -1032,19 +953,6 @@ const deleteShiftHandler = async (shiftId) => {
   if (confirm('Are you sure you want to delete this shift?')) {
     await deleteShift(shiftId)
   }
-}
-
-// Productivity rates functions
-const updateProductivityRate = async (jobFunctionId, rate) => {
-  await updateJobFunction(jobFunctionId, { productivity_rate: rate })
-}
-
-const updateUnitOfMeasure = async (jobFunctionId, unit) => {
-  await updateJobFunction(jobFunctionId, { unit_of_measure: unit })
-}
-
-const updateCustomUnit = async (jobFunctionId, customUnit) => {
-  await updateJobFunction(jobFunctionId, { custom_unit: customUnit })
 }
 
 // Target hours functions

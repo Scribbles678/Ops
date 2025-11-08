@@ -354,8 +354,18 @@ const loadTrainingData = async () => {
       cleanedTraining[empId] = Array.from(new Set(training[empId].filter(id => id && id !== 'meter-group')))
     })
     
-    employeeTraining.value = cleanedTraining
-    originalTraining.value = JSON.parse(JSON.stringify(cleanedTraining))
+    // Ensure every employee has an entry (even if no training assigned)
+    const withDefaults: Record<string, string[]> = {}
+    employees.value.forEach(emp => {
+      withDefaults[emp.id] = cleanedTraining[emp.id] ? [...cleanedTraining[emp.id]] : []
+    })
+    
+    employeeTraining.value = withDefaults
+    originalTraining.value = JSON.parse(JSON.stringify(withDefaults))
+    
+    // Clear any stale pending state or save indicators
+    pendingChanges.clear()
+    saveStates.clear()
   } catch (error) {
     console.error('Error loading training data:', error)
     throw error

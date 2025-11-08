@@ -122,22 +122,40 @@ export const useEmployees = () => {
 
   const getAllEmployeeTraining = async (employeeIds) => {
     try {
-      const { data, error: fetchError } = await $supabase
-        .from('employee_training')
-        .select('employee_id, job_function_id')
-        .in('employee_id', employeeIds)
-      
-      if (fetchError) throw fetchError
-      
-      // Group by employee_id
-      const trainingMap = {}
-      data.forEach(t => {
-        if (!trainingMap[t.employee_id]) {
-          trainingMap[t.employee_id] = []
+      if (!employeeIds || employeeIds.length === 0) return {}
+
+      const batchSize = 1000
+      let from = 0
+      let hasMore = true
+      let allRows: Array<{ employee_id: string; job_function_id: string }> = []
+
+      while (hasMore) {
+        const { data, error: fetchError } = await $supabase
+          .from('employee_training')
+          .select('employee_id, job_function_id')
+          .in('employee_id', employeeIds)
+          .order('employee_id', { ascending: true })
+          .range(from, from + batchSize - 1)
+
+        if (fetchError) throw fetchError
+
+        if (!data || data.length === 0) {
+          hasMore = false
+        } else {
+          allRows = allRows.concat(data)
+          hasMore = data.length === batchSize
+          from += batchSize
         }
-        trainingMap[t.employee_id].push(t.job_function_id)
+      }
+
+      const trainingMap: Record<string, string[]> = {}
+      allRows.forEach(row => {
+        if (!trainingMap[row.employee_id]) {
+          trainingMap[row.employee_id] = []
+        }
+        trainingMap[row.employee_id].push(row.job_function_id)
       })
-      
+
       return trainingMap
     } catch (e) {
       console.error('Error fetching all employee training:', e)
