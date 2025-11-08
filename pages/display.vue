@@ -1,102 +1,79 @@
 <template>
-  <div class="min-h-screen bg-gray-900 text-white">
-    <!-- Header -->
-    <div class="bg-gray-800 border-b border-gray-700 px-1.5 py-0.5">
-      <div class="flex justify-between items-center">
-        <div class="flex items-center gap-2">
-          <h1 class="text-[11px] font-bold">OPERATIONS SCHEDULE</h1>
-          <p class="text-gray-400 text-[9px]">{{ formattedDate }}</p>
-        </div>
-        <div class="flex items-center space-x-1.5">
-          <div class="text-right">
-            <p class="text-[8px] text-gray-400">Last Updated</p>
-            <p class="text-[9px] font-semibold">{{ lastUpdated }}</p>
-          </div>
-          <button
-            @click="refreshData"
-            class="bg-gray-700 hover:bg-gray-600 px-1 py-0.5 rounded transition flex items-center text-[8px]"
-          >
-            <svg class="w-2.5 h-2.5 mr-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Refresh
-          </button>
+  <div class="display-page min-h-screen bg-gradient-to-b from-gray-950 via-black to-gray-950 text-white text-[10px] md:text-[11px]">
+    <div class="max-w-[1400px] mx-auto px-2.5 py-2 space-y-1.5">
+      <!-- Loading -->
+      <div v-if="loading" class="flex items-center justify-center h-[60vh]">
+        <div class="flex flex-col items-center gap-2 text-white/60">
+          <svg class="animate-spin h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <p>Syncing schedule data...</p>
         </div>
       </div>
-    </div>
 
-    <!-- Loading State -->
-    <div v-if="loading" class="flex items-center justify-center h-32">
-      <p class="text-gray-400 text-sm">Loading schedule...</p>
-    </div>
+      <!-- Schedule -->
+      <div v-else class="space-y-1.5">
+        <section
+          v-for="shift in shiftsWithAssignments"
+          :key="shift.id"
+          class="rounded-md border border-white/10 bg-white/5 backdrop-blur-sm shadow-[0_4px_12px_rgba(0,0,0,0.25)] overflow-hidden"
+        >
+          <div class="flex items-center justify-between px-2.5 py-1 border-b border-white/10 bg-gradient-to-r from-white/6 to-transparent">
+            <h2 class="text-[10px] font-semibold tracking-wide text-white">{{ shift.name }}</h2>
+            <span v-if="shift.employees && shift.employees.length" class="text-[8px] text-white/50 uppercase tracking-[0.2em]">
+              {{ shift.employees.length }} staff
+            </span>
+          </div>
 
-    <!-- Schedule Content -->
-    <div v-else class="p-0.5 space-y-0">
-      <!-- Each Shift -->
-      <div
-        v-for="shift in shiftsWithAssignments"
-        :key="shift.id"
-        class="bg-gray-800 rounded border border-gray-700 p-0.5"
-      >
-        <h2 class="text-[9px] font-semibold mb-0 pb-0 border-b border-gray-700">
-          {{ shift.name }}
-        </h2>
-
-        <!-- Employees Grid -->
-        <div v-if="shift.employees && shift.employees.length > 0" class="divide-y divide-gray-700">
-          <div
-            v-for="employee in shift.employees"
-            :key="employee.id"
-            class="flex items-center gap-0.5 py-0"
-          >
-            <!-- Employee name -->
-            <div class="w-28 text-white text-[8px] font-medium truncate flex-shrink-0">
-              {{ employee.last_name }}, {{ employee.first_name }}
-            </div>
-            
-            <!-- Inline assignment pills -->
-            <div class="flex flex-wrap gap-0.5">
-              <div
-                v-for="item in getEmployeeScheduleItems(employee)"
-                :key="item.id"
-                class="rounded px-0.5 py-0.5 text-[7px] border border-opacity-50 flex-shrink-0 flex items-center justify-center shadow-sm w-22 min-w-[5.5rem] max-w-[5.5rem] box-border overflow-hidden whitespace-nowrap"
-                :style="{
-                  backgroundColor: item.assignment.job_function.color_code,
-                  borderColor: darkenColor(item.assignment.job_function.color_code),
-                  color: getTextColor(item.assignment.job_function.color_code),
-                  textShadow: getTextColor(item.assignment.job_function.color_code) === '#ffffff' 
-                    ? '0 1px 2px rgba(0,0,0,0.3)' 
-                    : '0 1px 2px rgba(255,255,255,0.5)'
-                }"
-              >
-                <div class="flex items-center gap-0.5 min-h-[14px] w-full justify-center">
-                  <span class="font-semibold truncate leading-tight text-[7px]">{{ item.assignment.job_function.name }}</span>
-                  <span class="opacity-90 text-[6px] truncate leading-tight">{{ item.timeRange }}</span>
+          <div v-if="shift.employees && shift.employees.length > 0" class="divide-y divide-white/10">
+            <article
+              v-for="employee in shift.employees"
+              :key="employee.id"
+              class="flex items-start gap-2 px-2.5 py-1.25 hover:bg-white/8 transition-colors"
+            >
+              <div class="w-28 flex-shrink-0 text-[9px] font-semibold uppercase tracking-[0.2em] text-white/70">
+                {{ employee.last_name }}, {{ employee.first_name }}
+              </div>
+              <div class="flex flex-wrap gap-0.75">
+                <div
+                  v-for="item in getEmployeeScheduleItems(employee)"
+                  :key="item.id"
+                  class="relative flex items-center gap-0.5 px-1.25 py-0.5 rounded border border-white/15 shadow-md shadow-black/25 min-w-[4.75rem] max-w-[5.5rem]"
+                  :style="{
+                    backgroundColor: addAlpha(item.assignment.job_function.color_code, 0.85),
+                    borderColor: addAlpha(darkenColor(item.assignment.job_function.color_code), 0.8),
+                    color: getTextColor(item.assignment.job_function.color_code),
+                    boxShadow: '0 5px 9px -8px rgba(0,0,0,0.6)'
+                  }"
+                >
+                  <div class="w-0.5 h-5 rounded" :style="{ backgroundColor: darkenColor(item.assignment.job_function.color_code) }"></div>
+                  <div class="flex flex-col leading-tight">
+                    <span class="font-semibold text-[9px] uppercase tracking-wide truncate">{{ item.assignment.job_function.name }}</span>
+                    <span class="text-[8px] font-medium opacity-70">{{ item.timeRange }}</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            </article>
           </div>
-        </div>
 
-        <!-- No employees message -->
-        <div v-else class="text-center py-1 text-gray-500 text-[9px]">
-          No staff scheduled for this shift
-        </div>
-      </div>
+          <div v-else class="px-2.5 py-1.5 text-[9px] text-white/50 text-center bg-white/4">
+            No team members assigned to this shift
+          </div>
+        </section>
 
-      <!-- No schedule message -->
-      <div v-if="shiftsWithAssignments.length === 0" class="text-center py-8">
-        <p class="text-gray-400 text-sm">No schedule available for today</p>
-        <NuxtLink to="/" class="text-blue-400 hover:text-blue-300 mt-2 inline-block text-[9px]">
-          Go to Home Page
-        </NuxtLink>
+        <div v-if="shiftsWithAssignments.length === 0" class="text-center py-10 text-white/50 text-sm">
+          <p>No schedule available for today</p>
+          <NuxtLink to="/" class="inline-flex items-center text-blue-300 hover:text-blue-200 text-[10px] mt-1 underline decoration-dotted">
+            Open Operations Console
+          </NuxtLink>
+        </div>
       </div>
     </div>
 
-    <!-- Auto-refresh indicator -->
-    <div class="fixed bottom-0.5 right-0.5 bg-gray-800 px-0.5 py-0 rounded text-[7px] text-gray-400 border border-gray-700">
-      Auto-refreshing every 2 minutes
-    </div>
+    <footer class="fixed bottom-2 right-2 px-1.5 py-0.75 rounded-full bg-white/10 border border-white/20 text-[8px] text-white/60 uppercase tracking-[0.25em] backdrop-blur">
+      Auto Refresh · 2m
+    </footer>
   </div>
 </template>
 
@@ -473,6 +450,14 @@ const updateLastUpdated = () => {
     minute: '2-digit',
     hour12: true
   })
+}
+
+const addAlpha = (hex: string, alpha: number): string => {
+  hex = hex.replace('#', '')
+  const r = parseInt(hex.substring(0, 2), 16)
+  const g = parseInt(hex.substring(2, 4), 16)
+  const b = parseInt(hex.substring(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
 const darkenColor = (hex: string): string => {
