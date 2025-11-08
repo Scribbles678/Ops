@@ -235,6 +235,8 @@ CREATE TABLE IF NOT EXISTS business_rules (
     max_staff INTEGER,
     block_size_minutes INTEGER NOT NULL DEFAULT 0,
     priority INTEGER DEFAULT 0,
+    fan_out_enabled BOOLEAN DEFAULT false,
+    fan_out_prefix TEXT,
     is_active BOOLEAN DEFAULT true,
     notes TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -249,6 +251,12 @@ EXCEPTION WHEN OTHERS THEN
     -- Column already allows NULL or table doesn't exist, ignore
     NULL;
 END $$;
+
+ALTER TABLE business_rules
+  ADD COLUMN IF NOT EXISTS fan_out_enabled BOOLEAN DEFAULT false;
+
+ALTER TABLE business_rules
+  ADD COLUMN IF NOT EXISTS fan_out_prefix TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_business_rules_job_function ON business_rules(job_function_name);
 CREATE INDEX IF NOT EXISTS idx_business_rules_active ON business_rules(is_active);

@@ -18,7 +18,7 @@ export const useBusinessRules = () => {
         .order('time_slot_start', { ascending: true })
       
       if (err) throw err
-      businessRules.value = data || []
+      businessRules.value = data ? sortRules(data) : []
       return businessRules.value
     } catch (e: any) {
       error.value = e.message
@@ -27,6 +27,18 @@ export const useBusinessRules = () => {
     } finally {
       loading.value = false
     }
+  }
+
+  const sortRules = (rules: any[]) => {
+    return [...rules].sort((a, b) => {
+      if (a.job_function_name !== b.job_function_name) {
+        return a.job_function_name.localeCompare(b.job_function_name)
+      }
+      if ((a.priority || 0) !== (b.priority || 0)) {
+        return (a.priority || 0) - (b.priority || 0)
+      }
+      return a.time_slot_start.localeCompare(b.time_slot_start)
+    })
   }
 
   const createBusinessRule = async (rule: {
@@ -39,6 +51,8 @@ export const useBusinessRules = () => {
     priority?: number
     is_active?: boolean
     notes?: string | null
+    fan_out_enabled?: boolean
+    fan_out_prefix?: string | null
   }) => {
     try {
       loading.value = true
@@ -49,8 +63,11 @@ export const useBusinessRules = () => {
         .select()
       
       if (err) throw err
-      await fetchBusinessRules() // Refresh list
-      return data?.[0]
+      if (data && data[0]) {
+        businessRules.value = sortRules([...businessRules.value, data[0]])
+        return data[0]
+      }
+      return null
     } catch (e: any) {
       error.value = e.message
       console.error('Error creating business rule:', e)
@@ -70,6 +87,8 @@ export const useBusinessRules = () => {
     priority: number
     is_active: boolean
     notes: string | null
+    fan_out_enabled: boolean
+    fan_out_prefix: string | null
   }>) => {
     try {
       loading.value = true
@@ -81,8 +100,12 @@ export const useBusinessRules = () => {
         .select()
       
       if (err) throw err
-      await fetchBusinessRules() // Refresh list
-      return data?.[0]
+      if (data && data[0]) {
+        const updatedRule = data[0]
+        businessRules.value = sortRules(businessRules.value.map(rule => rule.id === id ? updatedRule : rule))
+        return updatedRule
+      }
+      return null
     } catch (e: any) {
       error.value = e.message
       console.error('Error updating business rule:', e)
@@ -102,7 +125,7 @@ export const useBusinessRules = () => {
         .eq('id', id)
       
       if (err) throw err
-      await fetchBusinessRules() // Refresh list
+      businessRules.value = businessRules.value.filter(rule => rule.id !== id)
       return true
     } catch (e: any) {
       error.value = e.message

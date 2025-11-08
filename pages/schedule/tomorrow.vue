@@ -580,6 +580,69 @@ const generateAIScheduleLogic = async (): Promise<{ schedule: any[], warnings: s
 }
 
 // Core algorithm with 15-minute increments and 2-4 hour blocks
+const distributeCounts = (total: number | null, count: number): number[] | null => {
+  if (total === null || total === undefined) return null
+  if (count <= 0) return null
+  const base = Math.floor(total / count)
+  const remainder = total % count
+  return Array.from({ length: count }, (_, idx) => base + (idx < remainder ? 1 : 0))
+}
+
+const expandBusinessRulesForFanOut = (rules: any[], jobFunctions: any[], warnings: string[] = []) => {
+  if (!Array.isArray(rules)) return []
+
+  const activeJobFunctions = Array.isArray(jobFunctions) ? jobFunctions : []
+  const expanded: any[] = []
+
+  for (const rule of rules) {
+    if (rule?.fan_out_enabled && rule?.fan_out_prefix) {
+      const prefix = String(rule.fan_out_prefix)
+      const matches = activeJobFunctions.filter(jf => {
+        const name = jf?.name || ''
+        return name &&
+          name !== rule.job_function_name &&
+          name.startsWith(prefix) &&
+          jf.is_active !== false
+      })
+
+      if (matches.length === 0) {
+        warnings.push(`No active job functions match prefix "${prefix}" for rule "${rule.job_function_name}".`)
+        expanded.push(rule)
+        continue
+      }
+
+      const originalMin = typeof rule.min_staff === 'number' ? rule.min_staff : null
+      const originalMax = typeof rule.max_staff === 'number' ? rule.max_staff : null
+
+      const minDistribution = distributeCounts(originalMin, matches.length)
+      const maxDistribution = distributeCounts(originalMax, matches.length)
+
+      matches
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+        .forEach((match, idx) => {
+          const minStaff = minDistribution ? minDistribution[idx] : null
+          let maxStaff = maxDistribution ? maxDistribution[idx] : null
+          if (maxStaff !== null && minStaff !== null && maxStaff < minStaff) {
+            maxStaff = minStaff
+          }
+
+        expanded.push({
+          ...rule,
+          job_function_name: match.name,
+          min_staff: minStaff,
+          max_staff: maxStaff,
+          fan_out_enabled: false,
+          fan_out_prefix: null
+        })
+      })
+    } else {
+      expanded.push(rule)
+    }
+  }
+
+  return expanded
+}
+
 const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shifts: any[], trainingData: any, dbRules: any[], warnings: string[] = [], preferredAssignmentsMap: Record<string, Record<string, any>> = {}) => {
   const assignments = []
   const employeeAssignments = new Map() // Track what each employee is doing
@@ -588,16 +651,18 @@ const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shift
   // STEP 1: Assign Startup to all 6am employees (6am-8am)
   await assignStartupTo6amEmployees(employees, shifts, jobFunctions, trainingData, assignments, employeeAssignments, employeeHours)
   
+  const processedRules = expandBusinessRulesForFanOut(dbRules, jobFunctions, warnings)
+
   // Convert database rules to processing format
   // Group by job function and process max staff limits separately
   const globalMaxLimits = new Map<string, number>() // jobFunction -> maxStaff
   const timeSlotRules: Record<string, any[]> = {} // jobFunction -> array of time slot rules
   
-  for (const dbRule of dbRules) {
+  for (const dbRule of processedRules) {
     const jfName = dbRule.job_function_name
     
     // Handle global max limits (where min_staff is null)
-    if (!dbRule.min_staff && dbRule.max_staff) {
+    if (dbRule.min_staff === null && dbRule.max_staff !== null) {
       globalMaxLimits.set(jfName, dbRule.max_staff)
       continue
     }
@@ -708,37 +773,64 @@ const buildOptimalSchedule = async (employees: any[], jobFunctions: any[], shift
         }
       }
       
-      // If we couldn't meet the minimum requirement, try to find any available employee
+      // If we couldn't meet the minimum requirement, try to find additional eligible employees
       if (staffToAssign < (requiredStaff || 0) && globalMax === undefined) {
         console.log(`Warning: Only found ${staffToAssign} employees for ${jobFunction}, need ${requiredStaff}`)
         
-        // Try to find employees trained in any function and assign them
-        const anyTrainedEmployees = employees.filter((emp: any) => {
+        const jobFunctionObj = jobFunctions.find((jf: any) => jf.name === jobFunction)
+        const usedEmployeeIds = new Set(availableEmployees.map((emp: any) => emp.id))
+
+        const fallbackCandidates = employees.filter((emp: any) => {
+          if (usedEmployeeIds.has(emp.id)) return false
+
+          const jobFunctionTrained = jobFunctionObj ? trainingData[emp.id]?.includes(jobFunctionObj.id) : false
+          if (!jobFunctionTrained) return false
+
           const shift = shifts.find((s: any) => s.id === emp.shift_id)
           if (!shift) return false
-          
-          const shiftStart = shift.start_time
-          const shiftEnd = shift.end_time
-          return timeSlot.start >= shiftStart && timeSlot.end <= shiftEnd
+
+          const coversShift = timeSlot.start < shift.end_time && timeSlot.end > shift.start_time
+          if (!coversShift) return false
+
+          const preferredForEmployee = preferredAssignmentsMap[emp.id]
+          const requiredForCurrent = preferredForEmployee?.[jobFunctionObj?.id || '']?.is_required === true
+          const requiredElsewhere = preferredForEmployee
+            ? Object.values(preferredForEmployee).some((pa: any) => pa?.is_required && pa.job_function_id !== (jobFunctionObj?.id || ''))
+            : false
+
+          if (!requiredForCurrent && requiredElsewhere) return false
+
+          const hasConflict = assignments.some((a: any) => {
+            if (a.employee_id !== emp.id) return false
+            const aStart = timeToMinutes(a.start_time)
+            const aEnd = timeToMinutes(a.end_time)
+            return !(timeToMinutes(timeSlot.end) <= aStart || timeToMinutes(timeSlot.start) >= aEnd)
+          })
+
+          return !hasConflict
         })
-        
-        for (let i = staffToAssign; i < (requiredStaff || 0) && i < anyTrainedEmployees.length && currentStaffCount < (globalMax || 999); i++) {
-          const employee = anyTrainedEmployees[i]
+
+        let filled = staffToAssign
+        for (const employee of fallbackCandidates) {
+          if (filled >= (requiredStaff || 0)) break
+          if (globalMax !== undefined && currentStaffCount >= globalMax) break
+
           const blockAssignments = createBlockAssignments(
-            employee, 
-            jobFunction, 
-            timeSlot.start, 
-            timeSlot.end, 
+            employee,
+            jobFunction,
+            timeSlot.start,
+            timeSlot.end,
             timeSlot.blockSize || 0
           )
-          
+
           assignments.push(...blockAssignments)
-          
+
           if (!employeeAssignments.has(employee.id)) {
             employeeAssignments.set(employee.id, [])
           }
           employeeAssignments.get(employee.id).push(jobFunction)
           currentStaffCount++
+          filled++
         }
       }
     }
@@ -1117,6 +1209,19 @@ const findAvailableEmployees = (employees: any[], shifts: any[], trainingData: a
     if (!isTrained) {
       console.log(`Employee ${employee.first_name} not trained in ${jobFunction}`)
       return false
+    }
+    
+    // Respect required preferred assignments: if employee is required for a different
+    // job function, keep them reserved for that function.
+    const preferredForEmployee = preferredAssignmentsMap[employee.id]
+    if (preferredForEmployee) {
+      const requiredForCurrent = preferredForEmployee[jobFunctionObj.id]?.is_required === true
+      const requiredForDifferent = Object.values(preferredForEmployee).some((pa: any) => pa?.is_required && pa.job_function_id !== jobFunctionObj.id)
+      
+      if (!requiredForCurrent && requiredForDifferent) {
+        console.log(`Employee ${employee.first_name} reserved for required assignment elsewhere`)
+        return false
+      }
     }
     
     // Check if employee's shift covers this time

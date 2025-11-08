@@ -80,7 +80,17 @@
             </thead>
             <tbody class="bg-white divide-y divide-gray-200">
               <tr v-for="rule in sortedRules" :key="rule.id" :class="{ 'bg-gray-50': !rule.is_active }">
-                <td class="px-3 md:px-4 py-2 whitespace-nowrap font-medium text-gray-900">{{ rule.job_function_name }}</td>
+                <td class="px-3 md:px-4 py-2 whitespace-nowrap font-medium text-gray-900">
+                  <div class="flex items-center space-x-2">
+                    <span>{{ rule.job_function_name }}</span>
+                    <span
+                      v-if="rule.fan_out_enabled"
+                      class="px-1.5 py-0.5 text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 rounded-full"
+                    >
+                      Fan-out
+                    </span>
+                  </div>
+                </td>
                 <td class="px-3 md:px-4 py-2 whitespace-nowrap text-gray-600">
                   {{ formatTime(rule.time_slot_start) }} - {{ formatTime(rule.time_slot_end) }}
                 </td>
@@ -234,6 +244,29 @@
                 class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
               <p class="mt-1 text-xs text-gray-500">Lower numbers are processed first. 0 = highest priority.</p>
+            </div>
+
+            <!-- Fan-out Rules -->
+            <div class="border border-blue-200 rounded-md bg-blue-50/70 px-3 py-2 space-y-2">
+              <label class="flex items-center text-xs md:text-sm font-medium text-blue-800">
+                <input
+                  type="checkbox"
+                  v-model="ruleForm.fan_out_enabled"
+                  class="h-4 w-4 text-blue-600 border-blue-300 rounded focus:ring-blue-500"
+                />
+                <span class="ml-2">Apply this rule to matching job functions</span>
+              </label>
+              <p class="text-[11px] md:text-xs text-blue-700">
+                When enabled, the AI will duplicate this rule for every active job function whose name begins with the prefix below.
+                Min/Max values apply to each station individually.
+              </p>
+              <input
+                v-model="ruleForm.fan_out_prefix"
+                :disabled="!ruleForm.fan_out_enabled"
+                type="text"
+                placeholder="e.g., Meter "
+                class="w-full px-3 py-1.5 border border-blue-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm disabled:bg-blue-50 disabled:text-blue-300"
+              />
             </div>
 
             <!-- Active Status -->
@@ -537,7 +570,9 @@ const ruleForm = ref({
   block_size_minutes: 240,
   priority: 0,
   is_active: true,
-  notes: ''
+  notes: '',
+  fan_out_enabled: false,
+  fan_out_prefix: ''
 })
 
 const sortedRules = computed(() => {
@@ -589,7 +624,9 @@ const openAddModal = () => {
     block_size_minutes: 240,
     priority: 0,
     is_active: true,
-    notes: ''
+    notes: '',
+    fan_out_enabled: false,
+    fan_out_prefix: ''
   }
   showModal.value = true
 }
@@ -606,7 +643,9 @@ const editRule = (rule: any) => {
     block_size_minutes: rule.block_size_minutes || 0,
     priority: rule.priority || 0,
     is_active: rule.is_active,
-    notes: rule.notes || ''
+    notes: rule.notes || '',
+    fan_out_enabled: !!rule.fan_out_enabled,
+    fan_out_prefix: rule.fan_out_prefix || ''
   }
   showModal.value = true
 }
@@ -628,6 +667,11 @@ const saveRule = async () => {
     return
   }
 
+  if (ruleForm.value.fan_out_enabled && !ruleForm.value.fan_out_prefix?.trim()) {
+    alert('Please enter a prefix to match job functions when fan-out is enabled.')
+    return
+  }
+
   const ruleData: any = {
     job_function_name: ruleForm.value.job_function_name.trim(),
     time_slot_start: ruleForm.value.time_slot_start,
@@ -637,7 +681,11 @@ const saveRule = async () => {
     block_size_minutes: isGlobalMax.value ? 0 : ruleForm.value.block_size_minutes,
     priority: ruleForm.value.priority || 0,
     is_active: ruleForm.value.is_active,
-    notes: ruleForm.value.notes?.trim() || null
+    notes: ruleForm.value.notes?.trim() || null,
+    fan_out_enabled: !!ruleForm.value.fan_out_enabled,
+    fan_out_prefix: ruleForm.value.fan_out_enabled
+      ? (ruleForm.value.fan_out_prefix?.trim() || null)
+      : null
   }
 
   try {
@@ -661,7 +709,6 @@ const deleteRule = async (id: string) => {
       alert('Error deleting rule. Please try again.')
       return
     }
-    businessRules.value = businessRules.value.filter(rule => rule.id !== id)
     showSuccessIndicator('Business rule deleted')
   } catch (e: any) {
     alert(`Error deleting rule: ${e.message || 'Unknown error'}`)
@@ -678,6 +725,34 @@ const showSuccessIndicator = (message: string) => {
     showSuccessToast.value = false
   }, 2000)
 }
+
+watch(
+  () => ruleForm.value.job_function_name,
+  newName => {
+    if (
+      newName &&
+      newName.toLowerCase() === 'meter' &&
+      !ruleForm.value.fan_out_prefix
+    ) {
+      ruleForm.value.fan_out_prefix = 'Meter '
+    }
+  }
+)
+
+watch(
+  () => ruleForm.value.fan_out_enabled,
+  enabled => {
+    if (enabled) {
+      if (!ruleForm.value.fan_out_prefix) {
+        if (ruleForm.value.job_function_name?.toLowerCase() === 'meter') {
+          ruleForm.value.fan_out_prefix = 'Meter '
+        }
+      }
+    } else {
+      ruleForm.value.fan_out_prefix = ''
+    }
+  }
+)
 
 const handleLogout = async () => {
   if (confirm('Are you sure you want to logout?')) {
