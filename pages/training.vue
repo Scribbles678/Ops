@@ -1,27 +1,27 @@
 <template>
-  <div class="min-h-screen bg-gray-50">
-    <div class="container mx-auto px-4 py-8">
+  <div class="training-page min-h-screen bg-gray-50 text-xs md:text-sm">
+    <div class="container mx-auto px-3 md:px-4 py-6 md:py-8">
       <!-- Header -->
-      <div class="flex items-center justify-between mb-4">
-        <h1 class="text-3xl font-bold text-gray-800">Employees & Training Matrix</h1>
+      <div class="flex items-center justify-between mb-3">
+        <h1 class="text-xl md:text-2xl font-semibold text-gray-800">Employees & Training Matrix</h1>
         <NuxtLink to="/" class="btn-secondary">
           ← Back to Home
         </NuxtLink>
       </div>
 
       <!-- Search Bar -->
-      <div class="card mb-4">
+      <div class="card mb-3">
         <input
           v-model="searchQuery"
           type="text"
           placeholder="Search employees..."
-          class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          class="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs md:text-sm"
         />
       </div>
 
       <!-- Loading State -->
-      <div v-if="loading" class="card text-center py-8">
-        <p class="text-gray-600">Loading job functions...</p>
+      <div v-if="loading" class="card text-center py-6">
+        <p class="text-gray-600 text-sm">Loading job functions...</p>
       </div>
 
       <!-- Error State -->
@@ -30,13 +30,13 @@
       </div>
 
       <!-- Employee Management Header -->
-      <div v-else class="card mb-4">
+      <div v-else class="card mb-3">
         <div class="flex justify-between items-center">
-          <h2 class="text-xl font-bold text-gray-800">Employee Management</h2>
+          <h2 class="text-base md:text-lg font-semibold text-gray-800">Employee Management</h2>
           <div class="flex space-x-2">
             <button
               @click="openAddEmployeeModal"
-              class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm"
+              class="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-xs md:text-sm"
             >
               + Add Employee
             </button>
@@ -47,21 +47,21 @@
       <!-- Training Matrix -->
       <div v-if="!loading && !error" class="card">
         <!-- Debug info -->
-        <div v-if="employees.length === 0" class="text-center py-8 text-gray-500">
+        <div v-if="employees.length === 0" class="text-center py-6 text-gray-500 text-sm">
           <p>No employees found. {{ employeesLoading ? 'Still loading employees...' : 'Try adding some employees.' }}</p>
         </div>
-        <div class="space-y-3">
+        <div class="space-y-2.5">
           <div
             v-for="employee in filteredEmployees"
             :key="employee.id"
             :data-employee-id="employee.id"
-            class="border-b border-gray-200 pb-3 last:border-b-0"
+            class="border-b border-gray-200 pb-2 last:border-b-0"
           >
             <!-- Employee Header with Controls -->
             <div class="flex justify-between items-start mb-2">
-              <div class="flex items-center space-x-4">
-                <div class="flex items-center space-x-2">
-                  <h3 class="text-lg font-semibold text-gray-800">
+              <div class="flex items-center space-x-3">
+                <div class="flex items-center space-x-1.5">
+                  <h3 class="text-sm md:text-base font-semibold text-gray-800">
                     {{ employee.last_name }}, {{ employee.first_name }}
                   </h3>
                   
@@ -72,12 +72,12 @@
                 </div>
                 
                 <!-- Shift Selection -->
-                <div class="flex items-center space-x-2">
-                  <label class="text-sm text-gray-600">Shift:</label>
+                <div class="flex items-center space-x-1.5">
+                  <label class="text-xs md:text-sm text-gray-600">Shift:</label>
                   <select
                     :value="employeeShifts[employee.id] || ''"
                     @change="updateEmployeeShift(employee.id, $event)"
-                    class="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    class="text-xs md:text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="">Select Shift</option>
                     <option v-for="shift in shifts" :key="shift.id" :value="shift.id">
@@ -88,24 +88,24 @@
               </div>
               
               <!-- Employee Actions -->
-              <div class="flex items-center space-x-2">
+              <div class="flex items-center space-x-1.5">
                 <button
                   :data-save-button="employee.id"
                   @click="saveEmployeeTraining(employee.id)"
                   disabled
-                  class="px-3 py-1 bg-gray-300 text-gray-500 rounded cursor-not-allowed text-sm"
+                  class="px-2.5 py-1 bg-gray-300 text-gray-500 rounded cursor-not-allowed text-xs md:text-sm"
                 >
                   No Changes
                 </button>
                 <button
                   @click="openEditEmployeeModal(employee)"
-                  class="px-3 py-1 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition text-sm"
+                  class="px-2.5 py-1 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition text-xs md:text-sm"
                 >
                   Edit
                 </button>
                 <button
                   @click="deleteEmployee(employee.id)"
-                  class="px-3 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200 transition text-sm"
+                  class="px-2.5 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200 transition text-xs md:text-sm"
                 >
                   Delete
                 </button>
@@ -113,11 +113,11 @@
             </div>
             
             <!-- Training Matrix -->
-            <div class="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-9 gap-2">
+            <div class="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-9 gap-1.5">
               <label
                 v-for="jobFunction in getGroupedJobFunctions()"
                 :key="jobFunction.id"
-                class="flex items-center space-x-1 cursor-pointer hover:bg-gray-50 p-1 rounded text-xs transition-colors"
+                class="flex items-center space-x-1 cursor-pointer hover:bg-gray-50 p-1 rounded text-[11px] md:text-xs transition-colors"
               >
                 <input
                   type="checkbox"
@@ -129,10 +129,10 @@
                 />
                 <div class="flex items-center space-x-1">
                   <div
-                    class="w-3 h-3 rounded border border-gray-300"
+                    class="w-2.5 h-2.5 rounded border border-gray-300"
                     :style="{ backgroundColor: jobFunction.color_code }"
                   ></div>
-                  <span class="text-xs text-gray-700 truncate">{{ jobFunction.name }}</span>
+                  <span class="text-[11px] md:text-xs text-gray-700 truncate">{{ jobFunction.name }}</span>
                 </div>
               </label>
             </div>
@@ -140,11 +140,11 @@
         </div>
 
         <!-- Save Instructions -->
-        <div class="mt-4 pt-4 border-t border-gray-200">
+        <div class="mt-3 pt-3 border-t border-gray-200 text-xs md:text-sm">
           <div class="flex items-center justify-center">
-            <div class="text-sm text-gray-500">
+            <div class="text-gray-500">
               <span class="inline-flex items-center">
-                <svg class="w-4 h-4 mr-1 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                <svg class="w-3.5 h-3.5 mr-1 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
                   <path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2H4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
                 </svg>
                 Click checkboxes to make changes, then click "Save Changes" for each employee
@@ -155,7 +155,7 @@
           <!-- Training Data Loading Indicator -->
           <div v-if="trainingDataLoading" class="mt-2 text-center">
             <div class="inline-flex items-center text-sm text-blue-500">
-              <svg class="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
+              <svg class="animate-spin h-3.5 w-3.5 mr-2" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
