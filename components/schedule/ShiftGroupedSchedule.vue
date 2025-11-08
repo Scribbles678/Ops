@@ -294,8 +294,8 @@ const { getEmployeeTraining } = useEmployees()
 const { getGroupedJobFunctions, isMeterJobFunction } = useJobFunctions()
 const { isPreferredAssignment, getAssignmentPriority, isRequiredAssignment } = usePreferredAssignments()
 
-const BLOCK_WIDTH = 28
-const EMPLOYEE_COLUMN_WIDTH = 200
+const BLOCK_WIDTH = 24
+const EMPLOYEE_COLUMN_WIDTH = 176
 
 // Optimize meter job functions with computed property to avoid repeated filtering
 const allIndividualMeters = computed(() => {
@@ -1150,12 +1150,12 @@ initializeScheduleData()
 }
 
 .employee-name-header {
-  @apply px-2 py-1 text-[11px] font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
+  @apply px-1.5 py-0.5 text-[10px] font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
   background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
   box-shadow: inset 0 -1px 0 0 rgba(0, 0, 0, 0.06);
-  width: 200px;
-  min-width: 200px;
-  max-width: 200px;
+  width: 176px;
+  min-width: 176px;
+  max-width: 176px;
   box-sizing: border-box;
 }
 
@@ -1181,7 +1181,7 @@ initializeScheduleData()
 }
 
 .time-hour-marker {
-  @apply px-2 py-1 text-[10px] font-semibold text-gray-700 text-center flex items-center justify-center;
+  @apply px-1.5 py-0.5 text-[9px] font-semibold text-gray-700 text-center flex items-center justify-center;
   /* Modern styling with gradient and subtle shadow */
   background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
   border-right: 2px solid #d1d5db;
@@ -1208,11 +1208,11 @@ initializeScheduleData()
 }
 
 .employee-name {
-  @apply px-2 py-1 text-[11px] font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
+  @apply px-1.5 py-0.5 text-[10px] font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
   background: rgba(249, 250, 251, 0.5);
-  width: 200px;
-  min-width: 200px;
-  max-width: 200px;
+  width: 176px;
+  min-width: 176px;
+  max-width: 176px;
   box-sizing: border-box;
 }
 
@@ -1231,15 +1231,15 @@ initializeScheduleData()
 
 .assignment-input,
 .until-input {
-  @apply w-full px-2 py-1 text-sm border-0 bg-transparent focus:bg-white focus:ring-1 focus:ring-blue-500 focus:outline-none;
+  @apply w-full px-1.5 py-0.5 text-xs border-0 bg-transparent focus:bg-white focus:ring-1 focus:ring-blue-500 focus:outline-none;
 }
 
 .assignment-clickable {
-  @apply w-full px-2 py-1 text-sm border border-gray-300 cursor-pointer hover:bg-opacity-80 transition-all min-h-[32px] flex items-center justify-center;
+  @apply w-full px-1.5 py-0.5 text-xs border border-gray-300 cursor-pointer hover:bg-opacity-80 transition-all min-h-[24px] flex items-center justify-center;
 }
 
 .assignment-clickable-full {
-  @apply w-full h-full px-0 py-0.5 text-[10px] border border-gray-300 cursor-pointer hover:bg-opacity-80 transition-all min-h-[22px] flex items-center justify-center;
+  @apply w-full h-full px-0 py-0.5 text-[9px] border border-gray-300 cursor-pointer hover:bg-opacity-80 transition-all min-h-[18px] flex items-center justify-center;
 }
 
 .assignment-start {
@@ -1259,16 +1259,16 @@ initializeScheduleData()
 }
 
 .until-display {
-  @apply w-full px-2 py-1 text-sm border border-gray-200 min-h-[32px] flex items-center justify-center text-gray-500;
+  @apply w-full px-1.5 py-0.5 text-xs border border-gray-200 min-h-[26px] flex items-center justify-center text-gray-500;
 }
 
 .break-cell-full {
-  @apply w-full h-full px-1.5 text-[8px] md:text-[9px] font-medium text-center cursor-not-allowed flex items-center justify-center;
+  @apply w-full h-full px-1 text-[7px] md:text-[8px] font-medium text-center cursor-not-allowed flex items-center justify-center;
   /* Match assignment block styling for consistent height */
 }
 
 .empty-cell-full {
-  @apply w-full h-full px-0 py-0.5 text-[9px] text-center border border-gray-200 min-h-[22px] flex items-center justify-center;
+  @apply w-full h-full px-0 py-0.5 text-[8px] text-center border border-gray-200 min-h-[20px] flex items-center justify-center;
 }
 
 .break-blocked {
