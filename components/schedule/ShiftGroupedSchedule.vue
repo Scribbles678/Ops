@@ -24,8 +24,10 @@
           <!-- Render all time block cells for alignment (but empty) -->
           <div
             v-for="timeBlock in getShiftTimeBlocks(shift)"
-            :key="`header-cell-${timeBlock.time}`"
+            :key="`header-cell-${shift.id}-${timeBlock.time}`"
             class="time-block-header-cell"
+            :class="{ 'hidden': timeBlock.isBreakTime && !timeBlock.isBreakStart }"
+            :style="timeBlock.isBreakTime && timeBlock.isBreakStart ? { gridColumn: `span ${timeBlock.breakSpan}` } : {}"
           ></div>
           
           <!-- Render hourly markers that span the full hour (4 columns) -->
@@ -67,10 +69,12 @@
                 v-for="timeBlock in getShiftTimeBlocks(shift)" 
                 :key="`cell-${employee.id}-${shift.id}-${timeBlock.time}`"
                 class="time-block-content select-none"
+                :class="{ 'hidden': timeBlock.isBreakTime && !timeBlock.isBreakStart }"
+                :style="timeBlock.isBreakTime && timeBlock.isBreakStart ? { gridColumn: `span ${timeBlock.breakSpan}` } : {}"
               >
                 <div class="assignment-cell-full">
                   <div 
-                    v-if="!isBreakTime(timeBlock.time, shift)"
+                    v-if="!timeBlock.isBreakTime || !timeBlock.isBreakStart"
                     @click="openAssignmentModal(employee, timeBlock, shift)"
                     class="assignment-clickable-full bg-white hover:bg-blue-50 transition-colors duration-150 rounded-sm"
                   >
@@ -81,7 +85,7 @@
                     class="break-cell-full rounded-lg border text-white flex items-center justify-center"
                     style="background: linear-gradient(135deg, #374151 0%, #1f2937 100%); border-color: rgba(0, 0, 0, 0.2); box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.1);"
                   >
-                    {{ getBreakType(timeBlock.time, shift) }}
+                    {{ timeBlock.breakType }}
                   </div>
                 </div>
               </div>
@@ -120,14 +124,16 @@
             v-for="timeBlock in getShiftTimeBlocks(shift)" 
             :key="timeBlock.time"
             class="time-block-content"
+            :class="{ 'hidden': timeBlock.isBreakTime && !timeBlock.isBreakStart }"
+            :style="timeBlock.isBreakTime && timeBlock.isBreakStart ? { gridColumn: `span ${timeBlock.breakSpan}` } : {}"
           >
             <div class="assignment-cell-full">
               <div 
-                v-if="isBreakTime(timeBlock.time, shift)"
+                v-if="timeBlock.isBreakTime && timeBlock.isBreakStart"
                 class="break-cell-full"
                 style="background-color: #000000"
               >
-                {{ getBreakType(timeBlock.time, shift) }}
+                {{ timeBlock.breakType }}
               </div>
               <div 
                 v-else
@@ -692,20 +698,44 @@ const getShiftTimeBlocks = (shift: any) => {
   let currentMinutes = startMinutes
   
   // Generate time blocks every 15 minutes from start to end
+  const parse = (value: any): number | null => {
+    if (!value) return null
+    const str = String(value).substring(0, 5)
+    return timeToMinutes(str)
+  }
+
+  const buildRange = (start: any, end: any, type: 'BREAK' | 'LUNCH') => {
+    const s = parse(start)
+    const e = parse(end)
+    if (s === null || e === null || e <= s) return null
+    return { start: s, end: e, type }
+  }
+
+  const breakRanges = [
+    buildRange(shift.break_1_start, shift.break_1_end, 'BREAK'),
+    buildRange(shift.break_2_start, shift.break_2_end, 'BREAK'),
+    buildRange(shift.lunch_start, shift.lunch_end, 'LUNCH')
+  ].filter(Boolean) as Array<{ start: number; end: number; type: 'BREAK' | 'LUNCH' }>
+
   while (currentMinutes < endMinutes) {
     const timeString = minutesToTime(currentMinutes)
     const displayTime = formatTimeForDisplay(timeString)
-    
-    // Check if this time slot should be a break
-    const isBreak = isBreakTime(timeString, shift)
-    
+
+    const range = breakRanges.find(r => currentMinutes >= r.start && currentMinutes < r.end)
+    const isBreak = !!range
+    const isStart = range ? currentMinutes === range.start : false
+    const span = range ? Math.max(1, Math.round((range.end - range.start) / 15)) : 1
+
     timeBlocks.push({
       time: timeString,
       display: displayTime,
-      isBreakTime: isBreak
+      isBreakTime: isBreak,
+      breakType: range ? (range.type === 'LUNCH' ? 'Lunch' : 'Break') : '',
+      isBreakStart: isStart,
+      breakSpan: span
     })
-    
-    currentMinutes += 15 // Add 15 minutes for more granular scheduling
+
+    currentMinutes += 15
   }
   
   // console.log(`Generated ${timeBlocks.length} time blocks`)
