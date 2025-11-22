@@ -1,8 +1,7 @@
 import { ref, computed } from 'vue'
-import { useNuxtApp } from '#app'
 
 export const useShiftSwaps = () => {
-  const { $supabase } = useNuxtApp()
+  const supabase = useSupabaseClient()
 
   const shiftSwaps = ref<any[]>([])
   const loading = ref(false)
@@ -12,7 +11,7 @@ export const useShiftSwaps = () => {
     try {
       loading.value = true
       error.value = null
-      const { data, error: err } = await $supabase
+      const { data, error: err } = await supabase
         .from('shift_swaps')
         .select('*, employee:employees(*), original_shift:shifts!shift_swaps_original_shift_id_fkey(*), swapped_shift:shifts!shift_swaps_swapped_shift_id_fkey(*)')
         .eq('swap_date', date)
@@ -39,7 +38,7 @@ export const useShiftSwaps = () => {
     try {
       loading.value = true
       error.value = null
-      const { data, error: err } = await $supabase
+      const { data, error: err } = await supabase
         .from('shift_swaps')
         .upsert([record], { onConflict: 'employee_id,swap_date' })
         .select()
@@ -62,7 +61,7 @@ export const useShiftSwaps = () => {
     try {
       loading.value = true
       error.value = null
-      const { error: err } = await $supabase
+      const { error: err } = await supabase
         .from('shift_swaps')
         .delete()
         .eq('id', id)

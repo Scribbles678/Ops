@@ -1614,7 +1614,8 @@ const applyAISchedule = async (schedule: any[]) => {
     const batchSize = 200
     for (let i = 0; i < ranges.length; i += batchSize) {
       const batch = ranges.slice(i, i + batchSize)
-      const { error } = await useNuxtApp().$supabase.from('schedule_assignments').insert(batch)
+      const supabase = useSupabaseClient()
+      const { error } = await supabase.from('schedule_assignments').insert(batch)
       if (error) throw error
     }
   } catch (error) {

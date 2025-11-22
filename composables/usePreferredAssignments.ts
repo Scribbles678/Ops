@@ -1,8 +1,7 @@
 import { ref } from 'vue'
-import { useNuxtApp } from '#app'
 
 export const usePreferredAssignments = () => {
-  const { $supabase } = useNuxtApp()
+  const supabase = useSupabaseClient()
   const preferredAssignments = ref<any[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -12,7 +11,7 @@ export const usePreferredAssignments = () => {
     loading.value = true
     error.value = null
     try {
-      const { data, error: fetchError } = await $supabase
+      const { data, error: fetchError } = await supabase
         .from('preferred_assignments')
         .select(`
           *,
@@ -86,7 +85,7 @@ export const usePreferredAssignments = () => {
     notes?: string
   }) => {
     try {
-      const { data, error: insertError } = await $supabase
+      const { data, error: insertError } = await supabase
         .from('preferred_assignments')
         .insert(assignmentData)
         .select()
@@ -108,7 +107,7 @@ export const usePreferredAssignments = () => {
     notes?: string
   }) => {
     try {
-      const { data, error: updateError } = await $supabase
+      const { data, error: updateError } = await supabase
         .from('preferred_assignments')
         .update(updates)
         .eq('id', id)
@@ -127,7 +126,7 @@ export const usePreferredAssignments = () => {
   // Delete a preferred assignment
   const deletePreferredAssignment = async (id: string) => {
     try {
-      const { error: deleteError } = await $supabase
+      const { error: deleteError } = await supabase
         .from('preferred_assignments')
         .delete()
         .eq('id', id)

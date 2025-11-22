@@ -571,7 +571,7 @@
 import ShiftGroupedSchedule from '~/components/schedule/ShiftGroupedSchedule.vue'
 
 // Supabase client
-const { $supabase } = useNuxtApp()
+const supabase = useSupabaseClient()
 
 // Use real composables instead of mock data
 const { 
@@ -791,7 +791,7 @@ const loadTargetHours = async () => {
     console.log('Job functions available:', jobFunctions.value.length)
     
     // First, let's check if the table exists and has any data
-    const { data: allData, error: allError } = await $supabase
+    const { data: allData, error: allError } = await supabase
       .from('target_hours')
       .select('*')
     
@@ -1535,7 +1535,7 @@ const saveSchedule = async () => {
         saveProgress.value = `Saving assignments ${i + 1}-${Math.min(i + batchSize, assignmentsToSave.length)} of ${assignmentsToSave.length}...`
         // useSchedule.createAssignment currently inserts a single row.
         // Use Supabase client directly for bulk insert to avoid N calls.
-        const { error: insertError } = await $supabase
+        const { error: insertError } = await supabase
           .from('schedule_assignments')
           .insert(batch)
         if (insertError) throw insertError

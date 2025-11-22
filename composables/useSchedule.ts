@@ -1,5 +1,6 @@
 export const useSchedule = () => {
-  const { $supabase } = useNuxtApp()
+  const supabase = useSupabaseClient()
+  const { getCurrentTeamId, isSuperAdmin } = useTeam()
   
   const scheduleAssignments = ref([])
   const shifts = ref([])
@@ -12,10 +13,20 @@ export const useSchedule = () => {
     error.value = null
     
     try {
-      const { data, error: fetchError } = await $supabase
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+      
+      let query = supabase
         .from('shifts')
         .select('*')
         .eq('is_active', true)
+      
+      // Filter by team_id if not super admin
+      if (teamId) {
+        query = query.eq('team_id', teamId)
+      }
+      
+      const { data, error: fetchError } = await query
         .order('start_time', { ascending: true })
       
       if (fetchError) throw fetchError
@@ -36,7 +47,7 @@ export const useSchedule = () => {
     error.value = null
     
     try {
-      const { data, error: createError } = await $supabase
+      const { data, error: createError } = await supabase
         .from('shifts')
         .insert([shiftData])
         .select()
@@ -59,7 +70,7 @@ export const useSchedule = () => {
     error.value = null
     
     try {
-      const { data, error: updateError } = await $supabase
+      const { data, error: updateError } = await supabase
         .from('shifts')
         .update(shiftData)
         .eq('id', id)
@@ -83,7 +94,7 @@ export const useSchedule = () => {
     error.value = null
     
     try {
-      const { error: deleteError } = await $supabase
+      const { error: deleteError } = await supabase
         .from('shifts')
         .delete()
         .eq('id', id)
@@ -106,7 +117,10 @@ export const useSchedule = () => {
     error.value = null
     
     try {
-      const { data, error: fetchError } = await $supabase
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+      
+      let query = supabase
         .from('schedule_assignments')
         .select(`
           *,
@@ -115,6 +129,13 @@ export const useSchedule = () => {
           shift:shifts(*)
         `)
         .eq('schedule_date', date)
+      
+      // Filter by team_id if not super admin
+      if (teamId) {
+        query = query.eq('team_id', teamId)
+      }
+      
+      const { data, error: fetchError } = await query
         .order('start_time', { ascending: true })
       
       if (fetchError) throw fetchError
@@ -135,9 +156,15 @@ export const useSchedule = () => {
     error.value = null
     
     try {
-      const { data, error: createError } = await $supabase
+      // Get team_id for new assignment
+      const teamId = isSuperAdmin.value ? assignmentData.team_id : await getCurrentTeamId()
+      if (!teamId && !isSuperAdmin.value) {
+        throw new Error('Unable to determine team. Please contact administrator.')
+      }
+      
+      const { data, error: createError } = await supabase
         .from('schedule_assignments')
-        .insert([assignmentData])
+        .insert([{ ...assignmentData, team_id: teamId }])
         .select()
       
       if (createError) throw createError
@@ -157,7 +184,7 @@ export const useSchedule = () => {
     error.value = null
     
     try {
-      const { data, error: updateError } = await $supabase
+      const { data, error: updateError } = await supabase
         .from('schedule_assignments')
         .update(assignmentData)
         .eq('id', id)
@@ -180,7 +207,7 @@ export const useSchedule = () => {
     error.value = null
     
     try {
-      const { error: deleteError } = await $supabase
+      const { error: deleteError } = await supabase
         .from('schedule_assignments')
         .delete()
         .eq('id', id)
@@ -206,7 +233,7 @@ export const useSchedule = () => {
       // Note: Only job function assignments are copied from schedule_assignments table.
       // PTO records (pto_days table) and shift swaps (shift_swaps table) are NOT copied,
       // as they are date-specific and stored in separate tables.
-      const { data: sourceData, error: fetchError } = await $supabase
+      const { data: sourceData, error: fetchError } = await supabase
         .from('schedule_assignments')
         .select('*')
         .eq('schedule_date', fromDate)
@@ -239,7 +266,7 @@ export const useSchedule = () => {
         }))
       
       if (newAssignments.length > 0) {
-        const { error: insertError } = await $supabase
+        const { error: insertError } = await supabase
           .from('schedule_assignments')
           .insert(newAssignments)
         
@@ -258,7 +285,7 @@ export const useSchedule = () => {
 
   const fetchDailyTargets = async (date) => {
     try {
-      const { data, error: fetchError } = await $supabase
+      const { data, error: fetchError } = await supabase
         .from('daily_targets')
         .select('*, job_function:job_functions(*)')
         .eq('schedule_date', date)
@@ -278,7 +305,7 @@ export const useSchedule = () => {
     error.value = null
     
     try {
-      const { data, error: upsertError } = await $supabase
+      const { data, error: upsertError } = await supabase
         .from('daily_targets')
         .upsert(targetData)
         .select()
@@ -301,7 +328,7 @@ export const useSchedule = () => {
     error.value = null
     
     try {
-      const { data, error: cleanupError } = await $supabase
+      const { data, error: cleanupError } = await supabase
         .rpc('cleanup_old_schedules_with_logging')
       
       if (cleanupError) throw cleanupError
@@ -318,7 +345,7 @@ export const useSchedule = () => {
 
   const getCleanupStats = async () => {
     try {
-      const { data, error: statsError } = await $supabase
+      const { data, error: statsError } = await supabase
         .rpc('get_cleanup_stats')
       
       if (statsError) throw statsError
@@ -332,7 +359,7 @@ export const useSchedule = () => {
 
   const getCleanupLog = async (limit = 10) => {
     try {
-      const { data, error: logError } = await $supabase
+      const { data, error: logError } = await supabase
         .from('cleanup_log')
         .select('*')
         .order('cleanup_date', { ascending: false })
@@ -349,7 +376,7 @@ export const useSchedule = () => {
 
   const getCleanupStatus = async () => {
     try {
-      const { data, error: statusError } = await $supabase
+      const { data, error: statusError } = await supabase
         .from('cleanup_status')
         .select('*')
       
@@ -369,7 +396,7 @@ export const useSchedule = () => {
       cutoffDate.setDate(cutoffDate.getDate() - 7)
       const cutoffDateString = cutoffDate.toISOString().split('T')[0] // YYYY-MM-DD
       
-      const { data, error: fetchError } = await $supabase
+      const { data, error: fetchError } = await supabase
         .from('schedule_assignments')
         .select(`
           *,

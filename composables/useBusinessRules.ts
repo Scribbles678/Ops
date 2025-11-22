@@ -1,5 +1,5 @@
 export const useBusinessRules = () => {
-  const { $supabase } = useNuxtApp()
+  const supabase = useSupabaseClient()
 
   const businessRules = ref<any[]>([])
   const loading = ref(false)
@@ -9,7 +9,7 @@ export const useBusinessRules = () => {
     try {
       loading.value = true
       error.value = null
-      const { data, error: err } = await $supabase
+      const { data, error: err } = await supabase
         .from('business_rules')
         .select('*')
         .eq('is_active', true)
@@ -57,7 +57,7 @@ export const useBusinessRules = () => {
     try {
       loading.value = true
       error.value = null
-      const { data, error: err } = await $supabase
+      const { data, error: err } = await supabase
         .from('business_rules')
         .insert([rule])
         .select()
@@ -93,7 +93,7 @@ export const useBusinessRules = () => {
     try {
       loading.value = true
       error.value = null
-      const { data, error: err } = await $supabase
+      const { data, error: err } = await supabase
         .from('business_rules')
         .update(updates)
         .eq('id', id)
@@ -119,7 +119,7 @@ export const useBusinessRules = () => {
     try {
       loading.value = true
       error.value = null
-      const { error: err } = await $supabase
+      const { error: err } = await supabase
         .from('business_rules')
         .delete()
         .eq('id', id)

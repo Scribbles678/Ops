@@ -1,5 +1,6 @@
 export const useEmployees = () => {
-  const { $supabase } = useNuxtApp()
+  const supabase = useSupabaseClient()
+  const { getCurrentTeamId, isSuperAdmin } = useTeam()
   
   const employees = ref([])
   const loading = ref(false)
@@ -10,10 +11,19 @@ export const useEmployees = () => {
     error.value = null
     
     try {
-      let query = $supabase
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+      
+      let query = supabase
         .from('employees')
         .select('*')
-        .order('last_name', { ascending: true })
+      
+      // Filter by team_id if not super admin
+      if (teamId) {
+        query = query.eq('team_id', teamId)
+      }
+      
+      query = query.order('last_name', { ascending: true })
       
       if (activeOnly) {
         query = query.eq('is_active', true)
@@ -39,9 +49,15 @@ export const useEmployees = () => {
     error.value = null
     
     try {
-      const { data, error: createError } = await $supabase
+      // Get team_id for new employee
+      const teamId = isSuperAdmin.value ? employeeData.team_id : await getCurrentTeamId()
+      if (!teamId && !isSuperAdmin.value) {
+        throw new Error('Unable to determine team. Please contact administrator.')
+      }
+      
+      const { data, error: createError } = await supabase
         .from('employees')
-        .insert([employeeData])
+        .insert([{ ...employeeData, team_id: teamId }])
         .select()
       
       if (createError) throw createError
@@ -62,7 +78,7 @@ export const useEmployees = () => {
     error.value = null
     
     try {
-      const { data, error: updateError } = await $supabase
+      const { data, error: updateError } = await supabase
         .from('employees')
         .update(employeeData)
         .eq('id', id)
@@ -86,7 +102,7 @@ export const useEmployees = () => {
     error.value = null
     
     try {
-      const { error: deleteError } = await $supabase
+      const { error: deleteError } = await supabase
         .from('employees')
         .delete()
         .eq('id', id)
@@ -106,7 +122,7 @@ export const useEmployees = () => {
 
   const getEmployeeTraining = async (employeeId) => {
     try {
-      const { data, error: fetchError } = await $supabase
+      const { data, error: fetchError } = await supabase
         .from('employee_training')
         .select('job_function_id')
         .eq('employee_id', employeeId)
@@ -130,7 +146,7 @@ export const useEmployees = () => {
       let allRows: Array<{ employee_id: string; job_function_id: string }> = []
 
       while (hasMore) {
-        const { data, error: fetchError } = await $supabase
+        const { data, error: fetchError } = await supabase
           .from('employee_training')
           .select('employee_id, job_function_id')
           .in('employee_id', employeeIds)
@@ -175,7 +191,7 @@ export const useEmployees = () => {
       let useDirectMethod = false
       
       try {
-        const { data, error: rpcError } = await $supabase.rpc('update_employee_training', {
+        const { data, error: rpcError } = await supabase.rpc('update_employee_training', {
           p_employee_id: employeeId,
           p_job_function_ids: cleanJobFunctionIds
         })
@@ -195,7 +211,7 @@ export const useEmployees = () => {
       // Fallback to direct method if RPC failed
       if (useDirectMethod) {
         // Delete all existing training records
-        const { error: deleteError } = await $supabase
+        const { error: deleteError } = await supabase
           .from('employee_training')
           .delete()
           .eq('employee_id', employeeId)
@@ -212,7 +228,7 @@ export const useEmployees = () => {
             job_function_id: jfId
           }))
           
-          const { error: insertError } = await $supabase
+          const { error: insertError } = await supabase
             .from('employee_training')
             .insert(trainingRecords)
         
@@ -233,7 +249,7 @@ export const useEmployees = () => {
           await new Promise(resolve => setTimeout(resolve, 200 * retryCount))
         }
         
-        const { data: verifyData, error: verifyError } = await $supabase
+        const { data: verifyData, error: verifyError } = await supabase
           .from('employee_training')
           .select('job_function_id')
           .eq('employee_id', employeeId)

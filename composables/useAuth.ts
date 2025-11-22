@@ -1,18 +1,29 @@
+/**
+ * Auth composable using Supabase Auth
+ * Wraps Supabase auth methods for convenience
+ */
 export const useAuth = () => {
-  const authToken = useCookie('auth-token')
+  const supabase = useSupabaseClient()
+  const user = useSupabaseUser()
   
-  const isAuthenticated = computed(() => !!authToken.value)
+  const isAuthenticated = computed(() => !!user.value)
   
-  const login = (token: string) => {
-    authToken.value = token
+  const login = async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    })
+    if (error) throw error
+    return data
   }
   
   const logout = async () => {
-    authToken.value = null
+    await supabase.auth.signOut()
     await navigateTo('/login')
   }
   
   return {
+    user,
     isAuthenticated,
     login,
     logout

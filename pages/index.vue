@@ -99,6 +99,19 @@
         </NuxtLink>
       </div>
 
+      <!-- Admin Link (Super Admin Only) -->
+      <div v-if="isSuperAdmin" class="text-center mt-6">
+        <NuxtLink
+          to="/admin/users"
+          class="inline-flex items-center px-6 py-3 border border-purple-300 rounded-lg text-purple-700 bg-purple-50 hover:bg-purple-100 transition"
+        >
+          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+          User Management
+        </NuxtLink>
+      </div>
+
       <!-- Display Mode Link -->
       <div class="text-center mt-6 md:mt-8">
         <NuxtLink
@@ -117,6 +130,7 @@
 
 <script setup lang="ts">
 const { logout } = useAuth()
+const { isSuperAdmin, checkIsSuperAdmin } = useTeam()
 
 const today = computed(() => {
   const date = new Date()
@@ -128,5 +142,10 @@ const handleLogout = async () => {
     await logout()
   }
 }
+
+// Check if user is super admin
+onMounted(async () => {
+  await checkIsSuperAdmin()
+})
 </script>
 

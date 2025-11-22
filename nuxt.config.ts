@@ -3,7 +3,10 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
   
-  modules: ['@nuxtjs/tailwindcss'],
+  modules: [
+    '@nuxtjs/tailwindcss',
+    '@nuxtjs/supabase'
+  ],
   
   // Fix hydration issues
   ssr: true,
@@ -11,6 +14,17 @@ export default defineNuxtConfig({
   tailwindcss: {
     cssPath: '~/assets/css/main.css',
     configPath: 'tailwind.config.js'
+  },
+  
+  // Supabase configuration
+  supabase: {
+    redirect: false, // We'll handle redirects manually in middleware
+    redirectOptions: {
+      login: '/login',
+      exclude: ['/login', '/display'] // Display mode is public
+    },
+    url: process.env.SUPABASE_URL,
+    key: process.env.SUPABASE_ANON_KEY,
   },
   
   app: {
@@ -24,10 +38,12 @@ export default defineNuxtConfig({
   },
   
   runtimeConfig: {
+    // Server-only (never exposed to client)
+    supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
     public: {
       supabaseUrl: process.env.SUPABASE_URL || '',
-      supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
-      appPassword: process.env.APP_PASSWORD || 'operations2024'
+      supabaseKey: process.env.SUPABASE_ANON_KEY || ''
+      // Removed appPassword - no longer needed
     }
   },
   

@@ -262,7 +262,7 @@ onMounted(() => {
   loadData()
   
   // Set up real-time subscriptions for immediate updates
-  const { $supabase } = useNuxtApp()
+  const supabase = useSupabaseClient()
   
   // Subscribe to schedule_assignments changes
   const assignmentsChannel = $supabase
@@ -334,7 +334,7 @@ onMounted(() => {
       loadData()
       // Resubscribe for new date - clean up old subscriptions first
       realtimeSubscriptions.value.forEach(sub => {
-        $supabase.removeChannel(sub)
+        supabase.removeChannel(sub)
       })
       realtimeSubscriptions.value = []
       
@@ -407,9 +407,9 @@ onUnmounted(() => {
     clearInterval(rolloverInterval.value)
   }
   // Clean up real-time subscriptions
-  const { $supabase } = useNuxtApp()
+  const supabase = useSupabaseClient()
   realtimeSubscriptions.value.forEach(sub => {
-    $supabase.removeChannel(sub)
+    supabase.removeChannel(sub)
   })
   realtimeSubscriptions.value = []
 })

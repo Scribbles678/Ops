@@ -1,5 +1,5 @@
 export const usePTO = () => {
-  const { $supabase } = useNuxtApp()
+  const supabase = useSupabaseClient()
 
   const pto = ref<any[]>([])
   const loading = ref(false)
@@ -9,7 +9,7 @@ export const usePTO = () => {
     try {
       loading.value = true
       error.value = null
-      const { data, error: err } = await $supabase
+      const { data, error: err } = await supabase
         .from('pto_days')
         .select('*, employee:employees(*)')
         .eq('pto_date', date)
@@ -35,7 +35,7 @@ export const usePTO = () => {
     try {
       loading.value = true
       error.value = null
-      const { error: err } = await $supabase.from('pto_days').insert([record])
+      const { error: err } = await supabase.from('pto_days').insert([record])
       if (err) throw err
       return true
     } catch (e: any) {
@@ -50,7 +50,7 @@ export const usePTO = () => {
     try {
       loading.value = true
       error.value = null
-      const { error: err } = await $supabase.from('pto_days').delete().eq('id', id)
+      const { error: err } = await supabase.from('pto_days').delete().eq('id', id)
       if (err) throw err
       return true
     } catch (e: any) {

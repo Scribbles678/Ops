@@ -1,5 +1,6 @@
 export const useJobFunctions = () => {
-  const { $supabase } = useNuxtApp()
+  const supabase = useSupabaseClient()
+  const { getCurrentTeamId, isSuperAdmin } = useTeam()
   
   const jobFunctions = ref([])
   const loading = ref(false)
@@ -10,10 +11,19 @@ export const useJobFunctions = () => {
     error.value = null
     
     try {
-      let query = $supabase
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+      
+      let query = supabase
         .from('job_functions')
         .select('*')
-        .order('sort_order', { ascending: true })
+      
+      // Filter by team_id if not super admin
+      if (teamId) {
+        query = query.eq('team_id', teamId)
+      }
+      
+      query = query.order('sort_order', { ascending: true })
       
       if (activeOnly) {
         query = query.eq('is_active', true)
@@ -39,7 +49,7 @@ export const useJobFunctions = () => {
     error.value = null
     
     try {
-      const { data, error: createError } = await $supabase
+      const { data, error: createError } = await supabase
         .from('job_functions')
         .insert([jobFunctionData])
         .select()
@@ -62,7 +72,7 @@ export const useJobFunctions = () => {
     error.value = null
     
     try {
-      const { data, error: updateError } = await $supabase
+      const { data, error: updateError } = await supabase
         .from('job_functions')
         .update(jobFunctionData)
         .eq('id', id)
@@ -86,7 +96,7 @@ export const useJobFunctions = () => {
     error.value = null
     
     try {
-      const { error: deleteError } = await $supabase
+      const { error: deleteError } = await supabase
         .from('job_functions')
         .delete()
         .eq('id', id)

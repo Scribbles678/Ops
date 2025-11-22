@@ -231,7 +231,7 @@
 import { onBeforeRouteLeave } from 'vue-router'
 
 // Get Supabase client
-const { $supabase } = useNuxtApp()
+const supabase = useSupabaseClient()
 const { 
   employees, 
   loading: employeesLoading, 
@@ -379,7 +379,7 @@ const loadEmployeeShifts = async () => {
   
   try {
     // Load employee shifts from database using the composable
-    const { data, error } = await $supabase
+    const { data, error } = await supabase
       .from('employees')
       .select('id, shift_id')
       .in('id', employees.value.map(emp => emp.id))

@@ -1,12 +1,17 @@
-export default defineNuxtRouteMiddleware((to, from) => {
-  // Check if user is authenticated
-  const isAuthenticated = useCookie('auth-token', {
-    default: () => null,
-    maxAge: 60 * 60 * 24 * 7 // 7 days
-  })
+export default defineNuxtRouteMiddleware((to) => {
+  const user = useSupabaseUser()
 
-  // If not authenticated and not on login page, redirect to login
-  if (!isAuthenticated.value && to.path !== '/login') {
+  // Public routes that don't require authentication
+  const publicRoutes = ['/login', '/display']
+  const isPublicRoute = publicRoutes.includes(to.path)
+
+  // If user is logged in and trying to access login, redirect to home
+  if (user.value && isPublicRoute && to.path === '/login') {
+    return navigateTo('/')
+  }
+
+  // If user is not logged in and trying to access protected route, redirect to login
+  if (!user.value && !isPublicRoute) {
     return navigateTo('/login')
   }
 })

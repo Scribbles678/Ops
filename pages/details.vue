@@ -740,7 +740,7 @@
 const activeTab = ref('job-functions')
 
 // Supabase client
-const { $supabase } = useNuxtApp()
+const supabase = useSupabaseClient()
 
 // Composables
 const { 
@@ -975,7 +975,7 @@ const fetchTargetHours = async () => {
     targetHoursLoading.value = true
     
     // Load from database
-    const { data, error } = await $supabase
+    const { data, error } = await supabase
       .from('target_hours')
       .select('job_function_id, target_hours')
     
