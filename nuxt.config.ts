@@ -21,7 +21,7 @@ export default defineNuxtConfig({
     redirect: false, // We'll handle redirects manually in middleware
     redirectOptions: {
       login: '/login',
-      exclude: ['/login', '/display'] // Display mode is public
+      exclude: ['/login', '/display', '/reset-password'] // Display mode and reset password are public
     },
     url: process.env.SUPABASE_URL,
     key: process.env.SUPABASE_ANON_KEY,

@@ -2,7 +2,7 @@ export default defineNuxtRouteMiddleware((to) => {
   const user = useSupabaseUser()
 
   // Public routes that don't require authentication
-  const publicRoutes = ['/login', '/display']
+  const publicRoutes = ['/login', '/display', '/reset-password']
   const isPublicRoute = publicRoutes.includes(to.path)
 
   // If user is logged in and trying to access login, redirect to home
