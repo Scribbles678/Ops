@@ -136,22 +136,29 @@ const loading = ref(false)
 const error = ref('')
 const success = ref(false)
 
-// Get the hash from URL (Supabase sends token in hash)
-onMounted(async () => {
-  // Check if we have a hash with access_token (from email link)
-  if (process.client && window.location.hash) {
-    const hashParams = new URLSearchParams(window.location.hash.substring(1))
-    const accessToken = hashParams.get('access_token')
-    const type = hashParams.get('type')
-    
-    if (type === 'recovery' && accessToken) {
-      // We have a recovery token, user can reset password
-      // The token is in the URL, we'll use it when submitting
-    } else {
-      // Invalid or missing token
-      error.value = 'Invalid or expired reset link. Please request a new password reset.'
+// Check for reset token on mount
+onMounted(() => {
+  if (process.client) {
+    // Check URL hash for token
+    if (window.location.hash) {
+      const hashParams = new URLSearchParams(window.location.hash.substring(1))
+      const type = hashParams.get('type')
+      const accessToken = hashParams.get('access_token')
+      
+      if (type === 'recovery' && accessToken) {
+        // Token is present, user can proceed
+        return
+      }
     }
-  } else {
+    
+    // Check URL query params (some Supabase configs use query params)
+    const queryParams = new URLSearchParams(window.location.search)
+    if (queryParams.get('token') || queryParams.get('access_token')) {
+      // Token in query params
+      return
+    }
+    
+    // No token found
     error.value = 'No reset token found. Please use the link from your email.'
   }
 })
@@ -179,46 +186,70 @@ async function handleReset() {
   loading.value = true
 
   try {
-    // Get the hash from URL
-    if (!process.client || !window.location.hash) {
-      error.value = 'Invalid reset link'
+    if (!process.client) {
+      error.value = 'This must be done in the browser'
       return
     }
 
-    const hashParams = new URLSearchParams(window.location.hash.substring(1))
-    const accessToken = hashParams.get('access_token')
-    const type = hashParams.get('type')
+    // Check URL hash first (Supabase default)
+    let accessToken: string | null = null
+    let type: string | null = null
 
-    if (type !== 'recovery' || !accessToken) {
-      error.value = 'Invalid reset token. Please request a new password reset.'
+    if (window.location.hash) {
+      const hashParams = new URLSearchParams(window.location.hash.substring(1))
+      accessToken = hashParams.get('access_token')
+      type = hashParams.get('type')
+    }
+
+    // If not in hash, check query params
+    if (!accessToken) {
+      const queryParams = new URLSearchParams(window.location.search)
+      accessToken = queryParams.get('access_token') || queryParams.get('token')
+      type = queryParams.get('type') || 'recovery'
+    }
+
+    if (!accessToken || type !== 'recovery') {
+      error.value = 'Invalid or expired reset link. Please request a new password reset.'
       return
     }
 
-    // Set the session with the recovery token
+    // For password reset, we need to set the session first
+    // Supabase recovery tokens work by setting a temporary session
     const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
       access_token: accessToken,
-      refresh_token: '' // Not needed for recovery
+      refresh_token: '' // Recovery tokens don't include refresh tokens
     })
 
     if (sessionError) {
-      error.value = sessionError.message || 'Invalid or expired reset link'
+      // If setSession fails, the token might be expired or invalid
+      error.value = sessionError.message || 'Invalid or expired reset link. Please request a new password reset.'
       return
     }
 
-    // Update the password
+    // Verify we have a session before updating password
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      error.value = 'Failed to establish session. Please request a new password reset.'
+      return
+    }
+
+    // Now update the password (user is authenticated via the session)
     const { error: updateError } = await supabase.auth.updateUser({
       password: password.value
     })
 
     if (updateError) {
-      error.value = updateError.message || 'Failed to update password'
+      error.value = updateError.message || 'Failed to update password. The reset link may have expired.'
       return
     }
+
+    // Success! Sign out the temporary session
+    await supabase.auth.signOut()
 
     // Success!
     success.value = true
     
-    // Clear the hash from URL
+    // Clear the hash/query params from URL
     if (process.client) {
       window.history.replaceState(null, '', window.location.pathname)
     }
