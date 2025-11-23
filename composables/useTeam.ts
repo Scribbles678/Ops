@@ -76,11 +76,18 @@ export const useTeam = () => {
   
   /**
    * Check if current user is super admin
+   * Can optionally accept profile data to avoid querying
    */
-  const checkIsSuperAdmin = async (): Promise<boolean> => {
+  const checkIsSuperAdmin = async (profileData?: { is_super_admin?: boolean }): Promise<boolean> => {
     if (!user.value || !user.value.id) {
       isSuperAdmin.value = false
       return false
+    }
+    
+    // If profile data is provided, use it directly
+    if (profileData !== undefined) {
+      isSuperAdmin.value = profileData.is_super_admin || false
+      return isSuperAdmin.value
     }
     
     try {
@@ -92,11 +99,19 @@ export const useTeam = () => {
       
       if (error) {
         console.error('Error checking super admin:', error)
+        console.error('Error details:', JSON.stringify(error, null, 2))
         isSuperAdmin.value = false
         return false
       }
       
-      isSuperAdmin.value = data?.is_super_admin || false
+      if (!data) {
+        console.warn('No profile data returned for user:', user.value.id)
+        isSuperAdmin.value = false
+        return false
+      }
+      
+      isSuperAdmin.value = data.is_super_admin || false
+      console.log('Super admin check result:', { userId: user.value.id, isSuperAdmin: isSuperAdmin.value })
       return isSuperAdmin.value
     } catch (error) {
       console.error('Error checking super admin:', error)

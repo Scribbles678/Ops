@@ -755,10 +755,14 @@ const fetchTeams = async () => {
   }
   
   try {
-    // First check if we're super admin via composable
-    await checkIsSuperAdmin()
+    // Use profile data if available, otherwise check via composable
+    if (userProfile.value) {
+      await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
+    } else {
+      await checkIsSuperAdmin()
+    }
     
-    if (!isSuperAdmin.value) {
+    if (!isSuperAdmin.value && !userProfile.value?.is_super_admin) {
       console.log('Not a super admin after check')
       return
     }
@@ -830,23 +834,17 @@ const createTeam = async () => {
       await fetchUserProfile()
     }
     
-    // Check super admin status - use profile first, then composable
+    // Check super admin status - use profile first (most reliable)
     const isSuperAdminUser = userProfile.value?.is_super_admin === true
     
     if (!isSuperAdminUser) {
-      // Try checking via composable as fallback
-      const checked = await checkIsSuperAdmin()
-      if (!checked && !isSuperAdmin.value) {
-        error.value = 'Only super admins can create teams. Please refresh the page and try again.'
-        creatingTeam.value = false
-        return
-      }
+      error.value = 'Only super admins can create teams. Please refresh the page and try again.'
+      creatingTeam.value = false
+      return
     }
     
-    // Ensure composable knows we're super admin
-    if (isSuperAdminUser && !isSuperAdmin.value) {
-      isSuperAdmin.value = true
-    }
+    // Sync composable with profile data
+    await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
     
     await createTeamFn(newTeam.value.name)
     newTeam.value.name = ''
