@@ -759,6 +759,22 @@ const getUserEmail = (user: any) => {
 
 // Initialize
 onMounted(async () => {
+  // Wait for user to be available
+  const user = useSupabaseUser()
+  let retries = 0
+  const maxRetries = 10
+  
+  while (!user.value?.id && retries < maxRetries) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+    retries++
+  }
+  
+  if (!user.value?.id) {
+    error.value = 'User not found. Please log in again.'
+    loading.value = false
+    return
+  }
+  
   await checkIsSuperAdmin()
   if (isSuperAdmin.value) {
     await Promise.all([fetchUsers(), fetchTeams()])

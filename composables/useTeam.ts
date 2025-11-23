@@ -14,7 +14,7 @@ export const useTeam = () => {
    * Get current user's team
    */
   const fetchCurrentTeam = async () => {
-    if (!user.value) {
+    if (!user.value || !user.value.id) {
       currentTeam.value = null
       return null
     }
@@ -25,16 +25,21 @@ export const useTeam = () => {
         .from('user_profiles')
         .select('*, teams(*)')
         .eq('id', user.value.id)
-        .single()
+        .maybeSingle()
       
-      if (error) throw error
+      if (error) {
+        console.error('Error fetching team:', error)
+        currentTeam.value = null
+        return null
+      }
       
-      currentTeam.value = data?.teams
+      currentTeam.value = data?.teams || null
       isSuperAdmin.value = data?.is_super_admin || false
       
-      return data?.teams
+      return data?.teams || null
     } catch (error) {
       console.error('Error fetching team:', error)
+      currentTeam.value = null
       return null
     } finally {
       loading.value = false
@@ -45,7 +50,7 @@ export const useTeam = () => {
    * Get current user's team_id
    */
   const getCurrentTeamId = async (): Promise<string | null> => {
-    if (!user.value) return null
+    if (!user.value || !user.value.id) return null
     
     // If super admin, return null (can access all teams)
     if (isSuperAdmin.value) return null
@@ -55,9 +60,12 @@ export const useTeam = () => {
         .from('user_profiles')
         .select('team_id')
         .eq('id', user.value.id)
-        .single()
+        .maybeSingle()
       
-      if (error) throw error
+      if (error) {
+        console.error('Error fetching team_id:', error)
+        return null
+      }
       
       return data?.team_id || null
     } catch (error) {
@@ -70,21 +78,29 @@ export const useTeam = () => {
    * Check if current user is super admin
    */
   const checkIsSuperAdmin = async (): Promise<boolean> => {
-    if (!user.value) return false
+    if (!user.value || !user.value.id) {
+      isSuperAdmin.value = false
+      return false
+    }
     
     try {
       const { data, error } = await supabase
         .from('user_profiles')
         .select('is_super_admin')
         .eq('id', user.value.id)
-        .single()
+        .maybeSingle()
       
-      if (error) throw error
+      if (error) {
+        console.error('Error checking super admin:', error)
+        isSuperAdmin.value = false
+        return false
+      }
       
       isSuperAdmin.value = data?.is_super_admin || false
       return isSuperAdmin.value
     } catch (error) {
       console.error('Error checking super admin:', error)
+      isSuperAdmin.value = false
       return false
     }
   }

@@ -157,8 +157,21 @@ const handleLogout = async () => {
 }
 
 // Check if user is super admin
+const user = useSupabaseUser()
+
 onMounted(async () => {
-  await checkIsSuperAdmin()
+  // Wait for user to be available
+  let retries = 0
+  const maxRetries = 10
+  
+  while (!user.value?.id && retries < maxRetries) {
+    await new Promise(resolve => setTimeout(resolve, 100))
+    retries++
+  }
+  
+  if (user.value?.id) {
+    await checkIsSuperAdmin()
+  }
 })
 </script>
 
