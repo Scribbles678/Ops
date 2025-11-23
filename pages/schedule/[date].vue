@@ -799,7 +799,8 @@ const loadTargetHours = async () => {
     console.log('Any errors:', allError)
     
     // Load from database
-    const { data, error } = await $supabase
+    const supabase = useSupabaseClient()
+    const { data, error } = await supabase
       .from('target_hours')
       .select('job_function_id, target_hours')
     
@@ -1401,7 +1402,7 @@ const minutesToTime = (minutes: number): string => {
 
 const clearAssignmentsForDate = async (date: string) => {
   try {
-    const { error } = await $supabase
+    const { error } = await supabase
       .from('schedule_assignments')
       .delete()
       .eq('schedule_date', date)

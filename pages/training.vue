@@ -707,7 +707,7 @@ const updateEmployeeShift = async (employeeId: string, event: Event) => {
   
   try {
     // Update the employee's shift in the database
-    const { error } = await $supabase
+    const { error } = await supabase
       .from('employees')
       .update({ shift_id: shiftId || null })
       .eq('id', employeeId)

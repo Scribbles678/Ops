@@ -1036,7 +1036,7 @@ const saveTargetHours = async () => {
     console.log('Saving target hours:', upsertData)
     
     // Save to database using upsert
-    const { error } = await $supabase
+    const { error } = await supabase
       .from('target_hours')
       .upsert(upsertData, { 
         onConflict: 'job_function_id',

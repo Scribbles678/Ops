@@ -78,6 +78,7 @@
 </template>
 
 <script setup lang="ts">
+const supabase = useSupabaseClient()
 const { formatTime, formatDate } = useLaborCalculations()
 const { 
   scheduleAssignments: assignments,
@@ -265,7 +266,7 @@ onMounted(() => {
   const supabase = useSupabaseClient()
   
   // Subscribe to schedule_assignments changes
-  const assignmentsChannel = $supabase
+  const assignmentsChannel = supabase
     .channel('schedule-assignments-changes')
     .on(
       'postgres_changes',
@@ -284,7 +285,7 @@ onMounted(() => {
   realtimeSubscriptions.value.push(assignmentsChannel)
   
   // Subscribe to PTO changes
-  const ptoChannel = $supabase
+  const ptoChannel = supabase
     .channel('pto-changes')
     .on(
       'postgres_changes',
@@ -303,7 +304,7 @@ onMounted(() => {
   realtimeSubscriptions.value.push(ptoChannel)
   
   // Subscribe to shift swap changes
-  const swapChannel = $supabase
+  const swapChannel = supabase
     .channel('shift-swaps-changes')
     .on(
       'postgres_changes',
@@ -339,7 +340,7 @@ onMounted(() => {
       realtimeSubscriptions.value = []
       
       // Subscribe to schedule_assignments changes for new date
-      const assignmentsChannel = $supabase
+      const assignmentsChannel = supabase
         .channel('schedule-assignments-changes')
         .on(
           'postgres_changes',
@@ -358,7 +359,7 @@ onMounted(() => {
       realtimeSubscriptions.value.push(assignmentsChannel)
       
       // Subscribe to PTO changes for new date
-      const ptoChannel = $supabase
+      const ptoChannel = supabase
         .channel('pto-changes')
         .on(
           'postgres_changes',
@@ -377,7 +378,7 @@ onMounted(() => {
       realtimeSubscriptions.value.push(ptoChannel)
       
       // Subscribe to shift swap changes for new date
-      const swapChannel = $supabase
+      const swapChannel = supabase
         .channel('shift-swaps-changes')
         .on(
           'postgres_changes',
