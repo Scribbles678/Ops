@@ -154,12 +154,24 @@ export const useTeam = () => {
   
   /**
    * Create a new team (super admin only)
+   * Can optionally accept profile data to verify super admin status
    */
-  const createTeam = async (name: string) => {
-    // Always check super admin status before creating team
-    const isSuperAdminResult = await checkIsSuperAdmin()
+  const createTeam = async (name: string, profileData?: { is_super_admin?: boolean }) => {
+    // Check super admin status - use provided data or check current value
+    let isSuperAdminUser = isSuperAdmin.value
     
-    if (!isSuperAdminResult && !isSuperAdmin.value) {
+    if (profileData !== undefined) {
+      isSuperAdminUser = profileData.is_super_admin || false
+      // Sync the composable value
+      if (isSuperAdminUser) {
+        isSuperAdmin.value = true
+      }
+    } else if (!isSuperAdminUser) {
+      // If not set, try checking
+      isSuperAdminUser = await checkIsSuperAdmin()
+    }
+    
+    if (!isSuperAdminUser) {
       throw new Error('Only super admins can create teams')
     }
     

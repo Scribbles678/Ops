@@ -844,7 +844,8 @@ const createTeam = async () => {
     // Sync composable with profile data
     await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
     
-    await createTeamFn(newTeam.value.name)
+    // Pass profile data to createTeam to ensure it recognizes super admin status
+    await createTeamFn(newTeam.value.name, { is_super_admin: userProfile.value.is_super_admin })
     newTeam.value.name = ''
     showTeamModal.value = false
     await fetchTeams()
