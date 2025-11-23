@@ -95,8 +95,12 @@
         <h2 class="text-xl font-semibold text-gray-900 mb-4">Account Information</h2>
         <dl class="space-y-4">
           <div>
+            <dt class="text-sm font-medium text-gray-500">Email</dt>
+            <dd class="mt-1 text-sm text-gray-900">{{ user?.email || userProfile?.email || 'Loading...' }}</dd>
+          </div>
+          <div>
             <dt class="text-sm font-medium text-gray-500">Username</dt>
-            <dd class="mt-1 text-sm text-gray-900">{{ userProfile?.username || 'Loading...' }}</dd>
+            <dd class="mt-1 text-sm text-gray-900">{{ userProfile?.username || 'N/A' }}</dd>
           </div>
           <div v-if="userProfile?.full_name">
             <dt class="text-sm font-medium text-gray-500">Full Name</dt>
@@ -124,9 +128,7 @@
 </template>
 
 <script setup lang="ts">
-definePageMeta({
-  middleware: 'auth'
-})
+// Page is protected by auth.global.ts middleware
 
 const supabase = useSupabaseClient()
 const user = useSupabaseUser()
@@ -141,20 +143,35 @@ const userProfile = ref<any>(null)
 
 // Fetch user profile
 const fetchUserProfile = async () => {
-  if (!user.value) return
-
-  const { data, error: err } = await supabase
-    .from('user_profiles')
-    .select('*, teams(*)')
-    .eq('id', user.value.id)
-    .single()
-
-  if (err) {
-    console.error('Error fetching profile:', err)
+  if (!user.value) {
+    console.log('No user found, waiting...')
     return
   }
 
-  userProfile.value = data
+  try {
+    const { data, error: err } = await supabase
+      .from('user_profiles')
+      .select('*, teams(*)')
+      .eq('id', user.value.id)
+      .maybeSingle() // Use maybeSingle to avoid errors if profile doesn't exist
+
+    if (err) {
+      console.error('Error fetching profile:', err)
+      error.value = `Failed to load profile: ${err.message}`
+      return
+    }
+
+    if (!data) {
+      console.warn('No profile found for user')
+      error.value = 'Profile not found. Please contact your administrator.'
+      return
+    }
+
+    userProfile.value = data
+  } catch (err: any) {
+    console.error('Unexpected error fetching profile:', err)
+    error.value = 'Failed to load profile information'
+  }
 }
 
 // Handle password change
@@ -234,7 +251,20 @@ const handleChangePassword = async () => {
 
 // Fetch profile on mount
 onMounted(async () => {
+  // Wait for user to be available
+  if (!user.value) {
+    // Wait a bit for auth to initialize
+    await new Promise(resolve => setTimeout(resolve, 500))
+  }
+  
   await fetchUserProfile()
 })
+
+// Also watch for user changes
+watch(user, async (newUser) => {
+  if (newUser) {
+    await fetchUserProfile()
+  }
+}, { immediate: true })
 </script>
 

@@ -47,15 +47,11 @@ CREATE POLICY "Users can view own profile"
 ON user_profiles FOR SELECT 
 USING (auth.uid() = id);
 
--- Super admins can view all profiles
+-- Super admins can view all profiles (using function to avoid recursion)
 CREATE POLICY "Super admins can view all profiles" 
 ON user_profiles FOR SELECT 
 USING (
-  EXISTS (
-    SELECT 1 FROM user_profiles 
-    WHERE id = auth.uid() 
-    AND is_super_admin = true
-  )
+  is_super_admin()
 );
 
 -- Users can update their own profile (limited fields)
@@ -65,35 +61,23 @@ ON user_profiles FOR UPDATE
 USING (auth.uid() = id)
 WITH CHECK (auth.uid() = id);
 
--- Super admins can manage all profiles
+-- Super admins can manage all profiles (using function to avoid recursion)
 CREATE POLICY "Super admins can insert profiles" 
 ON user_profiles FOR INSERT 
 WITH CHECK (
-  EXISTS (
-    SELECT 1 FROM user_profiles 
-    WHERE id = auth.uid() 
-    AND is_super_admin = true
-  )
+  is_super_admin()
 );
 
 CREATE POLICY "Super admins can update all profiles" 
 ON user_profiles FOR UPDATE 
 USING (
-  EXISTS (
-    SELECT 1 FROM user_profiles 
-    WHERE id = auth.uid() 
-    AND is_super_admin = true
-  )
+  is_super_admin()
 );
 
 CREATE POLICY "Super admins can delete profiles" 
 ON user_profiles FOR DELETE 
 USING (
-  EXISTS (
-    SELECT 1 FROM user_profiles 
-    WHERE id = auth.uid() 
-    AND is_super_admin = true
-  )
+  is_super_admin()
 );
 
 -- ============================================
@@ -210,14 +194,14 @@ RETURNS UUID AS $$
   SELECT team_id FROM user_profiles WHERE id = auth.uid();
 $$ LANGUAGE sql SECURITY DEFINER;
 
--- Function to check if user is super admin
+-- Function to check if user is super admin (SECURITY DEFINER to avoid RLS recursion)
 CREATE OR REPLACE FUNCTION is_super_admin()
 RETURNS BOOLEAN AS $$
   SELECT COALESCE(
     (SELECT is_super_admin FROM user_profiles WHERE id = auth.uid()),
     false
   );
-$$ LANGUAGE sql SECURITY DEFINER;
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 -- ============================================
 -- EMPLOYEES TABLE POLICIES
