@@ -2,7 +2,7 @@
 
 [build]
   command = "npm run build"
-  publish = ".output/public"
+  publish = ".netlify/build"
 
 # Build settings
 [build.environment]
