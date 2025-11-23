@@ -825,13 +825,27 @@ const createTeam = async () => {
   error.value = ''
   
   try {
-    // Ensure super admin status is checked before creating team
-    await checkIsSuperAdmin()
+    // Ensure profile is loaded
+    if (!userProfile.value) {
+      await fetchUserProfile()
+    }
     
-    // Double-check: verify from profile as well
-    if (!isSuperAdmin.value && !userProfile.value?.is_super_admin) {
-      error.value = 'Only super admins can create teams'
-      return
+    // Check super admin status - use profile first, then composable
+    const isSuperAdminUser = userProfile.value?.is_super_admin === true
+    
+    if (!isSuperAdminUser) {
+      // Try checking via composable as fallback
+      const checked = await checkIsSuperAdmin()
+      if (!checked && !isSuperAdmin.value) {
+        error.value = 'Only super admins can create teams. Please refresh the page and try again.'
+        creatingTeam.value = false
+        return
+      }
+    }
+    
+    // Ensure composable knows we're super admin
+    if (isSuperAdminUser && !isSuperAdmin.value) {
+      isSuperAdmin.value = true
     }
     
     await createTeamFn(newTeam.value.name)

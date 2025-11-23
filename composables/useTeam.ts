@@ -126,12 +126,10 @@ export const useTeam = () => {
    * Create a new team (super admin only)
    */
   const createTeam = async (name: string) => {
-    // Ensure super admin status is checked
-    if (!isSuperAdmin.value) {
-      await checkIsSuperAdmin()
-    }
+    // Always check super admin status before creating team
+    const isSuperAdminResult = await checkIsSuperAdmin()
     
-    if (!isSuperAdmin.value) {
+    if (!isSuperAdminResult && !isSuperAdmin.value) {
       throw new Error('Only super admins can create teams')
     }
     
@@ -141,7 +139,13 @@ export const useTeam = () => {
       .select()
       .single()
     
-    if (error) throw error
+    if (error) {
+      // If RLS error, it might be because super admin check failed
+      if (error.message?.includes('permission') || error.message?.includes('policy') || error.message?.includes('row-level security')) {
+        throw new Error('Only super admins can create teams. Please ensure you are logged in as a super admin.')
+      }
+      throw error
+    }
     return data
   }
   
