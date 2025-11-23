@@ -2,7 +2,7 @@
 -- The new policies are causing recursion because subqueries in policies trigger RLS
 -- Run this to fix the recursion issue
 
--- Step 1: Create a SECURITY DEFINER function to get user's team_id (bypasses RLS)
+--- Step 1: Create a SECURITY DEFINER function to get user's team_id (bypasses RLS)
 CREATE OR REPLACE FUNCTION get_user_team_id()
 RETURNS UUID AS $$
   SELECT team_id FROM user_profiles WHERE id = auth.uid();
