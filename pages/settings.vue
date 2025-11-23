@@ -116,6 +116,9 @@
               <span v-if="userProfile?.is_super_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
                 Super Admin
               </span>
+              <span v-else-if="userProfile?.is_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                Admin
+              </span>
               <span v-else class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
                 User
               </span>
@@ -167,6 +170,9 @@
                   <td class="px-4 py-3 whitespace-nowrap">
                     <span v-if="u.is_super_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
                       Super Admin
+                    </span>
+                    <span v-else-if="u.is_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                      Admin
                     </span>
                     <span v-else class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
                       User
@@ -306,14 +312,28 @@
           </select>
         </div>
 
-        <div class="flex items-center">
-          <input
-            id="is_super_admin"
-            v-model="newUser.is_super_admin"
-            type="checkbox"
-            class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-          />
-          <label for="is_super_admin" class="ml-2 block text-sm text-gray-900">Super Admin</label>
+        <div class="space-y-2">
+          <div class="flex items-center">
+            <input
+              id="is_admin"
+              v-model="newUser.is_admin"
+              type="checkbox"
+              class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label for="is_admin" class="ml-2 block text-sm text-gray-900">Admin (Team Manager)</label>
+          </div>
+          <div class="flex items-center">
+            <input
+              id="is_super_admin"
+              v-model="newUser.is_super_admin"
+              type="checkbox"
+              class="h-4 w-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+            />
+            <label for="is_super_admin" class="ml-2 block text-sm text-gray-900">Super Admin (System Administrator)</label>
+          </div>
+          <p class="text-xs text-gray-500 ml-6">
+            Super Admin includes all Admin permissions plus system-wide access.
+          </p>
         </div>
         
         <div v-if="error" class="bg-red-50 border border-red-200 rounded-md p-3">
@@ -369,15 +389,31 @@
           </select>
         </div>
         
-        <div>
-          <label class="flex items-center">
-            <input
-              v-model="editUserData.is_super_admin"
-              type="checkbox"
-              class="mr-2"
-            />
-            <span class="text-sm text-gray-700">Super Admin</span>
-          </label>
+        <div class="space-y-2">
+          <div>
+            <label class="flex items-center">
+              <input
+                v-model="editUserData.is_admin"
+                type="checkbox"
+                class="mr-2"
+                :disabled="editingUser?.is_super_admin"
+              />
+              <span class="text-sm text-gray-700">Admin (Team Manager)</span>
+            </label>
+          </div>
+          <div>
+            <label class="flex items-center">
+              <input
+                v-model="editUserData.is_super_admin"
+                type="checkbox"
+                class="mr-2"
+              />
+              <span class="text-sm text-gray-700">Super Admin (System Administrator)</span>
+            </label>
+          </div>
+          <p class="text-xs text-gray-500 ml-6">
+            Only Super Admins can change roles. Super Admin includes all Admin permissions.
+          </p>
         </div>
         
         <div>
@@ -548,6 +584,7 @@ const confirmNewPasswordReset = ref('')
 const editUserData = ref({
   full_name: '',
   team_id: '',
+  is_admin: false,
   is_super_admin: false,
   is_active: true
 })
@@ -556,6 +593,7 @@ const newUser = ref({
   password: '',
   full_name: '',
   team_id: '',
+  is_admin: false,
   is_super_admin: false
 })
 const newTeam = ref({
@@ -689,7 +727,11 @@ const handleChangePassword = async () => {
 
 // Fetch data functions
 const fetchUsers = async () => {
-  if (!userProfile.value?.is_super_admin) return
+  // Check both userProfile and isSuperAdmin from composable
+  if (!userProfile.value?.is_super_admin && !isSuperAdmin.value) {
+    console.log('Not a super admin, skipping user fetch')
+    return
+  }
   
   const { data, error: err } = await supabase
     .from('user_profiles')
@@ -698,6 +740,7 @@ const fetchUsers = async () => {
   
   if (err) {
     console.error('Error fetching users:', err)
+    error.value = `Failed to fetch users: ${err.message}`
     return
   }
   
@@ -705,13 +748,26 @@ const fetchUsers = async () => {
 }
 
 const fetchTeams = async () => {
-  if (!userProfile.value?.is_super_admin) return
+  // Check both userProfile and isSuperAdmin from composable
+  if (!userProfile.value?.is_super_admin && !isSuperAdmin.value) {
+    console.log('Not a super admin, skipping team fetch')
+    return
+  }
   
   try {
+    // First check if we're super admin via composable
+    await checkIsSuperAdmin()
+    
+    if (!isSuperAdmin.value) {
+      console.log('Not a super admin after check')
+      return
+    }
+    
     const teamsData = await fetchAllTeams()
     teams.value = teamsData || []
   } catch (err: any) {
     console.error('Error fetching teams:', err)
+    error.value = `Failed to fetch teams: ${err.message}`
   }
 }
 
@@ -741,6 +797,7 @@ const createUser = async () => {
         password: newUser.value.password,
         full_name: newUser.value.full_name || null,
         team_id: newUser.value.team_id || null,
+        is_admin: newUser.value.is_admin || false,
         is_super_admin: newUser.value.is_super_admin || false
       }
     })
@@ -750,6 +807,7 @@ const createUser = async () => {
       password: '',
       full_name: '',
       team_id: '',
+      is_admin: false,
       is_super_admin: false
     }
     showCreateModal.value = false
@@ -784,6 +842,7 @@ const editUser = (u: any) => {
   editUserData.value = {
     full_name: u.full_name || '',
     team_id: u.team_id || '',
+    is_admin: u.is_admin || false,
     is_super_admin: u.is_super_admin || false,
     is_active: u.is_active !== false
   }
@@ -800,6 +859,7 @@ const saveUserEdit = async () => {
       .update({
         full_name: editUserData.value.full_name || null,
         team_id: editUserData.value.team_id || null,
+        is_admin: editUserData.value.is_admin,
         is_super_admin: editUserData.value.is_super_admin,
         is_active: editUserData.value.is_active
       } as any)
@@ -925,8 +985,14 @@ onMounted(async () => {
     
     if (user.value?.id || session?.user?.id) {
       await fetchUserProfile()
+      // Wait a bit for profile to load, then check if super admin
+      await new Promise(resolve => setTimeout(resolve, 200))
+      
+      // Check super admin status via composable
+      await checkIsSuperAdmin()
+      
       // If super admin, also fetch users and teams
-      if (userProfile.value?.is_super_admin) {
+      if (userProfile.value?.is_super_admin || isSuperAdmin.value) {
         await Promise.all([fetchUsers(), fetchTeams()])
       }
       return
@@ -944,15 +1010,18 @@ onMounted(async () => {
 watch(user, async (newUser) => {
   if (newUser?.id) {
     await fetchUserProfile()
-    if (userProfile.value?.is_super_admin) {
+    await checkIsSuperAdmin()
+    
+    if (userProfile.value?.is_super_admin || isSuperAdmin.value) {
       await Promise.all([fetchUsers(), fetchTeams()])
     }
   }
 }, { immediate: false })
 
 // Watch for profile changes to reload management data
-watch(() => userProfile.value?.is_super_admin, async (isSuperAdmin) => {
-  if (isSuperAdmin) {
+watch(() => userProfile.value?.is_super_admin, async (isSuperAdminStatus) => {
+  if (isSuperAdminStatus) {
+    await checkIsSuperAdmin()
     await Promise.all([fetchUsers(), fetchTeams()])
   }
 })

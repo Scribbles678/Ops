@@ -12,8 +12,8 @@ export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const body = await readBody(event)
 
-  // Validate required fields
-  const { email, password, full_name, team_id, is_super_admin } = body
+      // Validate required fields
+      const { email, password, full_name, team_id, is_admin, is_super_admin } = body
 
   if (!email || !password) {
     throw createError({
@@ -123,6 +123,7 @@ export default defineEventHandler(async (event) => {
         email: email.trim().toLowerCase(), // Store email for easy lookup
         full_name: full_name || null,
         team_id: team_id || null,
+        is_admin: is_admin || false,
         is_super_admin: is_super_admin || false,
         is_active: true
       })
