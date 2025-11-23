@@ -143,68 +143,71 @@ const success = ref(false)
 onMounted(async () => {
   if (!process.client) return
 
-  // Wait a moment for Supabase module to initialize
-  await new Promise(resolve => setTimeout(resolve, 300))
+  // Check if we have a recovery token in the URL
+  const hasHash = !!window.location.hash
+  const hashHasToken = hasHash && window.location.hash.includes('access_token')
+  
+  if (!hasHash || !hashHasToken) {
+    error.value = 'No reset token found in URL. Please use the link from your email.'
+    return
+  }
 
-  let accessToken: string | null = null
-  let type: string | null = null
+  // Wait for Supabase module to process the hash automatically
+  // The @nuxtjs/supabase module should handle the hash automatically
+  await new Promise(resolve => setTimeout(resolve, 1000))
 
-  // Check URL hash for token (Supabase default)
-  if (window.location.hash) {
+  // Check if Supabase automatically created a session
+  const { data: { session }, error: getSessionError } = await supabase.auth.getSession()
+  
+  if (getSessionError) {
+    console.error('Error getting session:', getSessionError)
+    error.value = `Failed to process reset link: ${getSessionError.message}. Please try refreshing the page.`
+    return
+  }
+
+  // If no session was auto-created, try to manually set it
+  if (!session) {
+    console.log('No auto session, trying manual setSession...')
+    
+    // Extract token from hash
     const hashParams = new URLSearchParams(window.location.hash.substring(1))
-    accessToken = hashParams.get('access_token')
-    type = hashParams.get('type')
-  }
+    const accessToken = hashParams.get('access_token')
+    const type = hashParams.get('type')
+    
+    if (!accessToken || type !== 'recovery') {
+      error.value = 'Invalid reset link format. Please request a new password reset.'
+      return
+    }
 
-  // If not in hash, check query params
-  if (!accessToken) {
-    const queryParams = new URLSearchParams(window.location.search)
-    accessToken = queryParams.get('access_token') || queryParams.get('token')
-    type = queryParams.get('type') || 'recovery'
-  }
-
-  if (!accessToken) {
-    error.value = 'No reset token found. Please use the link from your email.'
-    return
-  }
-
-  if (type !== 'recovery') {
-    error.value = 'Invalid reset link type. Please request a new password reset.'
-    return
-  }
-
-  // Try to set the session immediately
-  try {
-    const { data, error: sessionError } = await supabase.auth.setSession({
+    // Try to manually set the session
+    const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
       access_token: accessToken,
       refresh_token: ''
     })
-    
+
     if (sessionError) {
-      console.error('Session error:', sessionError)
-      // Provide more specific error message
-      if (sessionError.message.includes('expired') || sessionError.message.includes('invalid')) {
+      console.error('Manual setSession error:', sessionError)
+      
+      // If setSession fails with "session missing", the token might be expired
+      if (sessionError.message?.includes('session missing') || sessionError.message?.includes('expired') || sessionError.message?.includes('invalid')) {
         error.value = 'This reset link has expired or is invalid. Please request a new password reset.'
       } else {
-        error.value = `Unable to process reset link: ${sessionError.message}`
+        error.value = `Unable to process reset link: ${sessionError.message}. Please request a new password reset.`
       }
       return
     }
 
     // Verify session was set
-    const { data: { session }, error: getSessionError } = await supabase.auth.getSession()
-    if (getSessionError || !session) {
-      console.error('Session verification failed:', getSessionError)
+    const { data: { session: newSession } } = await supabase.auth.getSession()
+    if (!newSession || !newSession.user) {
       error.value = 'Failed to establish session. Please try refreshing the page or request a new password reset.'
       return
     }
-
-    // Success - session is set, clear any error
-    error.value = ''
-  } catch (err: any) {
-    console.error('Error setting session:', err)
-    error.value = `Failed to process reset link: ${err.message || 'Unknown error'}. Please request a new password reset.`
   }
+
+  // Success - we have a session
+  console.log('Session established successfully')
+  error.value = ''
 })
 
 // Handle password reset
