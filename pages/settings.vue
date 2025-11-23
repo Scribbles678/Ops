@@ -108,7 +108,21 @@
           </div>
           <div>
             <dt class="text-sm font-medium text-gray-500">Team</dt>
-            <dd class="mt-1 text-sm text-gray-900">{{ userProfile?.teams?.name || 'No Team' }}</dd>
+            <dd class="mt-1 flex items-center gap-2">
+              <span v-if="userProfile?.teams?.name" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800">
+                {{ userProfile.teams.name }}
+              </span>
+              <span v-else class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+                No Team
+              </span>
+              <button
+                v-if="userProfile?.is_super_admin || userProfile?.is_admin"
+                @click="showEditOwnTeamModal = true"
+                class="ml-2 text-xs text-blue-600 hover:text-blue-800 underline"
+              >
+                Change Team
+              </button>
+            </dd>
           </div>
           <div>
             <dt class="text-sm font-medium text-gray-500">Role</dt>
@@ -164,8 +178,13 @@
                   <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
                     {{ u.full_name || '-' }}
                   </td>
-                  <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                    {{ u.teams?.name || 'No Team' }}
+                  <td class="px-4 py-3 whitespace-nowrap">
+                    <span v-if="u.teams?.name" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800">
+                      {{ u.teams.name }}
+                    </span>
+                    <span v-else class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
+                      No Team
+                    </span>
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap">
                     <span v-if="u.is_super_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
@@ -548,6 +567,48 @@
       </form>
     </div>
   </div>
+
+  <!-- Edit Own Team Modal -->
+  <div v-if="showEditOwnTeamModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50" @click.self="showEditOwnTeamModal = false">
+    <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+      <h3 class="text-lg font-bold text-gray-900 mb-4">Change Your Team</h3>
+      
+      <form @submit.prevent="saveOwnTeam" class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Team</label>
+          <select
+            v-model="ownTeamData.team_id"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md"
+          >
+            <option value="">No Team</option>
+            <option v-for="team in teams" :key="team.id" :value="team.id">
+              {{ team.name }}
+            </option>
+          </select>
+        </div>
+        
+        <div v-if="error" class="bg-red-50 border border-red-200 rounded-md p-3">
+          <p class="text-sm text-red-600">{{ error }}</p>
+        </div>
+        
+        <div class="flex justify-end space-x-3">
+          <button
+            type="button"
+            @click="showEditOwnTeamModal = false; error = ''"
+            class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            Save Changes
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -573,6 +634,8 @@ const showCreateModal = ref(false)
 const showTeamModal = ref(false)
 const showEditModal = ref(false)
 const showResetPasswordModal = ref(false)
+const showEditOwnTeamModal = ref(false)
+const ownTeamData = ref({ team_id: '' })
 const creating = ref(false)
 const creatingTeam = ref(false)
 const resettingPassword = ref(false)
@@ -856,6 +919,33 @@ const createTeam = async () => {
   }
 }
 
+// Save own team assignment
+const saveOwnTeam = async () => {
+  if (!userProfile.value) return
+  
+  try {
+    const { error: err } = await supabase
+      .from('user_profiles')
+      .update({
+        team_id: ownTeamData.value.team_id || null
+      } as any)
+      .eq('id', userProfile.value.id)
+    
+    if (err) {
+      error.value = err.message
+      return
+    }
+    
+    // Refresh profile to show updated team
+    await fetchUserProfile()
+    showEditOwnTeamModal.value = false
+    ownTeamData.value.team_id = ''
+    error.value = ''
+  } catch (err: any) {
+    error.value = err.message || 'Failed to update team'
+  }
+}
+
 // Edit user
 const editUser = (u: any) => {
   editingUser.value = u
@@ -1003,22 +1093,25 @@ onMounted(async () => {
     // Check both user.value and session
     const { data: { session } } = await supabase.auth.getSession()
     
-    if (user.value?.id || session?.user?.id) {
-      await fetchUserProfile()
-      // Wait a bit for profile to load, then check if super admin
-      await new Promise(resolve => setTimeout(resolve, 200))
-      
-      // Check super admin status via composable
-      await checkIsSuperAdmin()
-      
-      // If super admin, also fetch users and teams
-      if (userProfile.value?.is_super_admin) {
-        // Sync composable first
-        await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
-        await Promise.all([fetchUsers(), fetchTeams()])
+      if (user.value?.id || session?.user?.id) {
+        await fetchUserProfile()
+        // Wait a bit for profile to load, then check if super admin
+        await new Promise(resolve => setTimeout(resolve, 200))
+        
+        // Check super admin status via composable
+        await checkIsSuperAdmin()
+        
+        // Initialize own team data
+        ownTeamData.value.team_id = userProfile.value?.team_id || ''
+        
+        // If super admin, also fetch users and teams
+        if (userProfile.value?.is_super_admin) {
+          // Sync composable first
+          await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
+          await Promise.all([fetchUsers(), fetchTeams()])
+        }
+        return
       }
-      return
-    }
     
     await new Promise(resolve => setTimeout(resolve, 100))
     retries++
