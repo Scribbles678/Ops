@@ -97,7 +97,7 @@
             Authorized personnel only. All access is logged and monitored.
           </p>
           <p class="text-xs text-gray-400 mt-2">
-            Need an account? Contact your administrator.
+            Need an account or forgot your password? Contact your administrator.
           </p>
         </div>
       </div>

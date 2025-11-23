@@ -84,6 +84,12 @@
                     Edit
                   </button>
                   <button
+                    @click="resetPassword(user)"
+                    class="text-indigo-600 hover:text-indigo-900 mr-4"
+                  >
+                    Reset Password
+                  </button>
+                  <button
                     @click="toggleUserStatus(user)"
                     class="text-gray-600 hover:text-gray-900"
                   >
@@ -276,6 +282,120 @@
           </form>
         </div>
       </div>
+
+      <!-- Reset Password Modal -->
+      <div v-if="showResetPasswordModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50" @click.self="showResetPasswordModal = false">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+          <h3 class="text-lg font-bold text-gray-900 mb-4">Reset Password for {{ resetPasswordUser?.username }}</h3>
+          
+          <form @submit.prevent="handleResetPassword" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">New Password *</label>
+              <input
+                v-model="resetPasswordData.password"
+                type="password"
+                required
+                minlength="6"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md"
+              />
+            </div>
+            
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Confirm Password *</label>
+              <input
+                v-model="resetPasswordData.confirmPassword"
+                type="password"
+                required
+                minlength="6"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md"
+              />
+            </div>
+            
+            <div v-if="error" class="bg-red-50 border border-red-200 rounded-md p-3">
+              <p class="text-sm text-red-600">{{ error }}</p>
+            </div>
+            
+            <div v-if="resetPasswordSuccess" class="bg-green-50 border border-green-200 rounded-md p-3">
+              <p class="text-sm text-green-600">Password updated successfully!</p>
+            </div>
+            
+            <div class="flex justify-end space-x-3">
+              <button
+                type="button"
+                @click="showResetPasswordModal = false"
+                class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                :disabled="resettingPassword"
+                class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {{ resettingPassword ? 'Resetting...' : 'Reset Password' }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Reset Password Modal -->
+      <div v-if="showResetPasswordModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50" @click.self="showResetPasswordModal = false">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+          <h3 class="text-lg font-bold text-gray-900 mb-4">Reset Password for {{ userToReset?.username }}</h3>
+          
+          <form @submit.prevent="confirmResetPassword" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">New Password *</label>
+              <input
+                v-model="newPassword"
+                type="password"
+                required
+                minlength="6"
+                placeholder="Enter new password"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md"
+              />
+            </div>
+            
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Confirm Password *</label>
+              <input
+                v-model="confirmNewPassword"
+                type="password"
+                required
+                minlength="6"
+                placeholder="Confirm new password"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md"
+              />
+            </div>
+            
+            <div v-if="error" class="bg-red-50 border border-red-200 rounded-md p-3">
+              <p class="text-sm text-red-600">{{ error }}</p>
+            </div>
+            
+            <div v-if="resetSuccess" class="bg-green-50 border border-green-200 rounded-md p-3">
+              <p class="text-sm text-green-600">Password reset successfully!</p>
+            </div>
+            
+            <div class="flex justify-end space-x-3">
+              <button
+                type="button"
+                @click="showResetPasswordModal = false; error = ''; resetSuccess = false"
+                class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                :disabled="resettingPassword || newPassword !== confirmNewPassword"
+                class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {{ resettingPassword ? 'Resetting...' : 'Reset Password' }}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -295,8 +415,14 @@ const error = ref('')
 
 const showCreateModal = ref(false)
 const showTeamModal = ref(false)
+const showResetPasswordModal = ref(false)
 const creating = ref(false)
 const creatingTeam = ref(false)
+const resettingPassword = ref(false)
+const resetSuccess = ref(false)
+const userToReset = ref<any>(null)
+const newPassword = ref('')
+const confirmNewPassword = ref('')
 
 const newUser = ref({
   username: '',
@@ -400,10 +526,181 @@ const createTeam = async () => {
   }
 }
 
+// Reset user password
+const resetPassword = (user: any) => {
+  resetPasswordUser.value = user
+  resetPasswordData.value = {
+    password: '',
+    confirmPassword: ''
+  }
+  resetPasswordSuccess.value = false
+  error.value = ''
+  showResetPasswordModal.value = true
+}
+
+const handleResetPassword = async () => {
+  error.value = ''
+  resetPasswordSuccess.value = false
+  
+  if (resetPasswordData.value.password !== resetPasswordData.value.confirmPassword) {
+    error.value = 'Passwords do not match'
+    return
+  }
+  
+  if (resetPasswordData.value.password.length < 6) {
+    error.value = 'Password must be at least 6 characters'
+    return
+  }
+  
+  resettingPassword.value = true
+  
+  try {
+    // Get current session token
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      error.value = 'Not authenticated'
+      return
+    }
+    
+    // Call server route to reset password (uses service role key)
+    const response = await $fetch('/api/admin/users/reset-password', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: {
+        user_id: resetPasswordUser.value.id,
+        new_password: resetPasswordData.value.password
+      }
+    })
+    
+    resetPasswordSuccess.value = true
+    
+    // Close modal after 2 seconds
+    setTimeout(() => {
+      showResetPasswordModal.value = false
+      resetPasswordUser.value = null
+      resetPasswordData.value = {
+        password: '',
+        confirmPassword: ''
+      }
+    }, 2000)
+  } catch (err: any) {
+    error.value = err.data?.message || err.message || 'Failed to reset password'
+  } finally {
+    resettingPassword.value = false
+  }
+}
+
+// Reset user password
+const resetPassword = (user: any) => {
+  userToReset.value = user
+  newPassword.value = ''
+  confirmNewPassword.value = ''
+  error.value = ''
+  resetSuccess.value = false
+  showResetPasswordModal.value = true
+}
+
+const confirmResetPassword = async () => {
+  if (newPassword.value !== confirmNewPassword.value) {
+    error.value = 'Passwords do not match'
+    return
+  }
+  
+  if (newPassword.value.length < 6) {
+    error.value = 'Password must be at least 6 characters'
+    return
+  }
+  
+  resettingPassword.value = true
+  error.value = ''
+  resetSuccess.value = false
+  
+  try {
+    // Get current session token
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      error.value = 'Not authenticated'
+      return
+    }
+    
+    // Call server route to reset password (uses service role key)
+    const response = await $fetch('/api/admin/users/reset-password', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: {
+        user_id: userToReset.value.id,
+        new_password: newPassword.value
+      }
+    })
+    
+    resetSuccess.value = true
+    
+    // Close modal after 1.5 seconds
+    setTimeout(() => {
+      showResetPasswordModal.value = false
+      newPassword.value = ''
+      confirmNewPassword.value = ''
+      resetSuccess.value = false
+    }, 1500)
+  } catch (err: any) {
+    error.value = err.data?.message || err.message || 'Failed to reset password'
+  } finally {
+    resettingPassword.value = false
+  }
+}
+
 // Edit user
 const editUser = (user: any) => {
   // TODO: Implement edit user modal
   alert('Edit user functionality coming soon')
+}
+
+// Reset user password
+const resetUserPassword = async (user: any) => {
+  const newPassword = prompt(`Enter new password for ${user.username} (min 6 characters):`)
+  
+  if (!newPassword) {
+    return // User cancelled
+  }
+  
+  if (newPassword.length < 6) {
+    error.value = 'Password must be at least 6 characters'
+    return
+  }
+  
+  if (!confirm(`Reset password for ${user.username}?`)) {
+    return
+  }
+  
+  try {
+    // Get current session token for admin API call
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      error.value = 'Not authenticated'
+      return
+    }
+    
+    // Call server route to reset password (uses service role key)
+    const response = await $fetch('/api/admin/users/reset-password', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${session.access_token}`
+      },
+      body: {
+        user_id: user.id,
+        new_password: newPassword
+      }
+    })
+    
+    alert(`Password reset successfully for ${user.username}`)
+    error.value = ''
+  } catch (err: any) {
+    error.value = err.data?.message || err.message || 'Failed to reset password'
+  }
 }
 
 // Toggle user status
