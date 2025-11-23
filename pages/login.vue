@@ -168,24 +168,56 @@ async function handleLogin() {
     }
 
     if (data.user) {
-      // Wait a moment for session to be fully established
-      await new Promise(resolve => setTimeout(resolve, 100))
+      // Wait for session to be fully established and RLS to recognize it
+      // The @nuxtjs/supabase module should handle this, but we need to wait
+      await new Promise(resolve => setTimeout(resolve, 500))
+
+      // Verify session is loaded
+      const { data: { session: currentSession } } = await supabase.auth.getSession()
+      if (!currentSession) {
+        error.value = 'Session not established. Please try again.'
+        return
+      }
 
       // Check if user has a profile (was created by admin)
-      // Try querying with explicit user ID
-      const { data: profile, error: profileError } = await supabase
-        .from('user_profiles')
-        .select('is_active, username, email, is_super_admin')
-        .eq('id', data.user.id)
-        .maybeSingle() // Use maybeSingle instead of single to avoid error if not found
+      // Retry logic for RLS timing issues
+      let profile = null
+      let profileError = null
+      let retries = 0
+      const maxRetries = 3
+
+      while (retries < maxRetries && !profile && !profileError) {
+        const { data: profileData, error: errorData } = await supabase
+          .from('user_profiles')
+          .select('is_active, username, email, is_super_admin')
+          .eq('id', data.user.id)
+          .maybeSingle()
+
+        if (errorData) {
+          // If it's an RLS/permission error, wait and retry
+          if (errorData.message?.includes('permission') || 
+              errorData.message?.includes('policy') || 
+              errorData.message?.includes('RLS') ||
+              errorData.code === '42501') {
+            retries++
+            if (retries < maxRetries) {
+              console.log(`RLS error, retrying... (${retries}/${maxRetries})`)
+              await new Promise(resolve => setTimeout(resolve, 500))
+              continue
+            }
+          }
+          profileError = errorData
+          break
+        }
+
+        profile = profileData
+        break
+      }
 
       if (profileError) {
         console.error('Profile lookup error:', profileError)
-        // Provide more specific error message
         if (profileError.code === 'PGRST116' || profileError.message?.includes('No rows')) {
           error.value = 'Account not found. Please contact your administrator to create your profile.'
-        } else if (profileError.message?.includes('permission') || profileError.message?.includes('policy') || profileError.message?.includes('RLS')) {
-          error.value = 'Permission denied. Please contact your administrator. (RLS policy issue)'
         } else {
           error.value = `Account lookup failed: ${profileError.message}. Please contact your administrator.`
         }
