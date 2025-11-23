@@ -168,15 +168,33 @@ async function handleLogin() {
     }
 
     if (data.user) {
+      // Wait a moment for session to be fully established
+      await new Promise(resolve => setTimeout(resolve, 100))
+
       // Check if user has a profile (was created by admin)
+      // Try querying with explicit user ID
       const { data: profile, error: profileError } = await supabase
         .from('user_profiles')
-        .select('is_active')
+        .select('is_active, username, email, is_super_admin')
         .eq('id', data.user.id)
-        .single()
+        .maybeSingle() // Use maybeSingle instead of single to avoid error if not found
 
-      if (profileError || !profile) {
-        error.value = 'Account not found. Please contact your administrator.'
+      if (profileError) {
+        console.error('Profile lookup error:', profileError)
+        // Provide more specific error message
+        if (profileError.code === 'PGRST116' || profileError.message?.includes('No rows')) {
+          error.value = 'Account not found. Please contact your administrator to create your profile.'
+        } else if (profileError.message?.includes('permission') || profileError.message?.includes('policy') || profileError.message?.includes('RLS')) {
+          error.value = 'Permission denied. Please contact your administrator. (RLS policy issue)'
+        } else {
+          error.value = `Account lookup failed: ${profileError.message}. Please contact your administrator.`
+        }
+        await supabase.auth.signOut()
+        return
+      }
+
+      if (!profile) {
+        error.value = 'Account not found. Please contact your administrator to create your profile.'
         await supabase.auth.signOut()
         return
       }
