@@ -825,6 +825,15 @@ const createTeam = async () => {
   error.value = ''
   
   try {
+    // Ensure super admin status is checked before creating team
+    await checkIsSuperAdmin()
+    
+    // Double-check: verify from profile as well
+    if (!isSuperAdmin.value && !userProfile.value?.is_super_admin) {
+      error.value = 'Only super admins can create teams'
+      return
+    }
+    
     await createTeamFn(newTeam.value.name)
     newTeam.value.name = ''
     showTeamModal.value = false

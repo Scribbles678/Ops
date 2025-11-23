@@ -8,6 +8,7 @@ ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT fals
 CREATE INDEX IF NOT EXISTS idx_user_profiles_admin ON user_profiles(is_admin);
 
 -- Step 3: Create function to check if user is admin (for their team)
+-- SECURITY DEFINER allows it to bypass RLS and prevent recursion
 CREATE OR REPLACE FUNCTION is_admin()
 RETURNS BOOLEAN AS $$
   SELECT COALESCE(
@@ -31,19 +32,23 @@ DROP POLICY IF EXISTS "Users can view own profile" ON user_profiles;
 DROP POLICY IF EXISTS "Super admins can view all profiles" ON user_profiles;
 
 -- Create new SELECT policy that includes admin access
+-- Note: We use is_admin() and is_super_admin() functions which are SECURITY DEFINER
+-- to avoid RLS recursion
 CREATE POLICY "Users can view own profile or team" 
 ON user_profiles FOR SELECT 
 USING (
   -- User can see their own profile
   auth.uid() = id
   OR
-  -- Super admins can see all profiles
+  -- Super admins can see all profiles (function bypasses RLS)
   is_super_admin()
   OR
-  -- Admins can see users in their own team
+  -- Admins can see users in their own team (function bypasses RLS)
   (
     is_admin()
-    AND team_id = (SELECT team_id FROM user_profiles WHERE id = auth.uid())
+    AND team_id IN (
+      SELECT team_id FROM user_profiles WHERE id = auth.uid()
+    )
     AND team_id IS NOT NULL
   )
 );
@@ -64,9 +69,10 @@ USING (
   is_super_admin()
   OR
   -- Admins can update users in their own team
+  -- Use get_user_team_id() function (SECURITY DEFINER) to avoid recursion
   (
     is_admin()
-    AND team_id = (SELECT team_id FROM user_profiles WHERE id = auth.uid())
+    AND team_id = get_user_team_id()
     AND team_id IS NOT NULL
     AND id != auth.uid() -- Admins cannot update themselves
   )
@@ -80,9 +86,10 @@ WITH CHECK (
   OR
   -- Admins can update users in their team
   -- Note: The trigger will prevent admins from changing roles/teams
+  -- Use get_user_team_id() function (SECURITY DEFINER) to avoid recursion
   (
     is_admin()
-    AND team_id = (SELECT team_id FROM user_profiles WHERE id = auth.uid())
+    AND team_id = get_user_team_id()
     AND team_id IS NOT NULL
   )
 );

@@ -126,6 +126,11 @@ export const useTeam = () => {
    * Create a new team (super admin only)
    */
   const createTeam = async (name: string) => {
+    // Ensure super admin status is checked
+    if (!isSuperAdmin.value) {
+      await checkIsSuperAdmin()
+    }
+    
     if (!isSuperAdmin.value) {
       throw new Error('Only super admins can create teams')
     }
