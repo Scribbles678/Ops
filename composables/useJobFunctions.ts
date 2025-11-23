@@ -49,9 +49,15 @@ export const useJobFunctions = () => {
     error.value = null
     
     try {
+      // Get team_id for new job function
+      const teamId = isSuperAdmin.value ? jobFunctionData.team_id : await getCurrentTeamId()
+      if (!teamId && !isSuperAdmin.value) {
+        throw new Error('Unable to determine team. Please contact administrator.')
+      }
+      
       const { data, error: createError } = await supabase
         .from('job_functions')
-        .insert([jobFunctionData])
+        .insert([{ ...jobFunctionData, team_id: teamId }])
         .select()
       
       if (createError) throw createError

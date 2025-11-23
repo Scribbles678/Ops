@@ -122,10 +122,20 @@ export const useEmployees = () => {
 
   const getEmployeeTraining = async (employeeId) => {
     try {
-      const { data, error: fetchError } = await supabase
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+      
+      let query = supabase
         .from('employee_training')
         .select('job_function_id')
         .eq('employee_id', employeeId)
+      
+      // Filter by team_id if not super admin
+      if (teamId) {
+        query = query.eq('team_id', teamId)
+      }
+      
+      const { data, error: fetchError } = await query
       
       if (fetchError) throw fetchError
       
@@ -140,18 +150,28 @@ export const useEmployees = () => {
     try {
       if (!employeeIds || employeeIds.length === 0) return {}
 
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+
       const batchSize = 1000
       let from = 0
       let hasMore = true
       let allRows: Array<{ employee_id: string; job_function_id: string }> = []
 
       while (hasMore) {
-        const { data, error: fetchError } = await supabase
+        let query = supabase
           .from('employee_training')
           .select('employee_id, job_function_id')
           .in('employee_id', employeeIds)
           .order('employee_id', { ascending: true })
           .range(from, from + batchSize - 1)
+        
+        // Filter by team_id if not super admin
+        if (teamId) {
+          query = query.eq('team_id', teamId)
+        }
+        
+        const { data, error: fetchError } = await query
 
         if (fetchError) throw fetchError
 
@@ -223,9 +243,19 @@ export const useEmployees = () => {
         
         // Insert new training records
         if (cleanJobFunctionIds.length > 0) {
+          // Get team_id for training records (from employee's team)
+          const { data: employeeData } = await supabase
+            .from('employees')
+            .select('team_id')
+            .eq('id', employeeId)
+            .single()
+          
+          const teamId = employeeData?.team_id || (isSuperAdmin.value ? null : await getCurrentTeamId())
+          
           const trainingRecords = cleanJobFunctionIds.map(jfId => ({
             employee_id: employeeId,
-            job_function_id: jfId
+            job_function_id: jfId,
+            team_id: teamId
           }))
           
           const { error: insertError } = await supabase

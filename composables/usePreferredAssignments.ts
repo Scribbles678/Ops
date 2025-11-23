@@ -2,6 +2,8 @@ import { ref } from 'vue'
 
 export const usePreferredAssignments = () => {
   const supabase = useSupabaseClient()
+  const { getCurrentTeamId, isSuperAdmin } = useTeam()
+  
   const preferredAssignments = ref<any[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -11,13 +13,23 @@ export const usePreferredAssignments = () => {
     loading.value = true
     error.value = null
     try {
-      const { data, error: fetchError } = await supabase
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+      
+      let query = supabase
         .from('preferred_assignments')
         .select(`
           *,
           employee:employees(id, first_name, last_name),
           job_function:job_functions(id, name)
         `)
+      
+      // Filter by team_id if not super admin
+      if (teamId) {
+        query = query.eq('team_id', teamId)
+      }
+      
+      const { data, error: fetchError } = await query
         .order('priority', { ascending: false })
         .order('created_at', { ascending: true })
 
@@ -83,11 +95,18 @@ export const usePreferredAssignments = () => {
     is_required?: boolean
     priority?: number
     notes?: string
+    team_id?: string | null
   }) => {
     try {
+      // Get team_id for new preferred assignment
+      const teamId = isSuperAdmin.value ? assignmentData.team_id : await getCurrentTeamId()
+      if (!teamId && !isSuperAdmin.value) {
+        throw new Error('Unable to determine team. Please contact administrator.')
+      }
+      
       const { data, error: insertError } = await supabase
         .from('preferred_assignments')
-        .insert(assignmentData)
+        .insert({ ...assignmentData, team_id: teamId })
         .select()
 
       if (insertError) throw insertError

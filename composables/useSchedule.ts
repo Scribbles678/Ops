@@ -47,9 +47,15 @@ export const useSchedule = () => {
     error.value = null
     
     try {
+      // Get team_id for new shift
+      const teamId = isSuperAdmin.value ? shiftData.team_id : await getCurrentTeamId()
+      if (!teamId && !isSuperAdmin.value) {
+        throw new Error('Unable to determine team. Please contact administrator.')
+      }
+      
       const { data, error: createError } = await supabase
         .from('shifts')
-        .insert([shiftData])
+        .insert([{ ...shiftData, team_id: teamId }])
         .select()
       
       if (createError) throw createError
@@ -229,14 +235,24 @@ export const useSchedule = () => {
     error.value = null
     
     try {
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+      
       // Fetch source schedule assignments
       // Note: Only job function assignments are copied from schedule_assignments table.
       // PTO records (pto_days table) and shift swaps (shift_swaps table) are NOT copied,
       // as they are date-specific and stored in separate tables.
-      const { data: sourceData, error: fetchError } = await supabase
+      let query = supabase
         .from('schedule_assignments')
         .select('*')
         .eq('schedule_date', fromDate)
+      
+      // Filter by team_id if not super admin
+      if (teamId) {
+        query = query.eq('team_id', teamId)
+      }
+      
+      const { data: sourceData, error: fetchError } = await query
       
       if (fetchError) throw fetchError
       
@@ -262,7 +278,8 @@ export const useSchedule = () => {
           schedule_date: toDate,
           assignment_order: assignment.assignment_order,
           start_time: assignment.start_time,
-          end_time: assignment.end_time
+          end_time: assignment.end_time,
+          team_id: assignment.team_id // Preserve team_id
         }))
       
       if (newAssignments.length > 0) {
@@ -285,10 +302,20 @@ export const useSchedule = () => {
 
   const fetchDailyTargets = async (date) => {
     try {
-      const { data, error: fetchError } = await supabase
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+      
+      let query = supabase
         .from('daily_targets')
         .select('*, job_function:job_functions(*)')
         .eq('schedule_date', date)
+      
+      // Filter by team_id if not super admin
+      if (teamId) {
+        query = query.eq('team_id', teamId)
+      }
+      
+      const { data, error: fetchError } = await query
       
       if (fetchError) throw fetchError
       
@@ -305,9 +332,15 @@ export const useSchedule = () => {
     error.value = null
     
     try {
+      // Get team_id for daily target
+      const teamId = isSuperAdmin.value ? targetData.team_id : await getCurrentTeamId()
+      if (!teamId && !isSuperAdmin.value) {
+        throw new Error('Unable to determine team. Please contact administrator.')
+      }
+      
       const { data, error: upsertError } = await supabase
         .from('daily_targets')
-        .upsert(targetData)
+        .upsert({ ...targetData, team_id: teamId })
         .select()
       
       if (upsertError) throw upsertError
@@ -392,11 +425,14 @@ export const useSchedule = () => {
   // Fetch old schedules for export (older than 7 days)
   const fetchOldSchedulesForExport = async () => {
     try {
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+      
       const cutoffDate = new Date()
       cutoffDate.setDate(cutoffDate.getDate() - 7)
       const cutoffDateString = cutoffDate.toISOString().split('T')[0] // YYYY-MM-DD
       
-      const { data, error: fetchError } = await supabase
+      let query = supabase
         .from('schedule_assignments')
         .select(`
           *,
@@ -405,6 +441,13 @@ export const useSchedule = () => {
           shift:shifts(name)
         `)
         .lt('schedule_date', cutoffDateString)
+      
+      // Filter by team_id if not super admin
+      if (teamId) {
+        query = query.eq('team_id', teamId)
+      }
+      
+      const { data, error: fetchError } = await query
         .order('schedule_date', { ascending: true })
         .order('start_time', { ascending: true })
       

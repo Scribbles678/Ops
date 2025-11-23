@@ -1,5 +1,6 @@
 export const useBusinessRules = () => {
   const supabase = useSupabaseClient()
+  const { getCurrentTeamId, isSuperAdmin } = useTeam()
 
   const businessRules = ref<any[]>([])
   const loading = ref(false)
@@ -9,10 +10,21 @@ export const useBusinessRules = () => {
     try {
       loading.value = true
       error.value = null
-      const { data, error: err } = await supabase
+      
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+      
+      let query = supabase
         .from('business_rules')
         .select('*')
         .eq('is_active', true)
+      
+      // Filter by team_id if not super admin
+      if (teamId) {
+        query = query.eq('team_id', teamId)
+      }
+      
+      const { data, error: err } = await query
         .order('job_function_name', { ascending: true })
         .order('priority', { ascending: true })
         .order('time_slot_start', { ascending: true })
@@ -53,13 +65,21 @@ export const useBusinessRules = () => {
     notes?: string | null
     fan_out_enabled?: boolean
     fan_out_prefix?: string | null
+    team_id?: string | null
   }) => {
     try {
       loading.value = true
       error.value = null
+      
+      // Get team_id for new business rule
+      const teamId = isSuperAdmin.value ? rule.team_id : await getCurrentTeamId()
+      if (!teamId && !isSuperAdmin.value) {
+        throw new Error('Unable to determine team. Please contact administrator.')
+      }
+      
       const { data, error: err } = await supabase
         .from('business_rules')
-        .insert([rule])
+        .insert([{ ...rule, team_id: teamId }])
         .select()
       
       if (err) throw err

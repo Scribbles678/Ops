@@ -2,6 +2,7 @@ import { ref, computed } from 'vue'
 
 export const useShiftSwaps = () => {
   const supabase = useSupabaseClient()
+  const { getCurrentTeamId, isSuperAdmin } = useTeam()
 
   const shiftSwaps = ref<any[]>([])
   const loading = ref(false)
@@ -11,10 +12,21 @@ export const useShiftSwaps = () => {
     try {
       loading.value = true
       error.value = null
-      const { data, error: err } = await supabase
+      
+      // Get team_id filter (null for super admins = see all)
+      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
+      
+      let query = supabase
         .from('shift_swaps')
         .select('*, employee:employees(*), original_shift:shifts!shift_swaps_original_shift_id_fkey(*), swapped_shift:shifts!shift_swaps_swapped_shift_id_fkey(*)')
         .eq('swap_date', date)
+      
+      // Filter by team_id if not super admin
+      if (teamId) {
+        query = query.eq('team_id', teamId)
+      }
+      
+      const { data, error: err } = await query
 
       if (err) throw err
       shiftSwaps.value = data || []
@@ -34,13 +46,21 @@ export const useShiftSwaps = () => {
     original_shift_id: string
     swapped_shift_id: string
     notes?: string | null
+    team_id?: string | null
   }) => {
     try {
       loading.value = true
       error.value = null
+      
+      // Get team_id for new shift swap
+      const teamId = isSuperAdmin.value ? record.team_id : await getCurrentTeamId()
+      if (!teamId && !isSuperAdmin.value) {
+        throw new Error('Unable to determine team. Please contact administrator.')
+      }
+      
       const { data, error: err } = await supabase
         .from('shift_swaps')
-        .upsert([record], { onConflict: 'employee_id,swap_date' })
+        .upsert([{ ...record, team_id: teamId }], { onConflict: 'employee_id,swap_date' })
         .select()
 
       if (err) throw err
