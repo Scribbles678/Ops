@@ -136,31 +136,68 @@ const loading = ref(false)
 const error = ref('')
 const success = ref(false)
 
-// Check for reset token on mount
-onMounted(() => {
-  if (process.client) {
-    // Check URL hash for token
-    if (window.location.hash) {
-      const hashParams = new URLSearchParams(window.location.hash.substring(1))
-      const type = hashParams.get('type')
-      const accessToken = hashParams.get('access_token')
-      
-      if (type === 'recovery' && accessToken) {
-        // Token is present, user can proceed
-        return
-      }
-    }
+// Check for reset token on mount and set session
+onMounted(async () => {
+  if (!process.client) return
+
+  // Wait a moment for any module initialization
+  await new Promise(resolve => setTimeout(resolve, 200))
+
+  // Check URL hash for token
+  if (window.location.hash) {
+    const hashParams = new URLSearchParams(window.location.hash.substring(1))
+    const type = hashParams.get('type')
+    const accessToken = hashParams.get('access_token')
     
-    // Check URL query params (some Supabase configs use query params)
-    const queryParams = new URLSearchParams(window.location.search)
-    if (queryParams.get('token') || queryParams.get('access_token')) {
-      // Token in query params
+    if (type === 'recovery' && accessToken) {
+      // Try to set the session immediately
+      try {
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: ''
+        })
+        
+        if (sessionError) {
+          console.error('Session error on mount:', sessionError)
+          error.value = 'Invalid or expired reset link. Please request a new password reset.'
+        } else {
+          // Verify session was set
+          const { data: { session } } = await supabase.auth.getSession()
+          if (!session) {
+            error.value = 'Failed to establish session. Please try again.'
+          }
+        }
+      } catch (err) {
+        console.error('Error setting session on mount:', err)
+        error.value = 'Failed to process reset link. Please request a new password reset.'
+      }
       return
     }
-    
-    // No token found
-    error.value = 'No reset token found. Please use the link from your email.'
   }
+  
+  // Check URL query params (some Supabase configs use query params)
+  const queryParams = new URLSearchParams(window.location.search)
+  if (queryParams.get('token') || queryParams.get('access_token')) {
+    // Token in query params - try to set session
+    const token = queryParams.get('access_token') || queryParams.get('token')
+    if (token) {
+      try {
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: token,
+          refresh_token: ''
+        })
+        if (sessionError) {
+          error.value = 'Invalid or expired reset link.'
+        }
+      } catch (err) {
+        error.value = 'Failed to process reset link.'
+      }
+    }
+    return
+  }
+  
+  // No token found
+  error.value = 'No reset token found. Please use the link from your email.'
 })
 
 // Handle password reset
@@ -213,23 +250,33 @@ async function handleReset() {
       return
     }
 
-    // For password reset, we need to set the session first
-    // Supabase recovery tokens work by setting a temporary session
-    const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: '' // Recovery tokens don't include refresh tokens
-    })
+    // First, check if we already have a session (from onMounted)
+    let { data: { session } } = await supabase.auth.getSession()
+    
+    // If no session, try to set it now
+    if (!session) {
+      const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: '' // Recovery tokens don't include refresh tokens
+      })
 
-    if (sessionError) {
-      // If setSession fails, the token might be expired or invalid
-      error.value = sessionError.message || 'Invalid or expired reset link. Please request a new password reset.'
-      return
+      if (sessionError) {
+        error.value = sessionError.message || 'Invalid or expired reset link. Please request a new password reset.'
+        return
+      }
+
+      // Verify session was set
+      const { data: { session: newSession } } = await supabase.auth.getSession()
+      if (!newSession) {
+        error.value = 'Failed to establish session. Please request a new password reset.'
+        return
+      }
+      session = newSession
     }
 
-    // Verify we have a session before updating password
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      error.value = 'Failed to establish session. Please request a new password reset.'
+    // Verify we have a valid session
+    if (!session || !session.user) {
+      error.value = 'Auth session missing! Please request a new password reset.'
       return
     }
 
@@ -254,6 +301,7 @@ async function handleReset() {
       window.history.replaceState(null, '', window.location.pathname)
     }
   } catch (err: any) {
+    console.error('Password reset error:', err)
     error.value = err.message || 'An unexpected error occurred'
   } finally {
     loading.value = false
