@@ -23,6 +23,7 @@ ALTER TABLE teams ENABLE ROW LEVEL SECURITY;
 CREATE TABLE IF NOT EXISTS user_profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   username TEXT NOT NULL UNIQUE,
+  email TEXT, -- Added for email-based login
   team_id UUID REFERENCES teams(id) ON DELETE SET NULL,
   full_name TEXT,
   is_super_admin BOOLEAN DEFAULT false,
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_user_profiles_username ON user_profiles(username);
+CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email);
 CREATE INDEX IF NOT EXISTS idx_user_profiles_team ON user_profiles(team_id);
 CREATE INDEX IF NOT EXISTS idx_user_profiles_admin ON user_profiles(is_super_admin);
 

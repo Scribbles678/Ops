@@ -22,20 +22,20 @@
         </div>
 
         <form @submit.prevent="handleLogin" class="space-y-4">
-          <!-- Username Field -->
+          <!-- Email Field -->
           <div>
-            <label for="username" class="block text-sm font-medium text-gray-700 mb-2">
-              Username
+            <label for="email" class="block text-sm font-medium text-gray-700 mb-2">
+              Email
             </label>
             <input
-              id="username"
-              v-model="username"
-              type="text"
+              id="email"
+              v-model="email"
+              type="email"
               required
-              placeholder="Enter your username"
+              placeholder="you@example.com"
               class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               :disabled="loading"
-              autocomplete="username"
+              autocomplete="email"
             />
           </div>
 
@@ -80,7 +80,7 @@
           <!-- Submit Button -->
           <button
             type="submit"
-            :disabled="loading || !username || !password"
+            :disabled="loading || !email || !password"
             class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <svg v-if="loading" class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
@@ -124,7 +124,7 @@ const supabase = useSupabaseClient()
 const router = useRouter()
 
 // State
-const username = ref('')
+const email = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const loading = ref(false)
@@ -135,34 +135,30 @@ async function handleLogin() {
   error.value = ''
 
   // Validation
-  if (!username.value || !password.value) {
-    error.value = 'Please enter your username and password'
+  if (!email.value || !password.value) {
+    error.value = 'Please enter your email and password'
     return
   }
 
-  // Validate username format (alphanumeric, dots, underscores, hyphens)
-  const usernameRegex = /^[a-zA-Z0-9._-]+$/
-  if (!usernameRegex.test(username.value)) {
-    error.value = 'Username can only contain letters, numbers, dots, underscores, and hyphens'
+  // Basic email validation
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(email.value)) {
+    error.value = 'Please enter a valid email address'
     return
   }
 
   loading.value = true
 
   try {
-    // Convert username to placeholder email for Supabase Auth
-    // Supabase requires email field, but we use it as username
-    const email = `${username.value.trim().toLowerCase()}@internal.local`
-    
     const { data, error: signInError } = await supabase.auth.signInWithPassword({
-      email: email,
+      email: email.value.trim().toLowerCase(),
       password: password.value
     })
 
     if (signInError) {
       // Provide user-friendly error messages
       if (signInError.message.includes('Invalid login credentials')) {
-        error.value = 'Invalid username or password'
+        error.value = 'Invalid email or password'
       } else if (signInError.message.includes('Email not confirmed')) {
         error.value = 'Account not activated. Please contact your administrator.'
       } else {

@@ -187,13 +187,12 @@ const handleChangePassword = async () => {
 
   try {
     // First, verify current password by trying to sign in
-    // Get username from profile
-    if (!userProfile.value) {
-      await fetchUserProfile()
+    // Use the actual email from auth user
+    const email = user.value?.email
+    if (!email) {
+      error.value = 'Unable to determine email address'
+      return
     }
-
-    const username = userProfile.value?.username || user.value?.email?.replace('@internal.local', '')
-    const email = `${username}@internal.local`
 
     // Verify current password
     const { error: signInError } = await supabase.auth.signInWithPassword({

@@ -13,12 +13,21 @@ export default defineEventHandler(async (event) => {
   const body = await readBody(event)
 
   // Validate required fields
-  const { username, password, full_name, team_id, is_super_admin } = body
+  const { email, password, full_name, team_id, is_super_admin } = body
 
-  if (!username || !password) {
+  if (!email || !password) {
     throw createError({
       statusCode: 400,
-      message: 'Username and password are required'
+      message: 'Email and password are required'
+    })
+  }
+
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(email)) {
+    throw createError({
+      statusCode: 400,
+      message: 'Invalid email format'
     })
   }
 
@@ -69,28 +78,24 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    // Check if username already exists
-    const { data: existing } = await supabaseAdmin
-      .from('user_profiles')
-      .select('username')
-      .eq('username', username.trim().toLowerCase())
-      .single()
-
-    if (existing) {
+    // Check if email already exists in auth
+    const { data: existingAuth } = await supabaseAdmin.auth.admin.listUsers()
+    const emailExists = existingAuth?.users?.some(u => u.email?.toLowerCase() === email.trim().toLowerCase())
+    
+    if (emailExists) {
       throw createError({
         statusCode: 400,
-        message: 'Username already exists'
+        message: 'Email already exists'
       })
     }
 
-    // Create auth user with placeholder email
-    const email = `${username.trim().toLowerCase()}@internal.local`
+    // Create auth user with the provided email
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email: email,
+      email: email.trim().toLowerCase(),
       password: password,
       email_confirm: true, // Auto-confirm (no email verification needed)
       user_metadata: {
-        username: username.trim().toLowerCase()
+        full_name: full_name || null
       }
     })
 
@@ -108,12 +113,14 @@ export default defineEventHandler(async (event) => {
       })
     }
 
-    // Create user profile
+    // Create user profile (username is derived from email for display)
+    const username = email.split('@')[0] // Use part before @ as username
     const { data: profileData, error: profileError } = await supabaseAdmin
       .from('user_profiles')
       .insert({
         id: authData.user.id,
         username: username.trim().toLowerCase(),
+        email: email.trim().toLowerCase(), // Store email for easy lookup
         full_name: full_name || null,
         team_id: team_id || null,
         is_super_admin: is_super_admin || false,
@@ -145,4 +152,3 @@ export default defineEventHandler(async (event) => {
     })
   }
 })
-

@@ -52,7 +52,7 @@
             <tbody class="bg-white divide-y divide-gray-200">
               <tr v-for="user in users" :key="user.id">
                 <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                  {{ user.username }}
+                  {{ getUserEmail(user) }}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   {{ user.full_name || '-' }}
@@ -161,15 +161,13 @@
           
           <form @submit.prevent="createUser" class="space-y-4">
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Username *</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Email *</label>
               <input
-                v-model="newUser.username"
-                type="text"
+                v-model="newUser.email"
+                type="email"
                 required
-                placeholder="john.doe"
+                placeholder="john.doe@example.com"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md"
-                pattern="[a-zA-Z0-9._-]+"
-                title="Username can only contain letters, numbers, dots, underscores, and hyphens"
               />
             </div>
             
@@ -425,7 +423,7 @@ const newPassword = ref('')
 const confirmNewPassword = ref('')
 
 const newUser = ref({
-  username: '',
+  email: '',
   password: '',
   full_name: '',
   team_id: '',
@@ -484,7 +482,7 @@ const createUser = async () => {
         'Authorization': `Bearer ${session.access_token}`
       },
       body: {
-        username: newUser.value.username.trim().toLowerCase(),
+        email: newUser.value.email.trim().toLowerCase(),
         password: newUser.value.password,
         full_name: newUser.value.full_name || null,
         team_id: newUser.value.team_id || null,
@@ -494,7 +492,7 @@ const createUser = async () => {
     
     // Reset form and close modal
     newUser.value = {
-      username: '',
+      email: '',
       password: '',
       full_name: '',
       team_id: '',
@@ -636,6 +634,12 @@ const deleteTeam = async (team: any) => {
   } catch (err: any) {
     error.value = err.message || 'Failed to delete team'
   }
+}
+
+// Get user email (from profile or construct from username for legacy users)
+const getUserEmail = (user: any) => {
+  // Use stored email if available, otherwise construct from username (legacy)
+  return user.email || `${user.username}@internal.local`
 }
 
 // Initialize
