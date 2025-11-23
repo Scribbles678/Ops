@@ -331,7 +331,6 @@
                   <h4 class="font-semibold text-green-800 mb-2">Cleanup Completed Successfully!</h4>
                   <div class="text-sm text-green-700">
                     <p>Archived {{ cleanupResult.archived_assignments }} schedule assignments</p>
-                    <p>Archived {{ cleanupResult.archived_targets }} daily targets</p>
                     <p>Cleanup date: {{ formatDateTime(cleanupResult.cleanup_date) }}</p>
                   </div>
                 </div>
@@ -385,7 +384,6 @@
                     <tr>
                       <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                       <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Assignments</th>
-                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Targets</th>
                       <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                     </tr>
                   </thead>
@@ -396,9 +394,6 @@
                       </td>
                       <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {{ log.archived_assignments }}
-                      </td>
-                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {{ log.archived_targets }}
                       </td>
                       <td class="px-6 py-4 whitespace-nowrap">
                         <span :class="log.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'" 
