@@ -143,8 +143,24 @@ const userProfile = ref<any>(null)
 
 // Fetch user profile
 const fetchUserProfile = async () => {
-  if (!user.value || !user.value.id) {
-    console.log('No user found, waiting...')
+  // First, try to get the user ID from either user.value or session
+  let userId: string | null = null
+  
+  if (user.value?.id) {
+    userId = user.value.id
+  } else {
+    // Try to get session directly
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user?.id) {
+      userId = session.user.id
+    } else {
+      console.log('No user found, waiting...')
+      return
+    }
+  }
+
+  if (!userId) {
+    console.log('No user ID found')
     return
   }
 
@@ -152,7 +168,7 @@ const fetchUserProfile = async () => {
     const { data, error: err } = await supabase
       .from('user_profiles')
       .select('*, teams(*)')
-      .eq('id', user.value.id)
+      .eq('id', userId)
       .maybeSingle() // Use maybeSingle to avoid errors if profile doesn't exist
 
     if (err) {
@@ -252,20 +268,32 @@ const handleChangePassword = async () => {
 
 // Fetch profile on mount
 onMounted(async () => {
-  // Wait for user to be available
-  if (!user.value) {
-    // Wait a bit for auth to initialize
-    await new Promise(resolve => setTimeout(resolve, 500))
+  // Wait for user/session to be available with retries
+  let retries = 0
+  const maxRetries = 20 // Wait up to 2 seconds
+  
+  while (retries < maxRetries) {
+    // Check both user.value and session
+    const { data: { session } } = await supabase.auth.getSession()
+    
+    if (user.value?.id || session?.user?.id) {
+      await fetchUserProfile()
+      return
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 100))
+    retries++
   }
   
-  await fetchUserProfile()
+  // If still no user after retries, show error
+  error.value = 'Unable to load user session. Please try logging out and back in.'
 })
 
 // Also watch for user changes
 watch(user, async (newUser) => {
-  if (newUser) {
+  if (newUser?.id) {
     await fetchUserProfile()
   }
-}, { immediate: true })
+}, { immediate: false })
 </script>
 

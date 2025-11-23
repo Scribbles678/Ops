@@ -158,19 +158,24 @@ const handleLogout = async () => {
 
 // Check if user is super admin
 const user = useSupabaseUser()
+const supabase = useSupabaseClient()
 
 onMounted(async () => {
-  // Wait for user to be available
+  // Wait for user/session to be available with retries
   let retries = 0
-  const maxRetries = 10
+  const maxRetries = 20 // Wait up to 2 seconds
   
-  while (!user.value?.id && retries < maxRetries) {
+  while (retries < maxRetries) {
+    // Check both user.value and session directly
+    const { data: { session } } = await supabase.auth.getSession()
+    
+    if (user.value?.id || session?.user?.id) {
+      await checkIsSuperAdmin()
+      return
+    }
+    
     await new Promise(resolve => setTimeout(resolve, 100))
     retries++
-  }
-  
-  if (user.value?.id) {
-    await checkIsSuperAdmin()
   }
 })
 </script>
