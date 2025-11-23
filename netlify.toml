@@ -2,9 +2,9 @@
 
 [build]
   command = "npm run build"
-  publish = ".netlify/build"
+  # Publish directory is auto-detected by Nuxt 4 Netlify preset
+  # Do not specify publish directory - let Nuxt/Nitro handle it
 
-# Build settings
 [build.environment]
   NODE_VERSION = "20"
 
@@ -17,21 +17,6 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "geolocation=(), microphone=(), camera=()"
-
-# Rate Limiting Configuration
-# 
-# Rate limiting is handled by multiple layers:
-# 1. Supabase Auth (login attempts: 30 per 5 minutes per IP = 360 per hour)
-#    - Configured in Supabase Dashboard → Authentication → Rate Limits
-#    - Already active and protecting login endpoints
-#
-# 2. Netlify's built-in DDoS protection
-#    - Automatic protection against distributed attacks
-#    - No configuration needed
-#
-# 3. Application-level rate limiting (via server middleware)
-#    - Protects API routes: 100 requests per minute per IP
-#    - Implemented in server/middleware/rate-limit.ts
 
 # Cache settings for static assets (performance)
 [[headers]]
@@ -49,3 +34,8 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+# Rate Limiting Notes:
+# - Rate limiting is handled by application-level middleware (server/middleware/rate-limit.ts)
+# - Supabase Auth also provides rate limiting (configured in Supabase Dashboard)
+# - Netlify's built-in DDoS protection is automatic
+# - For Netlify-level rate limiting, configure in Netlify UI or add to function files directly
