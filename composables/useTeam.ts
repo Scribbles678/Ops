@@ -122,9 +122,24 @@ export const useTeam = () => {
   
   /**
    * Get all teams (super admin only)
+   * Can optionally accept profile data to verify super admin status
    */
-  const fetchAllTeams = async () => {
-    if (!isSuperAdmin.value) {
+  const fetchAllTeams = async (profileData?: { is_super_admin?: boolean }): Promise<any[]> => {
+    // Check super admin status - use provided data or check current value
+    let isSuperAdminUser = isSuperAdmin.value
+    
+    if (profileData !== undefined) {
+      isSuperAdminUser = profileData.is_super_admin || false
+      // Sync the composable value
+      if (isSuperAdminUser) {
+        isSuperAdmin.value = true
+      }
+    } else if (!isSuperAdminUser) {
+      // If not set, try checking
+      isSuperAdminUser = await checkIsSuperAdmin()
+    }
+    
+    if (!isSuperAdminUser) {
       throw new Error('Only super admins can view all teams')
     }
     

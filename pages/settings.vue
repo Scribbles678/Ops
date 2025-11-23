@@ -755,19 +755,17 @@ const fetchTeams = async () => {
   }
   
   try {
-    // Use profile data if available, otherwise check via composable
-    if (userProfile.value) {
-      await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
-    } else {
-      await checkIsSuperAdmin()
-    }
-    
-    if (!isSuperAdmin.value && !userProfile.value?.is_super_admin) {
-      console.log('Not a super admin after check')
+    // Check super admin status - use profile data if available
+    if (!userProfile.value?.is_super_admin) {
+      console.log('Not a super admin, skipping team fetch')
       return
     }
     
-    const teamsData = await fetchAllTeams()
+    // Sync composable with profile data
+    await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
+    
+    // Pass profile data to fetchAllTeams to ensure it works
+    const teamsData = await fetchAllTeams({ is_super_admin: userProfile.value.is_super_admin })
     teams.value = teamsData || []
   } catch (err: any) {
     console.error('Error fetching teams:', err)
@@ -1013,7 +1011,9 @@ onMounted(async () => {
       await checkIsSuperAdmin()
       
       // If super admin, also fetch users and teams
-      if (userProfile.value?.is_super_admin || isSuperAdmin.value) {
+      if (userProfile.value?.is_super_admin) {
+        // Sync composable first
+        await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
         await Promise.all([fetchUsers(), fetchTeams()])
       }
       return
@@ -1033,7 +1033,9 @@ watch(user, async (newUser) => {
     await fetchUserProfile()
     await checkIsSuperAdmin()
     
-    if (userProfile.value?.is_super_admin || isSuperAdmin.value) {
+    if (userProfile.value?.is_super_admin) {
+      // Sync composable first
+      await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
       await Promise.all([fetchUsers(), fetchTeams()])
     }
   }
