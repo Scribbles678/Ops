@@ -143,7 +143,7 @@ const userProfile = ref<any>(null)
 
 // Fetch user profile
 const fetchUserProfile = async () => {
-  if (!user.value) {
+  if (!user.value || !user.value.id) {
     console.log('No user found, waiting...')
     return
   }
@@ -168,6 +168,7 @@ const fetchUserProfile = async () => {
     }
 
     userProfile.value = data
+    error.value = '' // Clear any previous errors
   } catch (err: any) {
     console.error('Unexpected error fetching profile:', err)
     error.value = 'Failed to load profile information'

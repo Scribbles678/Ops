@@ -240,6 +240,80 @@
         </div>
       </div>
 
+      <!-- Edit User Modal -->
+      <div v-if="showEditModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50" @click.self="showEditModal = false">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+          <h3 class="text-lg font-bold text-gray-900 mb-4">Edit User: {{ editingUser?.email || editingUser?.username }}</h3>
+          
+          <form @submit.prevent="saveUserEdit" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+              <input
+                v-model="editUserData.full_name"
+                type="text"
+                placeholder="John Doe"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md"
+              />
+            </div>
+            
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Team</label>
+              <select
+                v-model="editUserData.team_id"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md"
+              >
+                <option value="">No Team</option>
+                <option v-for="team in teams" :key="team.id" :value="team.id">
+                  {{ team.name }}
+                </option>
+              </select>
+            </div>
+            
+            <div>
+              <label class="flex items-center">
+                <input
+                  v-model="editUserData.is_super_admin"
+                  type="checkbox"
+                  class="mr-2"
+                />
+                <span class="text-sm text-gray-700">Super Admin</span>
+              </label>
+            </div>
+            
+            <div>
+              <label class="flex items-center">
+                <input
+                  v-model="editUserData.is_active"
+                  type="checkbox"
+                  class="mr-2"
+                />
+                <span class="text-sm text-gray-700">Active</span>
+              </label>
+            </div>
+            
+            <div v-if="error" class="bg-red-50 border border-red-200 rounded-md p-3">
+              <p class="text-sm text-red-600">{{ error }}</p>
+            </div>
+            
+            <div class="flex justify-end space-x-3">
+              <button
+                type="button"
+                @click="showEditModal = false; editingUser = null"
+                class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                Save Changes
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <!-- Create Team Modal -->
       <div v-if="showTeamModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50" @click.self="showTeamModal = false">
         <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
@@ -413,14 +487,22 @@ const error = ref('')
 
 const showCreateModal = ref(false)
 const showTeamModal = ref(false)
+const showEditModal = ref(false)
 const showResetPasswordModal = ref(false)
 const creating = ref(false)
 const creatingTeam = ref(false)
 const resettingPassword = ref(false)
 const resetSuccess = ref(false)
 const userToReset = ref<any>(null)
+const editingUser = ref<any>(null)
 const newPassword = ref('')
 const confirmNewPassword = ref('')
+const editUserData = ref({
+  full_name: '',
+  team_id: '',
+  is_super_admin: false,
+  is_active: true
+})
 
 const newUser = ref({
   email: '',
@@ -592,8 +674,41 @@ const handleResetPassword = async () => {
 
 // Edit user
 const editUser = (user: any) => {
-  // TODO: Implement edit user modal
-  alert('Edit user functionality coming soon')
+  editingUser.value = user
+  editUserData.value = {
+    full_name: user.full_name || '',
+    team_id: user.team_id || '',
+    is_super_admin: user.is_super_admin || false,
+    is_active: user.is_active !== false
+  }
+  showEditModal.value = true
+}
+
+const saveUserEdit = async () => {
+  if (!editingUser.value) return
+  
+  try {
+    const { error: err } = await supabase
+      .from('user_profiles')
+      .update({
+        full_name: editUserData.value.full_name || null,
+        team_id: editUserData.value.team_id || null,
+        is_super_admin: editUserData.value.is_super_admin,
+        is_active: editUserData.value.is_active
+      })
+      .eq('id', editingUser.value.id)
+    
+    if (err) {
+      error.value = err.message
+      return
+    }
+    
+    showEditModal.value = false
+    editingUser.value = null
+    await fetchUsers()
+  } catch (err: any) {
+    error.value = err.message || 'Failed to update user'
+  }
 }
 
 // Toggle user status
