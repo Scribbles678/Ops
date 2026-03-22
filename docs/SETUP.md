@@ -273,9 +273,31 @@ WHERE schedule_date BETWEEN '2024-01-01' AND '2024-01-31';
 
 ## Password Management
 
-### Changing Application Password
+### Self-Service Password Reset
 
-The application uses Supabase Authentication with individual user accounts. Password management is handled through:
+Users can reset their own password via the "Forgot your password?" link on the login page:
+
+1. User enters their email on `/reset-password`
+2. If the email is registered, a reset link is sent (expires in 1 hour)
+3. User clicks the link and sets a new password
+
+**Required configuration:** Set up SMTP in your `.env` for email delivery:
+
+```
+APP_URL=https://your-scheduler.example.com
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=your-smtp-user
+SMTP_PASS=your-smtp-password
+SMTP_FROM=noreply@yourcompany.com
+```
+
+Without SMTP, the forgot-password flow will not send emails. Admins can still reset passwords via the Settings or Admin Users page.
+
+**Existing databases:** If you had the app before this feature, run the migration:
+`sql-schema/migrations/add-password-reset-tokens.sql`
+
+### Changing Application Password
 
 1. **User Settings Page**
    - Users can change their own password via the Settings page

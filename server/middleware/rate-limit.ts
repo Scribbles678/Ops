@@ -59,7 +59,11 @@ export default defineEventHandler(async (event) => {
   
   if (event.path.includes('/admin/users/create')) {
     config = RATE_LIMIT_CONFIG.userCreation
-  } else if (event.path.includes('/admin/users/reset-password')) {
+  } else if (
+    event.path.includes('/admin/users/reset-password') ||
+    event.path.includes('/auth/forgot-password') ||
+    event.path.includes('/auth/reset-password')
+  ) {
     config = RATE_LIMIT_CONFIG.passwordReset
   } else if (event.path.includes('/admin/')) {
     config = RATE_LIMIT_CONFIG.admin

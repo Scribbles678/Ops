@@ -28,8 +28,8 @@ export default defineNuxtConfig({
     // Server-only secrets (never exposed to client)
     databaseUrl: process.env.DATABASE_URL || '',
     jwtSecret: process.env.JWT_SECRET || '',
+    appUrl: process.env.APP_URL || 'http://localhost:3000',
     public: {
-      // Nothing sensitive here - app URL can be set if needed
       appName: 'Operations Scheduling Tool',
     },
   },
