@@ -17,7 +17,7 @@
         </div>
       </div>
 
-      <!-- Add New Rule Button and Preferred Assignments Button -->
+      <!-- Add New Rule Button and Required Assignments Button -->
       <div class="mb-4 flex flex-wrap gap-2">
         <button
           @click="openAddModal"
@@ -35,7 +35,7 @@
           <svg class="w-4 h-4 md:w-5 md:h-5 mr-1.5 md:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
           </svg>
-          Preferred Assignments
+          Required Assignments
         </button>
       </div>
 
@@ -311,11 +311,11 @@
         </div>
       </div>
 
-      <!-- Preferred Assignments Modal -->
+      <!-- Required Assignments Modal -->
       <div v-if="showPreferredAssignmentsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
         <div class="bg-white rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
           <div class="flex items-center justify-between mb-6">
-            <h3 class="text-2xl font-bold text-gray-800">Preferred Assignments</h3>
+            <h3 class="text-2xl font-bold text-gray-800">Required Assignments</h3>
             <button @click="closePreferredAssignmentsModal" class="text-gray-400 hover:text-gray-600">
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -329,22 +329,22 @@
               <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
               </svg>
-              Add Preferred Assignment
+              Add Required Assignment
             </button>
           </div>
 
           <!-- Loading State -->
           <div v-if="preferredAssignmentsLoading" class="text-center py-8">
             <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            <p class="mt-2 text-gray-600">Loading preferred assignments...</p>
+            <p class="mt-2 text-gray-600">Loading required assignments...</p>
           </div>
 
           <!-- Error State -->
           <div v-else-if="preferredAssignmentsError" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-            <p class="text-red-600">Error loading preferred assignments: {{ preferredAssignmentsError }}</p>
+            <p class="text-red-600">Error loading required assignments: {{ preferredAssignmentsError }}</p>
           </div>
 
-          <!-- Preferred Assignments List -->
+          <!-- Required Assignments List -->
           <div v-else class="space-y-4">
             <div 
               v-for="pref in preferredAssignments" 
@@ -362,28 +362,7 @@
                         Job Function: <span class="font-medium">{{ pref.job_function?.name }}</span>
                       </p>
                     </div>
-                    <div class="flex items-center space-x-3">
-                      <span 
-                        v-if="pref.is_required"
-                        class="px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-semibold"
-                      >
-                        Required
-                      </span>
-                      <span 
-                        v-else
-                        class="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-semibold"
-                      >
-                        Preferred
-                      </span>
-                      <span 
-                        v-if="pref.priority > 0"
-                        class="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-semibold"
-                      >
-                        Priority: {{ pref.priority }}
-                      </span>
-                    </div>
                   </div>
-                  <p v-if="pref.notes" class="text-sm text-gray-600 italic">{{ pref.notes }}</p>
                 </div>
                 <div class="flex space-x-2 ml-4">
                   <button 
@@ -403,12 +382,12 @@
             </div>
             
             <div v-if="preferredAssignments.length === 0" class="text-center py-8 text-gray-500">
-              <p>No preferred assignments configured yet.</p>
-              <p class="text-sm mt-2">Click "+ Add Preferred Assignment" to create one.</p>
+              <p>No required assignments configured yet.</p>
+              <p class="text-sm mt-2">Click "+ Add Required Assignment" to create one.</p>
             </div>
           </div>
 
-          <!-- Add/Edit Preferred Assignment Modal -->
+          <!-- Add/Edit Required Assignment Modal -->
           <div v-if="showPreferredAssignmentFormModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
             <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 relative">
               <!-- Saved Icon Indicator -->
@@ -425,7 +404,7 @@
               </div>
               
               <h4 class="text-xl font-bold mb-4">
-                {{ editingPreferredAssignment ? 'Edit Preferred Assignment' : 'Add Preferred Assignment' }}
+                {{ editingPreferredAssignment ? 'Edit Required Assignment' : 'Add Required Assignment' }}
               </h4>
               <form @submit.prevent="handlePreferredAssignmentSubmit" class="space-y-4">
                 <div>
@@ -461,37 +440,6 @@
                       {{ jf.name }}
                     </option>
                   </select>
-                </div>
-                <div class="flex items-center">
-                  <input
-                    v-model="preferredAssignmentFormData.is_required"
-                    type="checkbox"
-                    id="pref_required"
-                    class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                  />
-                  <label for="pref_required" class="ml-2 block text-sm text-gray-700">
-                    Required (employee should always be assigned to this function when available)
-                  </label>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1">Priority</label>
-                  <input
-                    v-model.number="preferredAssignmentFormData.priority"
-                    type="number"
-                    min="0"
-                    max="100"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <p class="text-xs text-gray-500 mt-1">Higher priority = assigned first (0 = lowest priority)</p>
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
-                  <textarea
-                    v-model="preferredAssignmentFormData.notes"
-                    rows="3"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Add any notes about this preferred assignment..."
-                  ></textarea>
                 </div>
                 <div class="flex justify-end space-x-3 pt-4">
                   <button
@@ -545,16 +493,13 @@ const showModal = ref(false)
 const editingRule = ref<any>(null)
 const isGlobalMax = ref(false)
 
-// Preferred Assignments Modal State
+// Required Assignments Modal State
 const showPreferredAssignmentsModal = ref(false)
 const showPreferredAssignmentFormModal = ref(false)
 const editingPreferredAssignment = ref<any>(null)
 const preferredAssignmentFormData = ref({
   employee_id: '',
-  job_function_id: '',
-  is_required: false,
-  priority: 0,
-  notes: ''
+  job_function_id: ''
 })
 const showSavedIcon = ref(false)
 const showSuccessToast = ref(false)
@@ -760,7 +705,7 @@ const handleLogout = async () => {
   }
 }
 
-// Preferred Assignments Functions
+// Required Assignments Functions
 const openPreferredAssignmentsModal = async () => {
   showPreferredAssignmentsModal.value = true
   await fetchPreferredAssignments()
@@ -779,10 +724,7 @@ const openAddPreferredAssignmentModal = () => {
   editingPreferredAssignment.value = null
   preferredAssignmentFormData.value = {
     employee_id: '',
-    job_function_id: '',
-    is_required: false,
-    priority: 0,
-    notes: ''
+    job_function_id: ''
   }
   showPreferredAssignmentFormModal.value = true
 }
@@ -791,10 +733,7 @@ const openEditPreferredAssignmentModal = (pref: any) => {
   editingPreferredAssignment.value = pref
   preferredAssignmentFormData.value = {
     employee_id: pref.employee_id,
-    job_function_id: pref.job_function_id,
-    is_required: pref.is_required || false,
-    priority: pref.priority || 0,
-    notes: pref.notes || ''
+    job_function_id: pref.job_function_id
   }
   showPreferredAssignmentFormModal.value = true
 }
@@ -806,10 +745,16 @@ const closePreferredAssignmentFormModal = () => {
 
 const handlePreferredAssignmentSubmit = async () => {
   try {
+    const payload = {
+      ...preferredAssignmentFormData.value,
+      is_required: true,
+      priority: 0,
+      notes: ''
+    }
     if (editingPreferredAssignment.value) {
-      await updatePreferredAssignment(editingPreferredAssignment.value.id, preferredAssignmentFormData.value)
+      await updatePreferredAssignment(editingPreferredAssignment.value.id, payload)
     } else {
-      await createPreferredAssignment(preferredAssignmentFormData.value)
+      await createPreferredAssignment(payload)
     }
     await fetchPreferredAssignments() // Refresh list
     
@@ -820,12 +765,12 @@ const handlePreferredAssignmentSubmit = async () => {
       closePreferredAssignmentFormModal()
     }, 1500) // Hide icon and close modal after 1.5 seconds
   } catch (e: any) {
-    alert(`Error saving preferred assignment: ${e.message || 'Unknown error'}`)
+    alert(`Error saving required assignment: ${e.message || 'Unknown error'}`)
   }
 }
 
 const deletePreferredAssignmentHandler = async (id: string) => {
-  if (confirm('Are you sure you want to delete this preferred assignment?')) {
+  if (confirm('Are you sure you want to delete this required assignment?')) {
     try {
       await deletePreferredAssignment(id)
       await fetchPreferredAssignments() // Refresh list
