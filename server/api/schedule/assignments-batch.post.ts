@@ -37,7 +37,12 @@ export default defineEventHandler(async (event) => {
     }
     return { inserted, count: inserted.length }
   } catch (e: any) {
-    const msg = e?.message || e?.data?.message || 'Failed to create assignments batch'
+    const msg =
+      e?.message ||
+      e?.data?.message ||
+      e?.cause?.message ||
+      (typeof e === 'string' ? e : 'Failed to create assignments batch')
+    console.error('[assignments-batch] Error:', e)
     throw createError({ statusCode: 500, message: msg })
   }
 })

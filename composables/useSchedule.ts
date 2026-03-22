@@ -86,7 +86,7 @@ export const useSchedule = () => {
       })
       return result
     } catch (e: any) {
-      error.value = e.message
+      error.value = e?.data?.message || e?.message || 'Failed to create assignments batch'
       return null
     }
   }

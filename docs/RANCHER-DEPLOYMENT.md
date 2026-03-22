@@ -128,6 +128,12 @@ against the target PostgreSQL database.
 
 ---
 
+## To-Do
+
+- [ ] **Email provider for password reset** – Configure SMTP (e.g., company email, Resend, SendGrid) so users can reset their own password via the "Forgot your password?" link. Without this, admins must reset passwords manually from Settings or Admin Users.
+
+---
+
 ## Summary
 
 | Topic                    | Answer                                                                 |
