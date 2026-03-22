@@ -5,5 +5,9 @@ export default defineEventHandler(async (event) => {
   requireSuperAdmin(event)
 
   const result = await query(`SELECT * FROM cleanup_old_schedules_with_logging()`)
-  return result.rows[0]
+  const row = result.rows[0] || {}
+  return {
+    ...row,
+    cleanup_date: row.cutoff_date || new Date().toISOString(),
+  }
 })

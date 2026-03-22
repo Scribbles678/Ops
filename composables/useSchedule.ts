@@ -208,9 +208,10 @@ export const useSchedule = () => {
 
   const getCleanupStatus = async () => {
     try {
-      return await $fetch('/api/admin/cleanup/stats')
+      const data = await $fetch<any>('/api/admin/cleanup/stats')
+      return data?.status ?? []
     } catch {
-      return null
+      return []
     }
   }
 

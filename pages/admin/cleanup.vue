@@ -338,17 +338,15 @@ const exportToExcel = async () => {
       return
     }
     
-    // Format data for Excel (simple flat format)
-    const excelData = oldSchedules.map((assignment: any) => ({
-      'Date': assignment.schedule_date || '',
-      'Employee Name': assignment.employee 
-        ? `${assignment.employee.first_name || ''} ${assignment.employee.last_name || ''}`.trim()
-        : 'Unknown',
-      'Shift Name': assignment.shift?.name || 'Unknown',
-      'Job Function': assignment.job_function?.name || 'Unknown',
-      'Start Time': assignment.start_time || '',
-      'End Time': assignment.end_time || '',
-      'Created At': assignment.created_at ? new Date(assignment.created_at).toLocaleString() : ''
+    // Format data for Excel (export API returns flat first_name, last_name, job_function_name, shift_name)
+    const excelData = oldSchedules.map((a: any) => ({
+      'Date': a.schedule_date || '',
+      'Employee Name': [a.first_name, a.last_name].filter(Boolean).join(' ').trim() || 'Unknown',
+      'Shift Name': a.shift_name || 'Unknown',
+      'Job Function': a.job_function_name || 'Unknown',
+      'Start Time': a.start_time || '',
+      'End Time': a.end_time || '',
+      'Created At': a.created_at ? new Date(a.created_at).toLocaleString() : ''
     }))
     
     // Create workbook and worksheet

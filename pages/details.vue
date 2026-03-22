@@ -1019,15 +1019,22 @@ const closeNotificationModal = () => {
 const refreshCleanupStats = async () => {
   try {
     cleanupLoading.value = true
-    const [stats, status, log] = await Promise.all([
+    cleanupError.value = ''
+    const [statsData, log] = await Promise.all([
       getCleanupStats(),
-      getCleanupStatus(),
       getCleanupLog(10)
     ])
     
-    cleanupStats.value = stats
-    cleanupStatus.value = status
-    cleanupLog.value = log
+    const data = statsData || {}
+    cleanupStats.value = {
+      total_assignments: data.total_assignments ?? 0,
+      total_archived_assignments: data.total_archived_assignments ?? 0,
+      assignments_to_cleanup: data.assignments_to_cleanup ?? 0,
+      oldest_schedule_date: data.oldest_schedule_date ?? null,
+      newest_schedule_date: data.newest_schedule_date ?? null,
+    }
+    cleanupStatus.value = Array.isArray(data.status) ? data.status : []
+    cleanupLog.value = log || []
   } catch (error) {
     console.error('Error refreshing cleanup stats:', error)
     cleanupError.value = 'Failed to refresh cleanup statistics'
@@ -1096,17 +1103,15 @@ const exportToExcel = async () => {
       return
     }
     
-    // Format data for Excel (simple flat format)
-    const excelData = oldSchedules.map((assignment: any) => ({
-      'Date': assignment.schedule_date || '',
-      'Employee Name': assignment.employee 
-        ? `${assignment.employee.first_name || ''} ${assignment.employee.last_name || ''}`.trim()
-        : 'Unknown',
-      'Shift Name': assignment.shift?.name || 'Unknown',
-      'Job Function': assignment.job_function?.name || 'Unknown',
-      'Start Time': assignment.start_time || '',
-      'End Time': assignment.end_time || '',
-      'Created At': assignment.created_at ? new Date(assignment.created_at).toLocaleString() : ''
+    // Format data for Excel (export API returns flat first_name, last_name, job_function_name, shift_name)
+    const excelData = oldSchedules.map((a: any) => ({
+      'Date': a.schedule_date || '',
+      'Employee Name': [a.first_name, a.last_name].filter(Boolean).join(' ').trim() || 'Unknown',
+      'Shift Name': a.shift_name || 'Unknown',
+      'Job Function': a.job_function_name || 'Unknown',
+      'Start Time': a.start_time || '',
+      'End Time': a.end_time || '',
+      'Created At': a.created_at ? new Date(a.created_at).toLocaleString() : ''
     }))
     
     // Create workbook and worksheet
