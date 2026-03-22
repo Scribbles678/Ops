@@ -84,6 +84,20 @@ Welcome to the Operations Scheduling Tool documentation. This directory contains
 
 ---
 
+## Abbott Labs Brand Colors
+
+When customizing the UI or creating branded materials, use these Abbott brand colors:
+
+| Color Name   | Hex       | RGB            | Usage                    |
+| ------------ | --------- | -------------- | ------------------------ |
+| Royal Blue   | `#2E4AED` | 46, 74, 237    | Primary brand, buttons   |
+| Portage      | `#96A3F5` | 150, 163, 245  | Secondary, accents       |
+| Hawkes Blue  | `#D6DBFC` | 214, 219, 252  | Backgrounds, highlights  |
+| Navy Blue    | `#000075` | 0, 0, 117      | Text, headers            |
+| White        | `#FFFFFF` | 255, 255, 255  | Backgrounds              |
+
+---
+
 ## 🔍 Finding Information
 
 ### I want to...
