@@ -93,7 +93,7 @@
             Authorized personnel only. All access is logged and monitored.
           </p>
           <p class="text-xs text-gray-400 mt-2">
-            Need an account or forgot your password? Contact your administrator.
+            Need an account? Contact your administrator. <NuxtLink to="/reset-password" class="text-white underline hover:text-blue-200">Forgot your password?</NuxtLink>
           </p>
         </div>
       </div>
