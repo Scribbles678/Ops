@@ -141,6 +141,20 @@ export const useSchedule = () => {
     }
   }
 
+  const replaceScheduleForDate = async (date: string, assignments: any[]) => {
+    try {
+      const result = await $fetch('/api/schedule/replace', {
+        method: 'POST',
+        body: { date, assignments },
+      })
+      return result
+    } catch (e: any) {
+      const msg = e?.data?.message ?? e?.data?.data?.message ?? e?.message ?? 'Failed to replace schedule'
+      error.value = msg
+      return null
+    }
+  }
+
   const copySchedule = async (fromDate: string, toDate: string) => {
     loading.value = true
     error.value = null
@@ -260,6 +274,7 @@ export const useSchedule = () => {
     updateAssignment,
     deleteAssignment,
     clearAssignmentsForDate,
+    replaceScheduleForDate,
     copySchedule,
     fetchDailyTargets,
     upsertDailyTarget,

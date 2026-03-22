@@ -161,7 +161,10 @@
         <!-- Job Function Selection -->
         <div class="space-y-2 mb-4">
           <label class="block text-xs font-medium text-gray-700">Select Job Function:</label>
-          <div class="grid grid-cols-2 gap-1.5">
+          <p v-if="availableJobFunctions.length === 0 && trainingByEmployee && Object.keys(trainingByEmployee).length > 0" class="text-sm text-amber-600 py-2">
+            No trained job functions. Assign training in Details & Settings first.
+          </p>
+          <div v-else class="grid grid-cols-2 gap-1.5">
             <button
               v-for="jobFunction in availableJobFunctions"
               :key="jobFunction.id"
@@ -318,6 +321,7 @@ const props = defineProps<{
   jobFunctions: any[]
   shifts: any[]
   scheduleAssignmentsData?: Record<string, any>
+  trainingByEmployee?: Record<string, string[]>
   ptoByEmployeeId?: Record<string, any[]>
   shiftSwapsByEmployeeId?: Record<string, any>
   preferredAssignmentsMap?: Record<string, Record<string, any>>
@@ -376,17 +380,36 @@ const shiftsWithEmployees = computed(() => {
   })
 })
 
-// Available job functions for the selected employee - optimized for performance
+// Available job functions for the selected employee - filtered by training, optimized for performance
 // Prioritizes preferred/required assignments
 const availableJobFunctions = computed(() => {
   if (!selectedEmployee.value) return []
   
-  // Simple approach: just filter out individual meters and add a grouped meter entry
-  const nonMeterFunctions = props.jobFunctions.filter(jf => 
+  const trainedIds = props.trainingByEmployee?.[selectedEmployee.value.id] ?? []
+  const hasTraining = trainedIds.length > 0
+  const hasTrainingDataLoaded = Object.keys(props.trainingByEmployee || {}).length > 0
+  
+  // When we have training data, filter to only show job functions the employee is trained for
+  const meterParent = props.jobFunctions.find((jf: any) => jf.name === 'Meter')
+  const meterParentId = meterParent?.id
+  const meterNIds = props.jobFunctions
+    .filter((jf: any) => jf.name && /^Meter \d+$/.test(jf.name))
+    .map((jf: any) => jf.id)
+  
+  const isTrainedForMeter = hasTraining && (
+    (meterParentId && trainedIds.includes(meterParentId)) ||
+    meterNIds.some((id: string) => trainedIds.includes(id))
+  )
+  
+  let nonMeterFunctions = props.jobFunctions.filter((jf: any) =>
     jf.is_active && !jf.name.startsWith('Meter ') && jf.name !== 'Meter'
   )
   
-  // Add grouped meter entry
+  if (hasTrainingDataLoaded) {
+    nonMeterFunctions = nonMeterFunctions.filter((jf: any) => trainedIds.includes(jf.id))
+  }
+  
+  // Add grouped meter entry if employee is trained for Meter (or any Meter N)
   const meterEntry = {
     id: 'meter-group',
     name: 'Meter',
@@ -398,8 +421,10 @@ const availableJobFunctions = computed(() => {
     isGroup: true
   }
   
-  // Combine all job functions
-  const allFunctions = [...nonMeterFunctions, meterEntry]
+  const allFunctions = [...nonMeterFunctions]
+  if (isTrainedForMeter || !hasTrainingDataLoaded) {
+    allFunctions.push(meterEntry)
+  }
   
   // Sort by preferred assignment priority, then by sort_order
   return allFunctions.sort((a, b) => {

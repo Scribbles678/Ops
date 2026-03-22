@@ -365,6 +365,7 @@
             :job-functions="jobFunctions"
             :shifts="scheduleData"
             :schedule-assignments-data="scheduleAssignmentsData"
+            :training-by-employee="trainingByEmployee"
             :pto-by-employee-id="ptoByEmployeeId"
             :shift-swaps-by-employee-id="swapByEmployeeId"
             :preferred-assignments-map="getPreferredAssignmentsMap()"
@@ -389,7 +390,10 @@
           <!-- Available Job Functions -->
           <div class="space-y-2 mb-4">
             <h4 class="font-medium text-gray-700">Available Job Functions:</h4>
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+            <p v-if="availableJobFunctions.length === 0 && Object.keys(trainingByEmployee || {}).length > 0" class="text-sm text-amber-600 py-2">
+              No trained job functions. Assign training in Details & Settings first.
+            </p>
+            <div v-else class="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
               <div v-for="jobFunction in availableJobFunctions" :key="jobFunction" 
                    class="flex items-center justify-between p-2 border border-gray-200 rounded hover:bg-gray-50">
                 <div class="flex items-center space-x-2">
@@ -575,7 +579,8 @@ const {
   employees, 
   loading: employeesLoading, 
   error: employeesError, 
-  fetchEmployees 
+  fetchEmployees,
+  getAllEmployeeTraining
 } = useEmployees()
 
 const { 
@@ -598,8 +603,7 @@ const {
   error: assignmentsError, 
   fetchScheduleForDate,
   fetchDailyTargets,
-  createAssignmentsBatch,
-  clearAssignmentsForDate,
+  replaceScheduleForDate,
   createAssignment,
   deleteAssignment
 } = useSchedule()
@@ -657,6 +661,9 @@ const loading = computed(() =>
 const error = computed(() => 
   employeesError.value || functionsError.value || shiftsError.value || assignmentsError.value
 )
+
+// Training data: employee_id -> job_function_id[]
+const trainingByEmployee = ref<Record<string, string[]>>({})
 
 // Modal state
 const showEmployeeModal = ref(false)
@@ -895,6 +902,8 @@ onMounted(async () => {
       fetchScheduleForDate(scheduleDate.value),
       fetchPreferredAssignments() // Load preferred assignments
     ])
+    const training = await getAllEmployeeTraining()
+    trainingByEmployee.value = training || {}
     await fetchPTOForDate(scheduleDate.value)
     // Load target hours from database
     await loadTargetHours()
@@ -1265,11 +1274,48 @@ const addEmployeeToShift = (shiftId: string, jobFunction: string) => {
 }
 
 const availableJobFunctions = computed(() => {
-  if (!selectedEmployee.value) return []
+  if (!selectedEmployee.value || !jobFunctions.value?.length) return []
   
-  // Get job functions the employee is trained for
-  return (selectedEmployee.value as any).trained_job_functions || []
+  const trainedIds = trainingByEmployee.value?.[(selectedEmployee.value as any).id] ?? []
+  const hasTraining = trainedIds.length > 0
+  
+  if (!hasTraining && Object.keys(trainingByEmployee.value || {}).length === 0) {
+    return jobFunctions.value
+      .filter((jf: any) => jf.is_active && !jf.name.startsWith('Meter '))
+      .map((jf: any) => jf.name)
+  }
+  if (!hasTraining) return []
+  
+  const meterParent = jobFunctions.value.find((jf: any) => jf.name === 'Meter')
+  const meterParentId = meterParent?.id
+  const meterNIds = jobFunctions.value
+    .filter((jf: any) => jf.name && /^Meter \d+$/.test(jf.name))
+    .map((jf: any) => jf.id)
+  const isTrainedForMeter =
+    (meterParentId && trainedIds.includes(meterParentId)) ||
+    meterNIds.some((id: string) => trainedIds.includes(id))
+  
+  const names: string[] = []
+  jobFunctions.value.forEach((jf: any) => {
+    if (!jf.is_active || jf.name.startsWith('Meter ') || jf.name === 'Meter') return
+    if (trainedIds.includes(jf.id)) names.push(jf.name)
+  })
+  if (isTrainedForMeter) names.push('Meter')
+  return names
 })
+
+const isEmployeeTrainedForJobFunctionName = (employeeId: string, jobFunctionName: string): boolean => {
+  const trainedIds = trainingByEmployee.value?.[employeeId] ?? []
+  if (!trainedIds.length || !jobFunctions.value?.length) return false
+  const jf = jobFunctions.value.find((j: any) => j.name === jobFunctionName)
+  if (!jf) return false
+  if (jobFunctionName === 'Meter') {
+    const meterParent = jobFunctions.value.find((j: any) => j.name === 'Meter')
+    const meterNIds = jobFunctions.value.filter((j: any) => /^Meter \d+$/.test(j.name || '')).map((j: any) => j.id)
+    return !!(meterParent && trainedIds.includes(meterParent.id)) || meterNIds.some((id: string) => trainedIds.includes(id))
+  }
+  return trainedIds.includes(jf.id)
+}
 
 const availableEmployees = computed(() => {
   if (!selectedShift.value || !selectedJobFunction.value || !scheduleAssignments.value || !employees.value) return []
@@ -1280,7 +1326,7 @@ const availableEmployees = computed(() => {
   
   return employees.value.filter((employee: any) => 
     !assignedEmployeeIds.includes(employee.id) && 
-    employee.trained_job_functions.includes(selectedJobFunction.value)
+    isEmployeeTrainedForJobFunctionName(employee.id, selectedJobFunction.value)
   )
 })
 
@@ -1346,21 +1392,12 @@ const minutesToTime = (minutes: number): string => {
   return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
 }
 
-const clearAssignmentsForDateLocal = async (date: string) => {
-  const ok = await clearAssignmentsForDate(date)
-  if (!ok) throw new Error('Failed to clear assignments')
-}
-
 const saveSchedule = async () => {
   try {
     isSaving.value = true
     saveProgress.value = 'Preparing to save schedule...'
     
-    // Clear existing assignments for this date first
-    saveProgress.value = 'Clearing existing assignments...'
-    await clearAssignmentsForDateLocal(scheduleDate.value)
-    
-    // Convert scheduleAssignmentsData into contiguous ranges and save (batch-save improvement)
+    // Convert scheduleAssignmentsData into contiguous ranges and save (atomic replace)
     saveProgress.value = 'Processing schedule data (merging ranges)...'
     const assignmentsToSave: any[] = []
 
@@ -1463,18 +1500,10 @@ const saveSchedule = async () => {
       }
     })
     
-    // Save all assignments
-    if (assignmentsToSave.length > 0) {
-      saveProgress.value = `Saving ${assignmentsToSave.length} assignments to database...`
-      // Faster: insert in batches of 200 for large schedules
-      const batchSize = 200
-      for (let i = 0; i < assignmentsToSave.length; i += batchSize) {
-        const batch = assignmentsToSave.slice(i, i + batchSize)
-        saveProgress.value = `Saving assignments ${i + 1}-${Math.min(i + batchSize, assignmentsToSave.length)} of ${assignmentsToSave.length}...`
-        const result = await createAssignmentsBatch(batch)
-        if (!result) throw new Error(assignmentsError.value || 'Failed to create assignments batch')
-      }
-    }
+    // Atomic replace: DELETE + INSERT in one transaction (preserves previous schedule on failure)
+    saveProgress.value = `Saving ${assignmentsToSave.length} assignments...`
+    const result = await replaceScheduleForDate(scheduleDate.value, assignmentsToSave)
+    if (!result) throw new Error(assignmentsError.value || 'Failed to replace schedule')
     
     // Refresh the schedule data
     saveProgress.value = 'Refreshing schedule data...'
@@ -1490,6 +1519,10 @@ const saveSchedule = async () => {
     isSaving.value = false
     saveProgress.value = ''
     showNotification(`Error saving schedule: ${error.message || 'Unknown error'}. Please try again.`, 'error')
+    // Refetch to show last saved state (previous schedule preserved due to atomic rollback)
+    await fetchScheduleForDate(scheduleDate.value)
+    await nextTick()
+    initializeScheduleData()
   }
 }
 
