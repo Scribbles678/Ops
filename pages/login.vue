@@ -3,7 +3,7 @@
     <div class="max-w-md w-full">
       <!-- Logo/Title Section -->
       <div class="text-center mb-8">
-        <img src="/abbott_full_logo.png" alt="Abbott" class="mx-auto h-auto max-h-20 mb-4 object-contain" />
+        <img src="/abbott_full_logo.png" alt="Abbott" class="mx-auto h-auto max-h-14 mb-4 object-contain" />
         <h1 class="text-3xl font-bold text-white mb-2">Operations Scheduler</h1>
         <p class="text-blue-200">Secure Access Portal</p>
       </div>
