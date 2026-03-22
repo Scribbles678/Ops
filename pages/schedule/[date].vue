@@ -1526,11 +1526,10 @@ const saveSchedule = async () => {
   }
 }
 
-// Event handlers for 15-minute grid
-const handleAddAssignment = (employeeId: string, timeSlot: string) => {
-  selectedEmployee.value = employees.value.find((e: any) => e.id === employeeId) || null
-  selectedShift.value = { id: timeSlot, name: `${timeSlot} Slot` }
-  showEmployeeModal.value = true
+// Event handler: ShiftGroupedSchedule emits this after completing an assignment in its own modal.
+// Do NOT open the parent's modal - the assignment is already done. Just sync (e.g. meter bookings).
+const handleAddAssignment = (_employeeId: string, _timeSlot: string) => {
+  syncMeterBookings()
 }
 
 const handleEditAssignment = (employeeId: string, timeSlot: string) => {
