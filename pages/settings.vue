@@ -179,8 +179,8 @@
                     {{ u.full_name || '-' }}
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap">
-                    <span v-if="u.teams?.name" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800">
-                      {{ u.teams.name }}
+                    <span v-if="u.team?.name" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800">
+                      {{ u.team.name }}
                     </span>
                     <span v-else class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
                       No Team
