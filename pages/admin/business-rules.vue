@@ -70,11 +70,8 @@
               <tr>
                 <th class="px-3 md:px-4 py-2 text-left">Job Function</th>
                 <th class="px-3 md:px-4 py-2 text-left">Time Slot</th>
-                <th class="px-3 md:px-4 py-2 text-left">Min Staff</th>
-                <th class="px-3 md:px-4 py-2 text-left">Max Staff</th>
-                <th class="px-3 md:px-4 py-2 text-left">Block Size</th>
+                <th class="px-3 md:px-4 py-2 text-left">Target Hrs</th>
                 <th class="px-3 md:px-4 py-2 text-left">Status</th>
-                <th class="px-3 md:px-4 py-2 text-left">Notes</th>
                 <th class="px-3 md:px-4 py-2 text-right">Actions</th>
               </tr>
             </thead>
@@ -95,11 +92,8 @@
                   {{ formatTime(rule.time_slot_start) }} - {{ formatTime(rule.time_slot_end) }}
                 </td>
                 <td class="px-3 md:px-4 py-2 whitespace-nowrap text-gray-600">
-                  <span v-if="rule.min_staff !== null">{{ rule.min_staff }}</span>
-                  <span v-else class="text-gray-400 italic">Global Max</span>
+                  {{ formatTargetHours(rule) }}
                 </td>
-                <td class="px-3 md:px-4 py-2 whitespace-nowrap text-gray-600">{{ rule.max_staff || '-' }}</td>
-                <td class="px-3 md:px-4 py-2 whitespace-nowrap text-gray-600">{{ rule.block_size_minutes }} min</td>
                 <td class="px-3 md:px-4 py-2 whitespace-nowrap">
                   <span 
                     class="px-1.5 py-0.5 inline-flex text-[10px] leading-4 font-semibold rounded-full"
@@ -108,7 +102,6 @@
                     {{ rule.is_active ? 'Active' : 'Inactive' }}
                   </span>
                 </td>
-                <td class="px-3 md:px-4 py-2 text-gray-600">{{ rule.notes || '-' }}</td>
                 <td class="px-3 md:px-4 py-2 whitespace-nowrap text-right font-medium space-x-2">
                   <button
                     @click="editRule(rule)"
@@ -175,17 +168,18 @@
               </div>
             </div>
 
-            <!-- Max Staff -->
+            <!-- Target Hours -->
             <div>
-              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Max Staff</label>
+              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Target Hours</label>
               <input
-                v-model.number="ruleForm.max_staff"
+                v-model.number="ruleForm.target_hours"
                 type="number"
-                min="1"
+                min="0.5"
+                step="0.5"
                 class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="Number of people to schedule"
+                placeholder="e.g., 6"
               />
-              <p class="mt-1 text-xs text-gray-500">Number of staff to schedule for this function during the time window</p>
+              <p class="mt-1 text-xs text-gray-500">Total labor hours needed for this function during the time window (staff count is calculated from slot duration)</p>
             </div>
           </div>
 
@@ -199,7 +193,7 @@
             </button>
             <button
               @click="saveRule"
-              :disabled="!ruleForm.job_function_name || !ruleForm.time_slot_start || !ruleForm.time_slot_end || !ruleForm.max_staff || ruleForm.max_staff < 1"
+              :disabled="!ruleForm.job_function_name || !ruleForm.time_slot_start || !ruleForm.time_slot_end || !ruleForm.target_hours || ruleForm.target_hours < 0.5"
               class="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
               {{ editingRule ? 'Update Rule' : 'Create Rule' }}
@@ -406,7 +400,7 @@ const ruleForm = ref({
   job_function_name: '',
   time_slot_start: '08:00',
   time_slot_end: '17:00',
-  max_staff: null as number | null
+  target_hours: null as number | null
 })
 
 const sortedRules = computed(() => {
@@ -420,6 +414,15 @@ const sortedRules = computed(() => {
     return a.time_slot_start.localeCompare(b.time_slot_start)
   })
 })
+
+const formatTargetHours = (rule: any) => {
+  const staffCount = rule.max_staff ?? rule.min_staff ?? null
+  if (staffCount == null) return '-'
+  const slotHours = getSlotDurationHours(rule.time_slot_start, rule.time_slot_end)
+  if (slotHours <= 0) return staffCount
+  const targetHours = staffCount * slotHours
+  return targetHours % 1 === 0 ? targetHours : targetHours.toFixed(1)
+}
 
 const formatTime = (time: string | null | undefined) => {
   if (!time) return '-'
@@ -446,24 +449,39 @@ const sortedJobFunctions = computed(() => {
     })
 })
 
+const timeToMinutes = (time: string): number => {
+  const parts = String(time || '00:00').split(':').map(Number)
+  return (parts[0] || 0) * 60 + (parts[1] || 0)
+}
+
+const getSlotDurationHours = (start: string, end: string): number => {
+  const startMin = timeToMinutes(start)
+  const endMin = timeToMinutes(end)
+  if (endMin <= startMin) return 0
+  return (endMin - startMin) / 60
+}
+
 const openAddModal = () => {
   editingRule.value = null
   ruleForm.value = {
     job_function_name: '',
     time_slot_start: '08:00',
     time_slot_end: '17:00',
-    max_staff: null
+    target_hours: null
   }
   showModal.value = true
 }
 
 const editRule = (rule: any) => {
   editingRule.value = rule
+  const staffCount = rule.max_staff ?? rule.min_staff ?? null
+  const slotHours = getSlotDurationHours(rule.time_slot_start, rule.time_slot_end)
+  const targetHours = staffCount != null && slotHours > 0 ? staffCount * slotHours : null
   ruleForm.value = {
     job_function_name: rule.job_function_name,
     time_slot_start: rule.time_slot_start,
     time_slot_end: rule.time_slot_end,
-    max_staff: rule.max_staff ?? rule.min_staff ?? null
+    target_hours: targetHours
   }
   showModal.value = true
 }
@@ -471,7 +489,6 @@ const editRule = (rule: any) => {
 const closeModal = () => {
   showModal.value = false
   editingRule.value = null
-  isGlobalMax.value = false
 }
 
 const saveRule = async () => {
@@ -480,18 +497,24 @@ const saveRule = async () => {
     return
   }
 
-  if (!ruleForm.value.max_staff || ruleForm.value.max_staff < 1) {
-    alert('Please enter a valid staff count (at least 1)')
+  if (!ruleForm.value.target_hours || ruleForm.value.target_hours < 0.5) {
+    alert('Please enter a valid target hours (at least 0.5)')
     return
   }
 
-  const maxStaff = ruleForm.value.max_staff
+  const slotHours = getSlotDurationHours(ruleForm.value.time_slot_start, ruleForm.value.time_slot_end)
+  if (slotHours <= 0) {
+    alert('End time must be after start time')
+    return
+  }
+
+  const staffCount = Math.max(1, Math.ceil(ruleForm.value.target_hours / slotHours))
   const ruleData: any = {
     job_function_name: ruleForm.value.job_function_name.trim(),
     time_slot_start: ruleForm.value.time_slot_start,
     time_slot_end: ruleForm.value.time_slot_end,
-    min_staff: maxStaff,
-    max_staff: maxStaff,
+    min_staff: staffCount,
+    max_staff: staffCount,
     block_size_minutes: 0,
     priority: 0,
     is_active: true,
