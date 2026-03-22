@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen flex flex-col relative overflow-x-hidden overflow-y-auto" style="background-color: #96A3F5">
+  <div class="min-h-screen flex flex-col relative overflow-x-hidden overflow-y-auto bg-gray-50">
     <!-- Logout Button -->
     <div class="absolute top-4 right-4 z-10">
       <button

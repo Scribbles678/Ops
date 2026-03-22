@@ -1,4 +1,4 @@
-import { query } from '../../utils/db'
+import { transaction } from '../../utils/db'
 import { requireAuth, getTeamFilter } from '../../utils/authorize'
 
 export default defineEventHandler(async (event) => {
@@ -19,24 +19,43 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'assignments array is required and must not be empty' })
   }
 
-  const inserted: any[] = []
   try {
-    for (const a of assignments) {
-      const { employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order = 1 } = a
-      if (!employee_id || !job_function_id || !shift_id || !schedule_date || !start_time || !end_time) {
-        throw createError({ statusCode: 400, message: 'Each assignment must have employee_id, job_function_id, shift_id, schedule_date, start_time, end_time' })
+    const inserted = await transaction(async (client) => {
+      const results: any[] = []
+      for (let i = 0; i < assignments.length; i++) {
+        const a = assignments[i]
+        const { employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order = 1 } = a
+        if (!employee_id || !job_function_id || !shift_id || !schedule_date || !start_time || !end_time) {
+          throw createError({
+            statusCode: 400,
+            message: `Assignment ${i + 1}: Each assignment must have employee_id, job_function_id, shift_id, schedule_date, start_time, end_time`
+          })
+        }
+        try {
+          const result = await client.query(
+            `INSERT INTO schedule_assignments
+               (employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order, team_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+             RETURNING *`,
+            [employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order, teamId ?? null]
+          )
+          results.push(result.rows[0])
+        } catch (insertErr: any) {
+          const dbMsg = insertErr?.message || String(insertErr)
+          console.error(`[assignments-batch] Assignment ${i + 1} failed:`, insertErr)
+          throw createError({
+            statusCode: 500,
+            message: `Assignment ${i + 1} of ${assignments.length} failed: ${dbMsg}`
+          })
+        }
       }
-      const result = await query(
-        `INSERT INTO schedule_assignments
-           (employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order, team_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         RETURNING *`,
-        [employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order, teamId ?? null]
-      )
-      inserted.push(result.rows[0])
-    }
+      return results
+    })
     return { inserted, count: inserted.length }
   } catch (e: any) {
+    if (e.statusCode) {
+      throw e
+    }
     const msg =
       e?.message ||
       e?.data?.message ||

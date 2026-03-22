@@ -1472,7 +1472,7 @@ const saveSchedule = async () => {
         const batch = assignmentsToSave.slice(i, i + batchSize)
         saveProgress.value = `Saving assignments ${i + 1}-${Math.min(i + batchSize, assignmentsToSave.length)} of ${assignmentsToSave.length}...`
         const result = await createAssignmentsBatch(batch)
-        if (!result) throw new Error('Failed to create assignments batch')
+        if (!result) throw new Error(assignmentsError.value || 'Failed to create assignments batch')
       }
     }
     
