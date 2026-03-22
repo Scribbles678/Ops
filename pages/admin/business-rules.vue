@@ -175,120 +175,17 @@
               </div>
             </div>
 
-            <!-- Rule Type Toggle -->
-            <div class="flex items-center gap-4">
-              <label class="flex items-center">
-                <input
-                  v-model="isGlobalMax"
-                  type="checkbox"
-                  class="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                />
-                <span class="ml-2 text-xs md:text-sm text-gray-700">Global Max Limit (no minimum staff)</span>
-              </label>
-            </div>
-
-            <!-- Min/Max Staff -->
-            <div class="grid grid-cols-2 gap-3" v-if="!isGlobalMax">
-              <div>
-              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Min Staff</label>
-                <input
-                  v-model.number="ruleForm.min_staff"
-                  type="number"
-                  min="0"
-                  class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-              <div>
-              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Max Staff (optional)</label>
-                <input
-                  v-model.number="ruleForm.max_staff"
-                  type="number"
-                  min="0"
-                  class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="Leave empty for no limit"
-                />
-              </div>
-            </div>
-
-            <!-- Max Staff Only (for Global Max) -->
-            <div v-if="isGlobalMax">
+            <!-- Max Staff -->
+            <div>
               <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Max Staff</label>
               <input
                 v-model.number="ruleForm.max_staff"
                 type="number"
                 min="1"
                 class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                placeholder="Number of people to schedule"
               />
-              <p class="mt-1 text-xs text-gray-500">Global maximum staff for this job function across all time slots</p>
-            </div>
-
-            <!-- Block Size -->
-            <div v-if="!isGlobalMax">
-              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Block Size (minutes)</label>
-              <input
-                v-model.number="ruleForm.block_size_minutes"
-                type="number"
-                min="0"
-                class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="e.g., 390 for 6.5 hours"
-              />
-            </div>
-
-            <!-- Priority -->
-            <div>
-              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Priority</label>
-              <input
-                v-model.number="ruleForm.priority"
-                type="number"
-                min="0"
-                class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              />
-              <p class="mt-1 text-xs text-gray-500">Lower numbers are processed first. 0 = highest priority.</p>
-            </div>
-
-            <!-- Fan-out Rules -->
-            <div class="border border-blue-200 rounded-md bg-blue-50/70 px-3 py-2 space-y-2">
-              <label class="flex items-center text-xs md:text-sm font-medium text-blue-800">
-                <input
-                  type="checkbox"
-                  v-model="ruleForm.fan_out_enabled"
-                  class="h-4 w-4 text-blue-600 border-blue-300 rounded focus:ring-blue-500"
-                />
-                <span class="ml-2">Apply this rule to matching job functions</span>
-              </label>
-              <p class="text-[11px] md:text-xs text-blue-700">
-                When enabled, the AI will duplicate this rule for every active job function whose name begins with the prefix below.
-                Min/Max values apply to each station individually.
-              </p>
-              <input
-                v-model="ruleForm.fan_out_prefix"
-                :disabled="!ruleForm.fan_out_enabled"
-                type="text"
-                placeholder="e.g., Meter "
-                class="w-full px-3 py-1.5 border border-blue-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm disabled:bg-blue-50 disabled:text-blue-300"
-              />
-            </div>
-
-            <!-- Active Status -->
-            <div class="flex items-center">
-              <input
-                v-model="ruleForm.is_active"
-                type="checkbox"
-                class="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                id="is_active"
-              />
-              <label for="is_active" class="ml-2 text-sm text-gray-700">Active (inactive rules are ignored)</label>
-            </div>
-
-            <!-- Notes -->
-            <div>
-              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
-              <textarea
-                v-model="ruleForm.notes"
-                rows="2"
-                class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="e.g., Morning pick coverage"
-              ></textarea>
+              <p class="mt-1 text-xs text-gray-500">Number of staff to schedule for this function during the time window</p>
             </div>
           </div>
 
@@ -302,7 +199,7 @@
             </button>
             <button
               @click="saveRule"
-              :disabled="!ruleForm.job_function_name || (!isGlobalMax && (!ruleForm.min_staff || ruleForm.min_staff < 0)) || (isGlobalMax && !ruleForm.max_staff)"
+              :disabled="!ruleForm.job_function_name || !ruleForm.time_slot_start || !ruleForm.time_slot_end || !ruleForm.max_staff || ruleForm.max_staff < 1"
               class="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
             >
               {{ editingRule ? 'Update Rule' : 'Create Rule' }}
@@ -491,7 +388,6 @@ const {
 
 const showModal = ref(false)
 const editingRule = ref<any>(null)
-const isGlobalMax = ref(false)
 
 // Required Assignments Modal State
 const showPreferredAssignmentsModal = ref(false)
@@ -510,14 +406,7 @@ const ruleForm = ref({
   job_function_name: '',
   time_slot_start: '08:00',
   time_slot_end: '17:00',
-  min_staff: 1,
-  max_staff: null as number | null,
-  block_size_minutes: 240,
-  priority: 0,
-  is_active: true,
-  notes: '',
-  fan_out_enabled: false,
-  fan_out_prefix: ''
+  max_staff: null as number | null
 })
 
 const sortedRules = computed(() => {
@@ -559,38 +448,22 @@ const sortedJobFunctions = computed(() => {
 
 const openAddModal = () => {
   editingRule.value = null
-  isGlobalMax.value = false
   ruleForm.value = {
     job_function_name: '',
     time_slot_start: '08:00',
     time_slot_end: '17:00',
-    min_staff: 1,
-    max_staff: null,
-    block_size_minutes: 240,
-    priority: 0,
-    is_active: true,
-    notes: '',
-    fan_out_enabled: false,
-    fan_out_prefix: ''
+    max_staff: null
   }
   showModal.value = true
 }
 
 const editRule = (rule: any) => {
   editingRule.value = rule
-  isGlobalMax.value = rule.min_staff === null
   ruleForm.value = {
     job_function_name: rule.job_function_name,
     time_slot_start: rule.time_slot_start,
     time_slot_end: rule.time_slot_end,
-    min_staff: rule.min_staff,
-    max_staff: rule.max_staff,
-    block_size_minutes: rule.block_size_minutes || 0,
-    priority: rule.priority || 0,
-    is_active: rule.is_active,
-    notes: rule.notes || '',
-    fan_out_enabled: !!rule.fan_out_enabled,
-    fan_out_prefix: rule.fan_out_prefix || ''
+    max_staff: rule.max_staff ?? rule.min_staff ?? null
   }
   showModal.value = true
 }
@@ -607,30 +480,24 @@ const saveRule = async () => {
     return
   }
 
-  if (!isGlobalMax.value && (!ruleForm.value.min_staff || ruleForm.value.min_staff < 0)) {
-    alert('Please enter a valid minimum staff count')
+  if (!ruleForm.value.max_staff || ruleForm.value.max_staff < 1) {
+    alert('Please enter a valid staff count (at least 1)')
     return
   }
 
-  if (ruleForm.value.fan_out_enabled && !ruleForm.value.fan_out_prefix?.trim()) {
-    alert('Please enter a prefix to match job functions when fan-out is enabled.')
-    return
-  }
-
+  const maxStaff = ruleForm.value.max_staff
   const ruleData: any = {
     job_function_name: ruleForm.value.job_function_name.trim(),
     time_slot_start: ruleForm.value.time_slot_start,
     time_slot_end: ruleForm.value.time_slot_end,
-    min_staff: isGlobalMax.value ? null : ruleForm.value.min_staff,
-    max_staff: ruleForm.value.max_staff || null,
-    block_size_minutes: isGlobalMax.value ? 0 : ruleForm.value.block_size_minutes,
-    priority: ruleForm.value.priority || 0,
-    is_active: ruleForm.value.is_active,
-    notes: ruleForm.value.notes?.trim() || null,
-    fan_out_enabled: !!ruleForm.value.fan_out_enabled,
-    fan_out_prefix: ruleForm.value.fan_out_enabled
-      ? (ruleForm.value.fan_out_prefix?.trim() || null)
-      : null
+    min_staff: maxStaff,
+    max_staff: maxStaff,
+    block_size_minutes: 0,
+    priority: 0,
+    is_active: true,
+    notes: null,
+    fan_out_enabled: false,
+    fan_out_prefix: null
   }
 
   try {
@@ -670,34 +537,6 @@ const showSuccessIndicator = (message: string) => {
     showSuccessToast.value = false
   }, 2000)
 }
-
-watch(
-  () => ruleForm.value.job_function_name,
-  newName => {
-    if (
-      newName &&
-      newName.toLowerCase() === 'meter' &&
-      !ruleForm.value.fan_out_prefix
-    ) {
-      ruleForm.value.fan_out_prefix = 'Meter '
-    }
-  }
-)
-
-watch(
-  () => ruleForm.value.fan_out_enabled,
-  enabled => {
-    if (enabled) {
-      if (!ruleForm.value.fan_out_prefix) {
-        if (ruleForm.value.job_function_name?.toLowerCase() === 'meter') {
-          ruleForm.value.fan_out_prefix = 'Meter '
-        }
-      }
-    } else {
-      ruleForm.value.fan_out_prefix = ''
-    }
-  }
-)
 
 const handleLogout = async () => {
   if (confirm('Are you sure you want to logout?')) {
