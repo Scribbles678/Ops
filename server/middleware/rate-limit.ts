@@ -23,14 +23,14 @@ const rateLimitStore: RateLimitStore = {}
 
 // Rate limit configuration
 const RATE_LIMIT_CONFIG = {
-  // General API routes: 100 requests per minute per IP
+  // General API routes: 200 requests per minute per IP (settings/teams can make several on load)
   default: {
-    maxRequests: 100,
+    maxRequests: 200,
     windowMs: 60 * 1000 // 1 minute
   },
-  // Admin routes: 50 requests per minute per IP (more restrictive)
+  // Admin routes: 100 requests per minute per IP (settings page loads teams + users)
   admin: {
-    maxRequests: 50,
+    maxRequests: 100,
     windowMs: 60 * 1000 // 1 minute
   },
   // User creation: 5 requests per hour per IP (very restrictive)

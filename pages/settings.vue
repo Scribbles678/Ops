@@ -969,8 +969,6 @@ onMounted(async () => {
   while (retries < maxRetries) {
     if (user.value?.id) {
       await fetchUserProfile()
-      await new Promise(resolve => setTimeout(resolve, 100))
-      await checkIsSuperAdmin()
       ownTeamData.value.team_id = userProfile.value?.team_id || ''
       if (isSuperAdmin.value) {
         await Promise.all([fetchUsers(), fetchTeams()])
@@ -984,15 +982,19 @@ onMounted(async () => {
   error.value = 'Unable to load user session. Please try logging out and back in.'
 })
 
-// Watch for user changes and profile updates
-watch(user, async (newUser) => {
-  if (newUser?.id) {
+// Watch for user changes - debounced to avoid request storms (was causing 429 rate limit)
+let fetchDebounceTimer: ReturnType<typeof setTimeout> | null = null
+watch(user, (newUser) => {
+  if (!newUser?.id) return
+  if (fetchDebounceTimer) clearTimeout(fetchDebounceTimer)
+  fetchDebounceTimer = setTimeout(async () => {
+    fetchDebounceTimer = null
     await fetchUserProfile()
-    await checkIsSuperAdmin()
+    // Don't call checkIsSuperAdmin here - it triggers fetchCurrentUser which can re-trigger this watch
     if (isSuperAdmin.value) {
       await Promise.all([fetchUsers(), fetchTeams()])
     }
-  }
+  }, 300)
 }, { immediate: false })
 </script>
 
