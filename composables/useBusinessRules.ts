@@ -1,134 +1,55 @@
 export const useBusinessRules = () => {
-  const supabase = useSupabaseClient()
-  const { getCurrentTeamId, isSuperAdmin } = useTeam()
-
   const businessRules = ref<any[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
 
+  const rulesByJobFunction = computed(() => {
+    const map: Record<string, any[]> = {}
+    for (const rule of businessRules.value) {
+      if (!map[rule.job_function_name]) map[rule.job_function_name] = []
+      map[rule.job_function_name].push(rule)
+    }
+    return map
+  })
+
   const fetchBusinessRules = async () => {
+    loading.value = true
+    error.value = null
     try {
-      loading.value = true
-      error.value = null
-      
-      // Get team_id filter (null for super admins = see all)
-      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
-      
-      let query = supabase
-        .from('business_rules')
-        .select('*')
-        .eq('is_active', true)
-      
-      // Filter by team_id if not super admin
-      if (teamId) {
-        query = query.eq('team_id', teamId)
-      }
-      
-      const { data, error: err } = await query
-        .order('job_function_name', { ascending: true })
-        .order('priority', { ascending: true })
-        .order('time_slot_start', { ascending: true })
-      
-      if (err) throw err
-      businessRules.value = data ? sortRules(data) : []
+      businessRules.value = await $fetch<any[]>('/api/business-rules')
       return businessRules.value
     } catch (e: any) {
       error.value = e.message
-      console.error('Error fetching business rules:', e)
       return []
     } finally {
       loading.value = false
     }
   }
 
-  const sortRules = (rules: any[]) => {
-    return [...rules].sort((a, b) => {
-      if (a.job_function_name !== b.job_function_name) {
-        return a.job_function_name.localeCompare(b.job_function_name)
-      }
-      if ((a.priority || 0) !== (b.priority || 0)) {
-        return (a.priority || 0) - (b.priority || 0)
-      }
-      return a.time_slot_start.localeCompare(b.time_slot_start)
-    })
-  }
-
-  const createBusinessRule = async (rule: {
-    job_function_name: string
-    time_slot_start: string
-    time_slot_end: string
-    min_staff: number
-    max_staff?: number | null
-    block_size_minutes: number
-    priority?: number
-    is_active?: boolean
-    notes?: string | null
-    fan_out_enabled?: boolean
-    fan_out_prefix?: string | null
-    team_id?: string | null
-  }) => {
+  const createBusinessRule = async (data: any) => {
+    loading.value = true
+    error.value = null
     try {
-      loading.value = true
-      error.value = null
-      
-      // Get team_id for new business rule
-      const teamId = isSuperAdmin.value ? rule.team_id : await getCurrentTeamId()
-      if (!teamId && !isSuperAdmin.value) {
-        throw new Error('Unable to determine team. Please contact administrator.')
-      }
-      
-      const { data, error: err } = await supabase
-        .from('business_rules')
-        .insert([{ ...rule, team_id: teamId }])
-        .select()
-      
-      if (err) throw err
-      if (data && data[0]) {
-        businessRules.value = sortRules([...businessRules.value, data[0]])
-        return data[0]
-      }
-      return null
+      const result = await $fetch('/api/business-rules', { method: 'POST', body: data })
+      await fetchBusinessRules()
+      return result
     } catch (e: any) {
       error.value = e.message
-      console.error('Error creating business rule:', e)
       return null
     } finally {
       loading.value = false
     }
   }
 
-  const updateBusinessRule = async (id: string, updates: Partial<{
-    job_function_name: string
-    time_slot_start: string
-    time_slot_end: string
-    min_staff: number
-    max_staff: number | null
-    block_size_minutes: number
-    priority: number
-    is_active: boolean
-    notes: string | null
-    fan_out_enabled: boolean
-    fan_out_prefix: string | null
-  }>) => {
+  const updateBusinessRule = async (id: string, data: any) => {
+    loading.value = true
+    error.value = null
     try {
-      loading.value = true
-      error.value = null
-      const { data, error: err } = await supabase
-        .from('business_rules')
-        .update(updates)
-        .eq('id', id)
-        .select()
-      
-      if (err) throw err
-      if (data && data[0]) {
-        const updatedRule = data[0]
-        businessRules.value = sortRules(businessRules.value.map(rule => rule.id === id ? updatedRule : rule))
-        return updatedRule
-      }
-      return null
+      const result = await $fetch(`/api/business-rules/${id}`, { method: 'PUT', body: data })
+      await fetchBusinessRules()
+      return result
     } catch (e: any) {
       error.value = e.message
-      console.error('Error updating business rule:', e)
       return null
     } finally {
       loading.value = false
@@ -136,37 +57,28 @@ export const useBusinessRules = () => {
   }
 
   const deleteBusinessRule = async (id: string) => {
+    loading.value = true
+    error.value = null
     try {
-      loading.value = true
-      error.value = null
-      const { error: err } = await supabase
-        .from('business_rules')
-        .delete()
-        .eq('id', id)
-      
-      if (err) throw err
-      businessRules.value = businessRules.value.filter(rule => rule.id !== id)
+      await $fetch(`/api/business-rules/${id}`, { method: 'DELETE' })
+      await fetchBusinessRules()
       return true
     } catch (e: any) {
       error.value = e.message
-      console.error('Error deleting business rule:', e)
       return false
     } finally {
       loading.value = false
     }
   }
 
-  // Group rules by job function for easier consumption
-  const rulesByJobFunction = computed(() => {
-    const grouped: Record<string, any[]> = {}
-    businessRules.value.forEach(rule => {
-      if (!grouped[rule.job_function_name]) {
-        grouped[rule.job_function_name] = []
-      }
-      grouped[rule.job_function_name].push(rule)
+  const sortRules = (rules: any[]) => {
+    return [...rules].sort((a, b) => {
+      if (a.job_function_name < b.job_function_name) return -1
+      if (a.job_function_name > b.job_function_name) return 1
+      if (b.priority !== a.priority) return b.priority - a.priority
+      return a.time_slot_start.localeCompare(b.time_slot_start)
     })
-    return grouped
-  })
+  }
 
   return {
     businessRules,
@@ -176,7 +88,7 @@ export const useBusinessRules = () => {
     fetchBusinessRules,
     createBusinessRule,
     updateBusinessRule,
-    deleteBusinessRule
+    deleteBusinessRule,
+    sortRules,
   }
 }
-

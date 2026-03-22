@@ -78,7 +78,6 @@
 </template>
 
 <script setup lang="ts">
-const supabase = useSupabaseClient()
 const { formatTime, formatDate } = useLaborCalculations()
 const { 
   scheduleAssignments: assignments,
@@ -103,7 +102,6 @@ const {
 const lastUpdated = ref('')
 const refreshInterval = ref<NodeJS.Timeout | null>(null)
 const rolloverInterval = ref<NodeJS.Timeout | null>(null)
-const realtimeSubscriptions = ref<any[]>([])
 
 // Timezone-aware date helper (America/Chicago) to avoid UTC off-by-one
 const getTZISODate = (tz: string): string => {
@@ -258,161 +256,28 @@ const consolidateAssignments = (assignments: any[]) => {
 }
 
 onMounted(() => {
-  // Ensure client-side date in CST/CDT before first load
   today.value = getTZISODate(TIMEZONE)
   loadData()
-  
-  // Set up real-time subscriptions for immediate updates
-  const supabase = useSupabaseClient()
-  
-  // Subscribe to schedule_assignments changes
-  const assignmentsChannel = supabase
-    .channel('schedule-assignments-changes')
-    .on(
-      'postgres_changes',
-      {
-        event: '*', // INSERT, UPDATE, DELETE
-        schema: 'public',
-        table: 'schedule_assignments',
-        filter: `schedule_date=eq.${today.value}`
-      },
-      (payload) => {
-        console.log('Schedule assignment change detected:', payload)
-        loadData()
-      }
-    )
-    .subscribe()
-  realtimeSubscriptions.value.push(assignmentsChannel)
-  
-  // Subscribe to PTO changes
-  const ptoChannel = supabase
-    .channel('pto-changes')
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'pto_days',
-        filter: `pto_date=eq.${today.value}`
-      },
-      (payload) => {
-        console.log('PTO change detected:', payload)
-        loadData()
-      }
-    )
-    .subscribe()
-  realtimeSubscriptions.value.push(ptoChannel)
-  
-  // Subscribe to shift swap changes
-  const swapChannel = supabase
-    .channel('shift-swaps-changes')
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'shift_swaps',
-        filter: `swap_date=eq.${today.value}`
-      },
-      (payload) => {
-        console.log('Shift swap change detected:', payload)
-        loadData()
-      }
-    )
-    .subscribe()
-  realtimeSubscriptions.value.push(swapChannel)
 
-  // Set up auto-refresh every 2 minutes as fallback
+  // Auto-refresh every 2 minutes
   refreshInterval.value = setInterval(() => {
     loadData()
   }, 120000)
 
-  // Update today's date every minute to catch midnight rollover, and reload when it changes
+  // Update date every minute to catch midnight rollover
   const tick = () => {
     const current = getTZISODate(TIMEZONE)
     if (today.value !== current) {
       today.value = current
       loadData()
-      // Resubscribe for new date - clean up old subscriptions first
-      realtimeSubscriptions.value.forEach(sub => {
-        supabase.removeChannel(sub)
-      })
-      realtimeSubscriptions.value = []
-      
-      // Subscribe to schedule_assignments changes for new date
-      const assignmentsChannel = supabase
-        .channel('schedule-assignments-changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'schedule_assignments',
-            filter: `schedule_date=eq.${today.value}`
-          },
-          (payload) => {
-            console.log('Schedule assignment change detected:', payload)
-            loadData()
-          }
-        )
-        .subscribe()
-      realtimeSubscriptions.value.push(assignmentsChannel)
-      
-      // Subscribe to PTO changes for new date
-      const ptoChannel = supabase
-        .channel('pto-changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'pto_days',
-            filter: `pto_date=eq.${today.value}`
-          },
-          (payload) => {
-            console.log('PTO change detected:', payload)
-            loadData()
-          }
-        )
-        .subscribe()
-      realtimeSubscriptions.value.push(ptoChannel)
-      
-      // Subscribe to shift swap changes for new date
-      const swapChannel = supabase
-        .channel('shift-swaps-changes')
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'shift_swaps',
-            filter: `swap_date=eq.${today.value}`
-          },
-          (payload) => {
-            console.log('Shift swap change detected:', payload)
-            loadData()
-          }
-        )
-        .subscribe()
-      realtimeSubscriptions.value.push(swapChannel)
     }
   }
   rolloverInterval.value = setInterval(tick, 60000)
 })
 
 onUnmounted(() => {
-  if (refreshInterval.value) {
-    clearInterval(refreshInterval.value)
-  }
-  if (rolloverInterval.value) {
-    clearInterval(rolloverInterval.value)
-  }
-  // Clean up real-time subscriptions
-  const supabase = useSupabaseClient()
-  realtimeSubscriptions.value.forEach(sub => {
-    supabase.removeChannel(sub)
-  })
-  realtimeSubscriptions.value = []
+  if (refreshInterval.value) clearInterval(refreshInterval.value)
+  if (rolloverInterval.value) clearInterval(rolloverInterval.value)
 })
 
 const loadData = async () => {

@@ -1,17 +1,24 @@
-export default defineNuxtRouteMiddleware((to) => {
-  const user = useSupabaseUser()
-
-  // Public routes that don't require authentication
+/**
+ * Global route middleware - replaces @nuxtjs/supabase auth redirect handling.
+ * On server: skip composables (useState/useRequestEvent cause "instance unavailable" in Nitro SSR).
+ * On client: use useAuth for redirects.
+ */
+export default defineNuxtRouteMiddleware(async (to) => {
   const publicRoutes = ['/login', '/display', '/reset-password']
   const isPublicRoute = publicRoutes.includes(to.path)
 
-  // If user is logged in and trying to access login, redirect to home
-  if (user.value && isPublicRoute && to.path === '/login') {
-    return navigateTo('/')
+  // SERVER: Skip auth check to avoid useState/useNuxtApp - let page render, client will redirect
+  if (import.meta.server) {
+    return
   }
 
-  // If user is not logged in and trying to access protected route, redirect to login
-  if (!user.value && !isPublicRoute) {
-    return navigateTo('/login')
+  // CLIENT: Use useAuth composable
+  const { user, fetchCurrentUser } = useAuth()
+
+  if (user.value === null && !isPublicRoute) {
+    await fetchCurrentUser()
   }
+
+  if (user.value && to.path === '/login') return navigateTo('/')
+  if (!user.value && !isPublicRoute) return navigateTo('/login')
 })

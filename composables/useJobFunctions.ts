@@ -1,182 +1,85 @@
 export const useJobFunctions = () => {
-  const supabase = useSupabaseClient()
-  const { getCurrentTeamId, isSuperAdmin } = useTeam()
-  
-  const jobFunctions = ref([])
+  const jobFunctions = ref<any[]>([])
   const loading = ref(false)
-  const error = ref(null)
+  const error = ref<string | null>(null)
 
-  const fetchJobFunctions = async (activeOnly = true) => {
+  const fetchJobFunctions = async () => {
     loading.value = true
     error.value = null
-    
     try {
-      // Get team_id filter (null for super admins = see all)
-      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
-      
-      let query = supabase
-        .from('job_functions')
-        .select('*')
-      
-      // Filter by team_id if not super admin
-      if (teamId) {
-        query = query.eq('team_id', teamId)
-      }
-      
-      query = query.order('sort_order', { ascending: true })
-      
-      if (activeOnly) {
-        query = query.eq('is_active', true)
-      }
-      
-      const { data, error: fetchError } = await query
-      
-      if (fetchError) throw fetchError
-      
-      jobFunctions.value = data
-      return data
-    } catch (e) {
+      jobFunctions.value = await $fetch<any[]>('/api/job-functions')
+      return jobFunctions.value
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error fetching job functions:', e)
       return []
     } finally {
       loading.value = false
     }
   }
 
-  const createJobFunction = async (jobFunctionData) => {
+  const createJobFunction = async (data: any) => {
     loading.value = true
     error.value = null
-    
     try {
-      // Get team_id for new job function
-      const teamId = isSuperAdmin.value ? jobFunctionData.team_id : await getCurrentTeamId()
-      if (!teamId && !isSuperAdmin.value) {
-        throw new Error('Unable to determine team. Please contact administrator.')
-      }
-      
-      const { data, error: createError } = await supabase
-        .from('job_functions')
-        .insert([{ ...jobFunctionData, team_id: teamId }])
-        .select()
-      
-      if (createError) throw createError
-      
+      const result = await $fetch('/api/job-functions', { method: 'POST', body: data })
       await fetchJobFunctions()
-      return data[0]
-    } catch (e) {
+      return result
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error creating job function:', e)
       return null
     } finally {
       loading.value = false
     }
   }
 
-  const updateJobFunction = async (id, jobFunctionData) => {
+  const updateJobFunction = async (id: string, data: any) => {
     loading.value = true
     error.value = null
-    
     try {
-      const { data, error: updateError } = await supabase
-        .from('job_functions')
-        .update(jobFunctionData)
-        .eq('id', id)
-        .select()
-      
-      if (updateError) throw updateError
-      
+      const result = await $fetch(`/api/job-functions/${id}`, { method: 'PUT', body: data })
       await fetchJobFunctions()
-      return data[0]
-    } catch (e) {
+      return result
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error updating job function:', e)
       return null
     } finally {
       loading.value = false
     }
   }
 
-  const deleteJobFunction = async (id) => {
+  const deleteJobFunction = async (id: string) => {
     loading.value = true
     error.value = null
-    
     try {
-      const { error: deleteError } = await supabase
-        .from('job_functions')
-        .delete()
-        .eq('id', id)
-      
-      if (deleteError) throw deleteError
-      
+      await $fetch(`/api/job-functions/${id}`, { method: 'DELETE' })
       await fetchJobFunctions()
       return true
-    } catch (e) {
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error deleting job function:', e)
       return false
     } finally {
       loading.value = false
     }
   }
 
-  // Helper functions for meter management
-  const isMeterJobFunction = (jobFunctionName) => {
-    return jobFunctionName && jobFunctionName.startsWith('Meter ')
-  }
-
-  const getMeterNumber = (jobFunctionName) => {
-    if (!isMeterJobFunction(jobFunctionName)) return null
-    const match = jobFunctionName.match(/Meter (\d+)/)
+  // Meter job function helpers (unchanged logic, no Supabase dependency)
+  const isMeterJobFunction = (name: string) => name.startsWith('Meter ')
+  const getMeterNumber = (name: string) => {
+    const match = name.match(/^Meter (\d+)$/)
     return match ? parseInt(match[1]) : null
   }
-
   const getGroupedJobFunctions = () => {
-    if (!jobFunctions.value) return []
-    
-    const grouped = []
-    const meters = []
-    
-    jobFunctions.value.forEach(jf => {
-      if (isMeterJobFunction(jf.name)) {
-        // Individual meter entries (Meter 1, Meter 2, etc.)
-        meters.push(jf)
-      } else if (jf.name === 'Meter') {
-        // Skip standalone "Meter" entry - we'll create a grouped one instead
-        // This prevents duplicate "Meter" entries in the UI
-      } else {
-        // All other non-meter job functions
-        grouped.push(jf)
-      }
-    })
-    
-    // Add a single "Meter" entry representing all meters (only if we have individual meters)
+    const meters = jobFunctions.value.filter((jf) => isMeterJobFunction(jf.name))
+    const nonMeters = jobFunctions.value.filter((jf) => !isMeterJobFunction(jf.name))
+    const grouped = [...nonMeters]
     if (meters.length > 0) {
-      grouped.push({
-        id: 'meter-group',
-        name: 'Meter',
-        color_code: meters[0].color_code,
-        productivity_rate: meters[0].productivity_rate,
-        unit_of_measure: meters[0].unit_of_measure,
-        is_active: meters[0].is_active,
-        sort_order: meters[0].sort_order,
-        isGroup: true,
-        individualMeters: meters
-      })
+      grouped.push({ id: 'meter-group', name: 'Meter', _isGroup: true, _meters: meters })
     }
-    
-    return grouped.sort((a, b) => a.sort_order - b.sort_order)
+    return grouped
   }
-
-  const getAllMeterJobFunctions = () => {
-    if (!jobFunctions.value) return []
-    return jobFunctions.value.filter(jf => isMeterJobFunction(jf.name))
-  }
-
-  const getMeterJobFunctionByNumber = (meterNumber) => {
-    if (!jobFunctions.value) return null
-    return jobFunctions.value.find(jf => jf.name === `Meter ${meterNumber}`)
-  }
+  const getAllMeterJobFunctions = () => jobFunctions.value.filter((jf) => isMeterJobFunction(jf.name))
+  const getMeterJobFunctionByNumber = (num: number) =>
+    jobFunctions.value.find((jf) => jf.name === `Meter ${num}`) ?? null
 
   return {
     jobFunctions,
@@ -186,12 +89,10 @@ export const useJobFunctions = () => {
     createJobFunction,
     updateJobFunction,
     deleteJobFunction,
-    // Meter helper functions
     isMeterJobFunction,
     getMeterNumber,
     getGroupedJobFunctions,
     getAllMeterJobFunctions,
-    getMeterJobFunctionByNumber
+    getMeterJobFunctionByNumber,
   }
 }
-

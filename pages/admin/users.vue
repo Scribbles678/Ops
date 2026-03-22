@@ -58,7 +58,7 @@
                   {{ user.full_name || '-' }}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {{ user.teams?.name || 'No Team' }}
+                  {{ user.team?.name || 'No Team' }}
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
                   <span v-if="user.is_super_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
@@ -477,7 +477,7 @@ definePageMeta({
   middleware: 'auth'
 })
 
-const supabase = useSupabaseClient()
+const { user, fetchCurrentUser } = useAuth()
 const { isSuperAdmin, checkIsSuperAdmin, fetchAllTeams, createTeam: createTeamFn, updateTeam: updateTeamFn, deleteTeam: deleteTeamFn } = useTeam()
 
 const users = ref<any[]>([])
@@ -492,8 +492,9 @@ const showResetPasswordModal = ref(false)
 const creating = ref(false)
 const creatingTeam = ref(false)
 const resettingPassword = ref(false)
-const resetSuccess = ref(false)
-const userToReset = ref<any>(null)
+const resetPasswordUser = ref<any>(null)
+const resetPasswordData = ref({ password: '', confirmPassword: '' })
+const resetPasswordSuccess = ref(false)
 const editingUser = ref<any>(null)
 const newPassword = ref('')
 const confirmNewPassword = ref('')
@@ -519,18 +520,11 @@ const newTeam = ref({
 // Fetch data
 const fetchUsers = async () => {
   if (!isSuperAdmin.value) return
-  
-  const { data, error: err } = await supabase
-    .from('user_profiles')
-    .select('*, teams(*)')
-    .order('username')
-  
-  if (err) {
+  try {
+    users.value = await $fetch<any[]>('/api/admin/users')
+  } catch (err: any) {
     error.value = err.message
-    return
   }
-  
-  users.value = data || []
 }
 
 const fetchTeams = async () => {
@@ -550,19 +544,8 @@ const createUser = async () => {
   error.value = ''
   
   try {
-    // Get current session token
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      error.value = 'Not authenticated'
-      return
-    }
-    
-    // Call server route to create user (uses service role key)
-    const response = await $fetch('/api/admin/users/create', {
+    await $fetch('/api/admin/users/create', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`
-      },
       body: {
         email: newUser.value.email.trim().toLowerCase(),
         password: newUser.value.password,
@@ -607,12 +590,9 @@ const createTeam = async () => {
 }
 
 // Reset user password
-const resetPassword = (user: any) => {
-  resetPasswordUser.value = user
-  resetPasswordData.value = {
-    password: '',
-    confirmPassword: ''
-  }
+const resetPassword = (u: any) => {
+  resetPasswordUser.value = u
+  resetPasswordData.value = { password: '', confirmPassword: '' }
   resetPasswordSuccess.value = false
   error.value = ''
   showResetPasswordModal.value = true
@@ -627,27 +607,16 @@ const handleResetPassword = async () => {
     return
   }
   
-  if (resetPasswordData.value.password.length < 6) {
-    error.value = 'Password must be at least 6 characters'
+  if (resetPasswordData.value.password.length < 8) {
+    error.value = 'Password must be at least 8 characters'
     return
   }
   
   resettingPassword.value = true
   
   try {
-    // Get current session token
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      error.value = 'Not authenticated'
-      return
-    }
-    
-    // Call server route to reset password (uses service role key)
-    const response = await $fetch('/api/admin/users/reset-password', {
+    await $fetch('/api/admin/users/reset-password', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`
-      },
       body: {
         user_id: resetPasswordUser.value.id,
         new_password: resetPasswordData.value.password
@@ -656,14 +625,10 @@ const handleResetPassword = async () => {
     
     resetPasswordSuccess.value = true
     
-    // Close modal after 2 seconds
     setTimeout(() => {
       showResetPasswordModal.value = false
       resetPasswordUser.value = null
-      resetPasswordData.value = {
-        password: '',
-        confirmPassword: ''
-      }
+      resetPasswordData.value = { password: '', confirmPassword: '' }
     }, 2000)
   } catch (err: any) {
     error.value = err.data?.message || err.message || 'Failed to reset password'
@@ -688,46 +653,39 @@ const saveUserEdit = async () => {
   if (!editingUser.value) return
   
   try {
-    const { error: err } = await supabase
-      .from('user_profiles')
-      .update({
+    await $fetch(`/api/admin/users/${editingUser.value.id}`, {
+      method: 'PUT',
+      body: {
         full_name: editUserData.value.full_name || null,
         team_id: editUserData.value.team_id || null,
         is_super_admin: editUserData.value.is_super_admin,
         is_active: editUserData.value.is_active
-      })
-      .eq('id', editingUser.value.id)
-    
-    if (err) {
-      error.value = err.message
-      return
-    }
+      }
+    })
     
     showEditModal.value = false
     editingUser.value = null
     await fetchUsers()
   } catch (err: any) {
-    error.value = err.message || 'Failed to update user'
+    error.value = err.data?.message || err.message || 'Failed to update user'
   }
 }
 
 // Toggle user status
-const toggleUserStatus = async (user: any) => {
-  if (!confirm(`Are you sure you want to ${user.is_active ? 'deactivate' : 'activate'} this user?`)) {
+const toggleUserStatus = async (u: any) => {
+  if (!confirm(`Are you sure you want to ${u.is_active ? 'deactivate' : 'activate'} this user?`)) {
     return
   }
   
-  const { error: err } = await supabase
-    .from('user_profiles')
-    .update({ is_active: !user.is_active })
-    .eq('id', user.id)
-  
-  if (err) {
-    error.value = err.message
-    return
+  try {
+    await $fetch(`/api/admin/users/${u.id}`, {
+      method: 'PUT',
+      body: { is_active: !u.is_active }
+    })
+    await fetchUsers()
+  } catch (err: any) {
+    error.value = err.data?.message || err.message || 'Failed to update user'
   }
-  
-  await fetchUsers()
 }
 
 // Edit team
@@ -759,8 +717,7 @@ const getUserEmail = (user: any) => {
 
 // Initialize
 onMounted(async () => {
-  // Wait for user to be available
-  const user = useSupabaseUser()
+  await fetchCurrentUser()
   let retries = 0
   const maxRetries = 10
   

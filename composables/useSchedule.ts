@@ -1,375 +1,189 @@
 export const useSchedule = () => {
-  const supabase = useSupabaseClient()
-  const { getCurrentTeamId, isSuperAdmin } = useTeam()
-  
-  const scheduleAssignments = ref([])
-  const shifts = ref([])
-  const dailyTargets = ref([])
+  const scheduleAssignments = ref<any[]>([])
+  const shifts = ref<any[]>([])
+  const dailyTargets = ref<any[]>([])
   const loading = ref(false)
-  const error = ref(null)
+  const error = ref<string | null>(null)
 
   const fetchShifts = async () => {
     loading.value = true
     error.value = null
-    
     try {
-      // Get team_id filter (null for super admins = see all)
-      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
-      
-      let query = supabase
-        .from('shifts')
-        .select('*')
-        .eq('is_active', true)
-      
-      // Filter by team_id if not super admin
-      if (teamId) {
-        query = query.eq('team_id', teamId)
-      }
-      
-      const { data, error: fetchError } = await query
-        .order('start_time', { ascending: true })
-      
-      if (fetchError) throw fetchError
-      
-      shifts.value = data
-      return data
-    } catch (e) {
+      shifts.value = await $fetch<any[]>('/api/shifts')
+      return shifts.value
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error fetching shifts:', e)
       return []
     } finally {
       loading.value = false
     }
   }
 
-  const createShift = async (shiftData) => {
+  const createShift = async (shiftData: any) => {
     loading.value = true
     error.value = null
-    
     try {
-      // Get team_id for new shift
-      const teamId = isSuperAdmin.value ? shiftData.team_id : await getCurrentTeamId()
-      if (!teamId && !isSuperAdmin.value) {
-        throw new Error('Unable to determine team. Please contact administrator.')
-      }
-      
-      const { data, error: createError } = await supabase
-        .from('shifts')
-        .insert([{ ...shiftData, team_id: teamId }])
-        .select()
-      
-      if (createError) throw createError
-      
+      const data = await $fetch('/api/shifts', { method: 'POST', body: shiftData })
       await fetchShifts()
-      return data[0]
-    } catch (e) {
+      return data
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error creating shift:', e)
       return null
     } finally {
       loading.value = false
     }
   }
 
-  const updateShift = async (id, shiftData) => {
+  const updateShift = async (id: string, shiftData: any) => {
     loading.value = true
     error.value = null
-    
     try {
-      const { data, error: updateError } = await supabase
-        .from('shifts')
-        .update(shiftData)
-        .eq('id', id)
-        .select()
-      
-      if (updateError) throw updateError
-      
+      const data = await $fetch(`/api/shifts/${id}`, { method: 'PUT', body: shiftData })
       await fetchShifts()
-      return data[0]
-    } catch (e) {
+      return data
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error updating shift:', e)
       return null
     } finally {
       loading.value = false
     }
   }
 
-  const deleteShift = async (id) => {
+  const deleteShift = async (id: string) => {
     loading.value = true
     error.value = null
-    
     try {
-      const { error: deleteError } = await supabase
-        .from('shifts')
-        .delete()
-        .eq('id', id)
-      
-      if (deleteError) throw deleteError
-      
+      await $fetch(`/api/shifts/${id}`, { method: 'DELETE' })
       await fetchShifts()
       return true
-    } catch (e) {
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error deleting shift:', e)
       return false
     } finally {
       loading.value = false
     }
   }
 
-  const fetchScheduleForDate = async (date) => {
+  const fetchScheduleForDate = async (date: string) => {
     loading.value = true
     error.value = null
-    
     try {
-      // Get team_id filter (null for super admins = see all)
-      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
-      
-      let query = supabase
-        .from('schedule_assignments')
-        .select(`
-          *,
-          employee:employees(*),
-          job_function:job_functions(*),
-          shift:shifts(*)
-        `)
-        .eq('schedule_date', date)
-      
-      // Filter by team_id if not super admin
-      if (teamId) {
-        query = query.eq('team_id', teamId)
-      }
-      
-      const { data, error: fetchError } = await query
-        .order('start_time', { ascending: true })
-      
-      if (fetchError) throw fetchError
-      
-      scheduleAssignments.value = data
-      return data
-    } catch (e) {
+      scheduleAssignments.value = await $fetch<any[]>(`/api/schedule/${date}`)
+      return scheduleAssignments.value
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error fetching schedule:', e)
       return []
     } finally {
       loading.value = false
     }
   }
 
-  const createAssignment = async (assignmentData) => {
+  const createAssignmentsBatch = async (assignments: any[]) => {
+    try {
+      const result = await $fetch('/api/schedule/assignments-batch', {
+        method: 'POST',
+        body: { assignments },
+      })
+      return result
+    } catch (e: any) {
+      error.value = e.message
+      return null
+    }
+  }
+
+  const createAssignment = async (assignmentData: any) => {
     loading.value = true
     error.value = null
-    
     try {
-      // Get team_id for new assignment
-      const teamId = isSuperAdmin.value ? assignmentData.team_id : await getCurrentTeamId()
-      if (!teamId && !isSuperAdmin.value) {
-        throw new Error('Unable to determine team. Please contact administrator.')
-      }
-      
-      const { data, error: createError } = await supabase
-        .from('schedule_assignments')
-        .insert([{ ...assignmentData, team_id: teamId }])
-        .select()
-      
-      if (createError) throw createError
-      
-      return data[0]
-    } catch (e) {
+      return await $fetch('/api/schedule/assignments', { method: 'POST', body: assignmentData })
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error creating assignment:', e)
       return null
     } finally {
       loading.value = false
     }
   }
 
-  const updateAssignment = async (id, assignmentData) => {
+  const updateAssignment = async (id: string, assignmentData: any) => {
     loading.value = true
     error.value = null
-    
     try {
-      const { data, error: updateError } = await supabase
-        .from('schedule_assignments')
-        .update(assignmentData)
-        .eq('id', id)
-        .select()
-      
-      if (updateError) throw updateError
-      
-      return data[0]
-    } catch (e) {
+      return await $fetch(`/api/schedule/assignments/${id}`, { method: 'PUT', body: assignmentData })
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error updating assignment:', e)
       return null
     } finally {
       loading.value = false
     }
   }
 
-  const deleteAssignment = async (id) => {
+  const deleteAssignment = async (id: string) => {
     loading.value = true
     error.value = null
-    
     try {
-      const { error: deleteError } = await supabase
-        .from('schedule_assignments')
-        .delete()
-        .eq('id', id)
-      
-      if (deleteError) throw deleteError
-      
+      await $fetch(`/api/schedule/assignments/${id}`, { method: 'DELETE' })
       return true
-    } catch (e) {
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error deleting assignment:', e)
       return false
     } finally {
       loading.value = false
     }
   }
 
-  const copySchedule = async (fromDate, toDate) => {
+  const clearAssignmentsForDate = async (date: string) => {
+    try {
+      await $fetch(`/api/schedule/${date}`, { method: 'DELETE' })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const copySchedule = async (fromDate: string, toDate: string) => {
     loading.value = true
     error.value = null
-    
     try {
-      // Get team_id filter (null for super admins = see all)
-      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
-      
-      // Fetch source schedule assignments
-      // Note: Only job function assignments are copied from schedule_assignments table.
-      // PTO records (pto_days table) and shift swaps (shift_swaps table) are NOT copied,
-      // as they are date-specific and stored in separate tables.
-      let query = supabase
-        .from('schedule_assignments')
-        .select('*')
-        .eq('schedule_date', fromDate)
-      
-      // Filter by team_id if not super admin
-      if (teamId) {
-        query = query.eq('team_id', teamId)
-      }
-      
-      const { data: sourceData, error: fetchError } = await query
-      
-      if (fetchError) throw fetchError
-      
-      if (!sourceData || sourceData.length === 0) {
-        return true // No assignments to copy
-      }
-      
-      // Create new assignments with new date
-      // Only copying actual job function assignments, not PTO or shift swap data
-      const newAssignments = sourceData
-        .filter(assignment => {
-          // Ensure we have required fields
-          return assignment.employee_id && 
-                 assignment.job_function_id && 
-                 assignment.shift_id &&
-                 assignment.start_time &&
-                 assignment.end_time
-        })
-        .map(assignment => ({
-          employee_id: assignment.employee_id,
-          job_function_id: assignment.job_function_id,
-          shift_id: assignment.shift_id,
-          schedule_date: toDate,
-          assignment_order: assignment.assignment_order,
-          start_time: assignment.start_time,
-          end_time: assignment.end_time,
-          team_id: assignment.team_id // Preserve team_id
-        }))
-      
-      if (newAssignments.length > 0) {
-        const { error: insertError } = await supabase
-          .from('schedule_assignments')
-          .insert(newAssignments)
-        
-        if (insertError) throw insertError
-      }
-      
+      await $fetch('/api/schedule/copy', { method: 'POST', body: { from_date: fromDate, to_date: toDate } })
       return true
-    } catch (e) {
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error copying schedule:', e)
       return false
     } finally {
       loading.value = false
     }
   }
 
-  const fetchDailyTargets = async (date) => {
+  const fetchDailyTargets = async (date: string) => {
     try {
-      // Get team_id filter (null for super admins = see all)
-      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
-      
-      let query = supabase
-        .from('daily_targets')
-        .select('*, job_function:job_functions(*)')
-        .eq('schedule_date', date)
-      
-      // Filter by team_id if not super admin
-      if (teamId) {
-        query = query.eq('team_id', teamId)
-      }
-      
-      const { data, error: fetchError } = await query
-      
-      if (fetchError) throw fetchError
-      
-      dailyTargets.value = data
-      return data
-    } catch (e) {
+      dailyTargets.value = await $fetch<any[]>(`/api/daily-targets/${date}`)
+      return dailyTargets.value
+    } catch (e: any) {
       console.error('Error fetching daily targets:', e)
       return []
     }
   }
 
-  const upsertDailyTarget = async (targetData) => {
+  const upsertDailyTarget = async (targetData: any) => {
     loading.value = true
     error.value = null
-    
     try {
-      // Get team_id for daily target
-      const teamId = isSuperAdmin.value ? targetData.team_id : await getCurrentTeamId()
-      if (!teamId && !isSuperAdmin.value) {
-        throw new Error('Unable to determine team. Please contact administrator.')
-      }
-      
-      const { data, error: upsertError } = await supabase
-        .from('daily_targets')
-        .upsert({ ...targetData, team_id: teamId })
-        .select()
-      
-      if (upsertError) throw upsertError
-      
-      return data[0]
-    } catch (e) {
+      return await $fetch('/api/daily-targets', { method: 'POST', body: targetData })
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error upserting daily target:', e)
       return null
     } finally {
       loading.value = false
     }
   }
 
-  // Cleanup functions
   const runCleanup = async () => {
     loading.value = true
     error.value = null
-    
     try {
-      const { data, error: cleanupError } = await supabase
-        .rpc('cleanup_old_schedules_with_logging')
-      
-      if (cleanupError) throw cleanupError
-      
-      return data[0]
-    } catch (e) {
+      return await $fetch('/api/admin/cleanup/run', { method: 'POST' })
+    } catch (e: any) {
       error.value = e.message
-      console.error('Error running cleanup:', e)
       return null
     } finally {
       loading.value = false
@@ -378,85 +192,53 @@ export const useSchedule = () => {
 
   const getCleanupStats = async () => {
     try {
-      const { data, error: statsError } = await supabase
-        .rpc('get_cleanup_stats')
-      
-      if (statsError) throw statsError
-      
-      return data[0]
-    } catch (e) {
-      console.error('Error getting cleanup stats:', e)
+      return await $fetch('/api/admin/cleanup/stats')
+    } catch {
       return null
     }
   }
 
   const getCleanupLog = async (limit = 10) => {
     try {
-      const { data, error: logError } = await supabase
-        .from('cleanup_log')
-        .select('*')
-        .order('cleanup_date', { ascending: false })
-        .limit(limit)
-      
-      if (logError) throw logError
-      
-      return data
-    } catch (e) {
-      console.error('Error getting cleanup log:', e)
+      return await $fetch('/api/admin/cleanup/log', { params: { limit } })
+    } catch {
       return []
     }
   }
 
   const getCleanupStatus = async () => {
     try {
-      const { data, error: statusError } = await supabase
-        .from('cleanup_status')
-        .select('*')
-      
-      if (statusError) throw statusError
-      
-      return data
-    } catch (e) {
-      console.error('Error getting cleanup status:', e)
+      return await $fetch('/api/admin/cleanup/stats')
+    } catch {
+      return null
+    }
+  }
+
+  const fetchOldSchedulesForExport = async () => {
+    try {
+      return await $fetch<any[]>('/api/schedule/export')
+    } catch {
       return []
     }
   }
 
-  // Fetch old schedules for export (older than 7 days)
-  const fetchOldSchedulesForExport = async () => {
+  const fetchTargetHours = async () => {
     try {
-      // Get team_id filter (null for super admins = see all)
-      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
-      
-      const cutoffDate = new Date()
-      cutoffDate.setDate(cutoffDate.getDate() - 7)
-      const cutoffDateString = cutoffDate.toISOString().split('T')[0] // YYYY-MM-DD
-      
-      let query = supabase
-        .from('schedule_assignments')
-        .select(`
-          *,
-          employee:employees(first_name, last_name),
-          job_function:job_functions(name),
-          shift:shifts(name)
-        `)
-        .lt('schedule_date', cutoffDateString)
-      
-      // Filter by team_id if not super admin
-      if (teamId) {
-        query = query.eq('team_id', teamId)
-      }
-      
-      const { data, error: fetchError } = await query
-        .order('schedule_date', { ascending: true })
-        .order('start_time', { ascending: true })
-      
-      if (fetchError) throw fetchError
-      
-      return data || []
-    } catch (e) {
-      console.error('Error fetching old schedules for export:', e)
-      return []
+      const rows = await $fetch<{ job_function_id: string; target_hours: number }[]>('/api/target-hours')
+      const out: Record<string, number> = {}
+      rows.forEach((r) => { out[r.job_function_id] = Number(r.target_hours) })
+      return out
+    } catch {
+      return {}
+    }
+  }
+
+  const saveTargetHours = async (items: Array<{ job_function_id: string; target_hours: number }>) => {
+    try {
+      await $fetch('/api/target-hours', { method: 'POST', body: { items } })
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -472,8 +254,10 @@ export const useSchedule = () => {
     deleteShift,
     fetchScheduleForDate,
     createAssignment,
+    createAssignmentsBatch,
     updateAssignment,
     deleteAssignment,
+    clearAssignmentsForDate,
     copySchedule,
     fetchDailyTargets,
     upsertDailyTarget,
@@ -481,7 +265,8 @@ export const useSchedule = () => {
     getCleanupStats,
     getCleanupLog,
     getCleanupStatus,
-    fetchOldSchedulesForExport
+    fetchOldSchedulesForExport,
+    fetchTargetHours,
+    saveTargetHours,
   }
 }
-

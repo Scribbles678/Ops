@@ -27,8 +27,11 @@ A modern web-based scheduling application for distribution center operations, bu
 1. Go to [supabase.com](https://supabase.com) and create a new project
 2. Wait for the database to initialize (takes ~2 minutes)
 3. Go to the SQL Editor in your Supabase dashboard
-4. Copy the entire contents of `supabase-schema.sql` and run it in the SQL Editor
-5. This will create all tables, relationships, and seed data
+4. Run the database schema files from the `sql-schema/` folder:
+   - Start with `teams.sql` and `user_profiles.sql`
+   - Then run all other table schema files
+   - Finally run `rls-policies.sql` for security
+5. See `sql-schema/README.md` for the complete list of schema files
 
 ### 2. Environment Variables
 
@@ -82,7 +85,7 @@ The application uses 6 main tables:
 5. **schedule_assignments** - Daily employee assignments
 6. **daily_targets** - Production targets by job function
 
-See `supabase-schema.sql` for the complete schema.
+See the `sql-schema/` folder for individual table schemas and `sql-schema/README.md` for documentation.
 
 ## 🚢 Deployment (Netlify)
 

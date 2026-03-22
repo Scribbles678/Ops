@@ -570,9 +570,6 @@
 // Import the component explicitly
 import ShiftGroupedSchedule from '~/components/schedule/ShiftGroupedSchedule.vue'
 
-// Supabase client
-const supabase = useSupabaseClient()
-
 // Use real composables instead of mock data
 const { 
   employees, 
@@ -600,6 +597,9 @@ const {
   loading: assignmentsLoading, 
   error: assignmentsError, 
   fetchScheduleForDate,
+  fetchDailyTargets,
+  createAssignmentsBatch,
+  clearAssignmentsForDate,
   createAssignment,
   deleteAssignment
 } = useSchedule()
@@ -758,7 +758,8 @@ watch(scheduleDate, async (newDate) => {
     await fetchScheduleForDate(newDate)
     await fetchPTOForDate(newDate)
     await fetchShiftSwapsForDate(newDate)
-    await fetchPreferredAssignments() // Reload preferred assignments when date changes
+    await fetchPreferredAssignments()
+    await loadTargetHours()
     await nextTick()
     initializeScheduleData()
   }
@@ -784,93 +785,38 @@ onMounted(() => {
   })
 })
 
-// Target hours functions
+// Target hours functions - uses daily_targets API
 const loadTargetHours = async () => {
+  const date = scheduleDate.value
+  if (!date) return
   try {
-    console.log('Loading target hours from database...')
-    console.log('Job functions available:', jobFunctions.value.length)
-    
-    // First, let's check if the table exists and has any data
-    const { data: allData, error: allError } = await supabase
-      .from('target_hours')
-      .select('*')
-    
-    console.log('All target_hours table data:', allData)
-    console.log('Any errors:', allError)
-    
-    // Load from database
-    const supabase = useSupabaseClient()
-    const { data, error } = await supabase
-      .from('target_hours')
-      .select('job_function_id, target_hours')
-    
-    if (error) {
-      console.error('Database error:', error)
-      throw error
-    }
-    
-    console.log('Raw target hours data from database:', data)
-    
-    // Convert array to object format
-    const targetHoursData = {}
+    const data = await fetchDailyTargets(date)
+    const targetHoursData: Record<string, number> = {}
     if (data && data.length > 0) {
-      data.forEach(item => {
-        targetHoursData[item.job_function_id] = item.target_hours
-        console.log(`Mapped ${item.job_function_id} -> ${item.target_hours}`)
+      data.forEach((item: any) => {
+        targetHoursData[item.job_function_id] = item.target_units ?? 0
       })
-    } else {
-      console.log('No target hours data found in database')
     }
-    
-    console.log('Converted target hours data:', targetHoursData)
-    
-    // Don't add default values - only use what's in the database
-    console.log('Using only database values, no defaults added')
-    
     targetHours.value = targetHoursData
-    console.log('Final target hours loaded:', targetHours.value)
-    
-  } catch (error) {
-    console.error('Error loading target hours:', error)
-    // Don't use fallback - keep targetHours empty so we can see the issue
+  } catch {
     targetHours.value = {}
-    console.log('Error occurred, targetHours.value set to empty object')
   }
 }
 
 const getTargetHours = (jobFunctionId: string) => {
-  console.log(`Getting target hours for job function ${jobFunctionId}`)
-  console.log('Current targetHours.value:', targetHours.value)
-  
-  if (!targetHours.value || Object.keys(targetHours.value).length === 0) {
-    console.log('targetHours.value is empty, returning 0')
-    return 0
-  }
-  
-  // Special handling for meter group
+  if (!targetHours.value || Object.keys(targetHours.value).length === 0) return 0
   if (jobFunctionId === 'meter-group') {
-    // Sum up target hours for all meters
-    let totalMeterHours = 0
+    let total = 0
     jobFunctions.value.forEach((job: any) => {
       if (job.name.startsWith('Meter ')) {
-        const hours = targetHours.value[job.id]
-        if (hours !== undefined && hours !== null) {
-          totalMeterHours += hours
-        }
+        const h = targetHours.value[job.id]
+        if (h !== undefined && h !== null) total += h
       }
     })
-    console.log(`Found total meter target hours: ${totalMeterHours}`)
-    return totalMeterHours
+    return total
   }
-  
   const hours = targetHours.value[jobFunctionId]
-  if (hours === undefined || hours === null) {
-    console.log(`No target hours found for ${jobFunctionId}, returning 0`)
-    return 0
-  }
-  
-  console.log(`Found target hours for ${jobFunctionId}: ${hours}`)
-  return hours
+  return hours !== undefined && hours !== null ? hours : 0
 }
 
 // Helper function to generate all 15-minute time slots between start and end
@@ -1400,18 +1346,9 @@ const minutesToTime = (minutes: number): string => {
   return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
 }
 
-const clearAssignmentsForDate = async (date: string) => {
-  try {
-    const { error } = await supabase
-      .from('schedule_assignments')
-      .delete()
-      .eq('schedule_date', date)
-
-    if (error) throw error
-  } catch (error) {
-    console.error('Error clearing assignments:', error)
-    throw error
-  }
+const clearAssignmentsForDateLocal = async (date: string) => {
+  const ok = await clearAssignmentsForDate(date)
+  if (!ok) throw new Error('Failed to clear assignments')
 }
 
 const saveSchedule = async () => {
@@ -1421,7 +1358,7 @@ const saveSchedule = async () => {
     
     // Clear existing assignments for this date first
     saveProgress.value = 'Clearing existing assignments...'
-    await clearAssignmentsForDate(scheduleDate.value)
+    await clearAssignmentsForDateLocal(scheduleDate.value)
     
     // Convert scheduleAssignmentsData into contiguous ranges and save (batch-save improvement)
     saveProgress.value = 'Processing schedule data (merging ranges)...'
@@ -1534,12 +1471,8 @@ const saveSchedule = async () => {
       for (let i = 0; i < assignmentsToSave.length; i += batchSize) {
         const batch = assignmentsToSave.slice(i, i + batchSize)
         saveProgress.value = `Saving assignments ${i + 1}-${Math.min(i + batchSize, assignmentsToSave.length)} of ${assignmentsToSave.length}...`
-        // useSchedule.createAssignment currently inserts a single row.
-        // Use Supabase client directly for bulk insert to avoid N calls.
-        const { error: insertError } = await supabase
-          .from('schedule_assignments')
-          .insert(batch)
-        if (insertError) throw insertError
+        const result = await createAssignmentsBatch(batch)
+        if (!result) throw new Error('Failed to create assignments batch')
       }
     }
     

@@ -230,8 +230,6 @@
 <script setup lang="ts">
 import { onBeforeRouteLeave } from 'vue-router'
 
-// Get Supabase client
-const supabase = useSupabaseClient()
 const { 
   employees, 
   loading: employeesLoading, 
@@ -376,31 +374,11 @@ const loadTrainingData = async () => {
 
 const loadEmployeeShifts = async () => {
   if (employees.value.length === 0) return
-  
-  try {
-    // Load employee shifts from database using the composable
-    const { data, error } = await supabase
-      .from('employees')
-      .select('id, shift_id')
-      .in('id', employees.value.map(emp => emp.id))
-    
-    if (error) {
-      console.error('Error loading employee shifts:', error)
-      return
-    }
-    
-    // Build employee shifts object
-    const shifts: Record<string, string> = {}
-    data.forEach(emp => {
-      if (emp.shift_id) {
-        shifts[emp.id] = emp.shift_id
-      }
-    })
-    
-    employeeShifts.value = shifts
-  } catch (error) {
-    console.error('Error loading employee shifts:', error)
-  }
+  const shiftsMap: Record<string, string> = {}
+  employees.value.forEach((emp: any) => {
+    if (emp.shift_id) shiftsMap[emp.id] = emp.shift_id
+  })
+  employeeShifts.value = shiftsMap
 }
 
 const isEmployeeTrained = (employeeId: string, jobFunctionId: string): boolean => {
@@ -699,35 +677,15 @@ const deleteEmployee = async (employeeId: string) => {
 const updateEmployeeShift = async (employeeId: string, event: Event) => {
   const shiftId = (event.target as HTMLSelectElement).value
   employeeShifts.value[employeeId] = shiftId
-  
-  // Show loading state
   const selectElement = event.target as HTMLSelectElement
-  const originalText = selectElement.selectedOptions[0]?.textContent || ''
   selectElement.disabled = true
-  
+
   try {
-    // Update the employee's shift in the database
-    const { error } = await supabase
-      .from('employees')
-      .update({ shift_id: shiftId || null })
-      .eq('id', employeeId)
-    
-    if (error) {
-      console.error('Error updating employee shift:', error)
-      alert('Failed to save shift assignment. Please try again.')
-      return
-    }
-    
-    console.log(`Employee ${employeeId} assigned to shift ${shiftId}`)
-    
-    // Show success feedback
+    const result = await updateEmployee(employeeId, { shift_id: shiftId || null })
+    if (!result) throw new Error('Update failed')
     selectElement.style.backgroundColor = '#d4edda'
-    setTimeout(() => {
-      selectElement.style.backgroundColor = ''
-    }, 1000)
-    
-  } catch (error) {
-    console.error('Error updating employee shift:', error)
+    setTimeout(() => { selectElement.style.backgroundColor = '' }, 1000)
+  } catch {
     alert('Failed to save shift assignment. Please try again.')
   } finally {
     selectElement.disabled = false

@@ -734,9 +734,6 @@
 <script setup lang="ts">
 const activeTab = ref('job-functions')
 
-// Supabase client
-const supabase = useSupabaseClient()
-
 // Composables
 const { 
   jobFunctions, 
@@ -765,13 +762,15 @@ const {
 } = useEmployees()
 
 
-// Cleanup composables
+// Cleanup and target hours composables
 const { 
   runCleanup, 
   getCleanupStats, 
   getCleanupLog, 
   getCleanupStatus,
-  fetchOldSchedulesForExport
+  fetchOldSchedulesForExport,
+  fetchTargetHours: fetchTargetHoursFromApi,
+  saveTargetHours: saveTargetHoursToApi
 } = useSchedule()
 
 // Cleanup state
@@ -968,39 +967,15 @@ const updateTargetHours = async (jobFunctionId, hours) => {
 const fetchTargetHours = async () => {
   try {
     targetHoursLoading.value = true
-    
-    // Load from database
-    const { data, error } = await supabase
-      .from('target_hours')
-      .select('job_function_id, target_hours')
-    
-    if (error) throw error
-    
-    // Convert array to object format
-    const targetHoursData = {}
-    if (data) {
-      data.forEach(item => {
-        targetHoursData[item.job_function_id] = item.target_hours
-      })
-    }
-    
-    // Initialize with default values for any missing job functions
-    jobFunctions.value.forEach(jf => {
-      if (!targetHoursData[jf.id]) {
-        targetHoursData[jf.id] = 8.00
-      }
+    const data = await fetchTargetHoursFromApi()
+    const targetHoursData = { ...data }
+    jobFunctions.value.forEach((jf: any) => {
+      if (!(jf.id in targetHoursData)) targetHoursData[jf.id] = 8.00
     })
-    
     targetHours.value = targetHoursData
-    console.log('Loaded target hours from database:', targetHours.value)
-    
-  } catch (error) {
-    console.error('Error fetching target hours:', error)
-    // Fallback to defaults
-    const defaultTargetHours = {}
-    jobFunctions.value.forEach(jf => {
-      defaultTargetHours[jf.id] = 8.00
-    })
+  } catch {
+    const defaultTargetHours: Record<string, number> = {}
+    jobFunctions.value.forEach((jf: any) => { defaultTargetHours[jf.id] = 8.00 })
     targetHours.value = defaultTargetHours
   } finally {
     targetHoursLoading.value = false
@@ -1010,49 +985,19 @@ const fetchTargetHours = async () => {
 const saveTargetHours = async () => {
   try {
     targetHoursLoading.value = true
-    
-    // Ensure all job functions are included in the save (even if not explicitly changed)
-    // This prevents losing values for job functions that weren't touched
     const allTargetHours = { ...targetHours.value }
-    
-    // Add any job functions that aren't in the local state yet (use default 8.00)
-    jobFunctions.value.forEach(jf => {
-      if (!(jf.id in allTargetHours)) {
-        allTargetHours[jf.id] = 8.00
-      }
+    jobFunctions.value.forEach((jf: any) => {
+      if (!(jf.id in allTargetHours)) allTargetHours[jf.id] = 8.00
     })
-    
-    // Prepare data for upsert - save ALL job functions
-    const upsertData = Object.entries(allTargetHours).map(([jobFunctionId, hours]) => ({
-      job_function_id: jobFunctionId,
-      target_hours: parseFloat(hours) || 0
+    const items = Object.entries(allTargetHours).map(([job_function_id, target_hours]) => ({
+      job_function_id,
+      target_hours: parseFloat(String(target_hours)) || 0
     }))
-    
-    console.log('Saving target hours:', upsertData)
-    
-    // Save to database using upsert
-    const { error } = await supabase
-      .from('target_hours')
-      .upsert(upsertData, { 
-        onConflict: 'job_function_id',
-        ignoreDuplicates: false 
-      })
-    
-    if (error) throw error
-    
-    console.log('Saved target hours to database successfully')
-    
-    // Update local state with what we just saved (preserve all values)
+    const ok = await saveTargetHoursToApi(items)
+    if (!ok) throw new Error('Save failed')
     targetHours.value = allTargetHours
-    
-    // Don't refetch - we know what was saved, so keep the local state
-    // This prevents any timing issues or race conditions
-    
-    // Show success modal
     showNotification('Target hours saved successfully!', 'success')
-    
-  } catch (error) {
-    console.error('Error saving target hours:', error)
+  } catch {
     showNotification('Error saving target hours. Please try again.', 'error')
   } finally {
     targetHoursLoading.value = false

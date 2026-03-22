@@ -614,8 +614,7 @@
 <script setup lang="ts">
 // Page is protected by auth.global.ts middleware
 
-const supabase = useSupabaseClient()
-const user = useSupabaseUser()
+const { user, fetchCurrentUser, changePassword: changePasswordApi } = useAuth()
 const { isSuperAdmin, checkIsSuperAdmin, fetchAllTeams, createTeam: createTeamFn, deleteTeam: deleteTeamFn } = useTeam()
 
 // Password change state
@@ -663,52 +662,29 @@ const newTeam = ref({
   name: ''
 })
 
-// Fetch user profile
+// Fetch user profile - use auth/me which returns user; merge with team from /api/teams
 const fetchUserProfile = async () => {
-  // First, try to get the user ID from either user.value or session
-  let userId: string | null = null
-  
-  if (user.value?.id) {
-    userId = user.value.id
-  } else {
-    // Try to get session directly
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session?.user?.id) {
-      userId = session.user.id
-    } else {
-      console.log('No user found, waiting...')
-      return
-    }
-  }
-
-  if (!userId) {
-    console.log('No user ID found')
-    return
-  }
-
+  if (!user.value?.id) return
   try {
-    const { data, error: err } = await supabase
-      .from('user_profiles')
-      .select('*, teams(*)')
-      .eq('id', userId)
-      .maybeSingle() // Use maybeSingle to avoid errors if profile doesn't exist
-
-    if (err) {
-      console.error('Error fetching profile:', err)
-      error.value = `Failed to load profile: ${err.message}`
-      return
+    const authUser = user.value
+    let teamData = null
+    if (authUser.team_id) {
+      const teams = await $fetch<any[]>('/api/teams')
+      teamData = teams.find((t) => t.id === authUser.team_id) ?? null
     }
-
-    if (!data) {
-      console.warn('No profile found for user')
-      error.value = 'Profile not found. Please contact your administrator.'
-      return
+    userProfile.value = {
+      id: authUser.id,
+      email: authUser.email,
+      username: authUser.username,
+      full_name: authUser.full_name,
+      team_id: authUser.team_id,
+      is_admin: authUser.is_admin,
+      is_super_admin: authUser.is_super_admin,
+      is_active: authUser.is_active,
+      teams: teamData ? { id: teamData.id, name: teamData.name } : null,
     }
-
-    userProfile.value = data
-    error.value = '' // Clear any previous errors
+    error.value = ''
   } catch (err: any) {
-    console.error('Unexpected error fetching profile:', err)
     error.value = 'Failed to load profile information'
   }
 }
@@ -724,8 +700,8 @@ const handleChangePassword = async () => {
     return
   }
 
-  if (newPassword.value.length < 6) {
-    error.value = 'New password must be at least 6 characters'
+  if (newPassword.value.length < 8) {
+    error.value = 'New password must be at least 8 characters'
     return
   }
 
@@ -742,34 +718,7 @@ const handleChangePassword = async () => {
   loading.value = true
 
   try {
-    // First, verify current password by trying to sign in
-    // Use the actual email from auth user
-    const email = user.value?.email
-    if (!email) {
-      error.value = 'Unable to determine email address'
-      return
-    }
-
-    // Verify current password
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email: email,
-      password: currentPassword.value
-    })
-
-    if (signInError) {
-      error.value = 'Current password is incorrect'
-      return
-    }
-
-    // Update password
-    const { error: updateError } = await supabase.auth.updateUser({
-      password: newPassword.value
-    })
-
-    if (updateError) {
-      error.value = updateError.message || 'Failed to update password'
-      return
-    }
+    await changePasswordApi(currentPassword.value, newPassword.value)
 
     // Success!
     success.value = 'Password changed successfully!'
@@ -790,48 +739,19 @@ const handleChangePassword = async () => {
 
 // Fetch data functions
 const fetchUsers = async () => {
-  // Check both userProfile and isSuperAdmin from composable
-  if (!userProfile.value?.is_super_admin && !isSuperAdmin.value) {
-    console.log('Not a super admin, skipping user fetch')
-    return
-  }
-  
-  const { data, error: err } = await supabase
-    .from('user_profiles')
-    .select('*, teams(*)')
-    .order('email')
-  
-  if (err) {
-    console.error('Error fetching users:', err)
+  if (!isSuperAdmin.value) return
+  try {
+    users.value = await $fetch<any[]>('/api/admin/users')
+  } catch (err: any) {
     error.value = `Failed to fetch users: ${err.message}`
-    return
   }
-  
-  users.value = data || []
 }
 
 const fetchTeams = async () => {
-  // Check both userProfile and isSuperAdmin from composable
-  if (!userProfile.value?.is_super_admin && !isSuperAdmin.value) {
-    console.log('Not a super admin, skipping team fetch')
-    return
-  }
-  
+  if (!isSuperAdmin.value) return
   try {
-    // Check super admin status - use profile data if available
-    if (!userProfile.value?.is_super_admin) {
-      console.log('Not a super admin, skipping team fetch')
-      return
-    }
-    
-    // Sync composable with profile data
-    await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
-    
-    // Pass profile data to fetchAllTeams to ensure it works
-    const teamsData = await fetchAllTeams({ is_super_admin: userProfile.value.is_super_admin })
-    teams.value = teamsData || []
+    teams.value = await fetchAllTeams()
   } catch (err: any) {
-    console.error('Error fetching teams:', err)
     error.value = `Failed to fetch teams: ${err.message}`
   }
 }
@@ -846,17 +766,8 @@ const createUser = async () => {
   error.value = ''
   
   try {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      error.value = 'Not authenticated'
-      return
-    }
-    
-    const response = await $fetch('/api/admin/users/create', {
+    await $fetch('/api/admin/users/create', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`
-      },
       body: {
         email: newUser.value.email.trim().toLowerCase(),
         password: newUser.value.password,
@@ -890,25 +801,13 @@ const createTeam = async () => {
   error.value = ''
   
   try {
-    // Ensure profile is loaded
-    if (!userProfile.value) {
-      await fetchUserProfile()
-    }
-    
-    // Check super admin status - use profile first (most reliable)
-    const isSuperAdminUser = userProfile.value?.is_super_admin === true
-    
-    if (!isSuperAdminUser) {
+    if (!isSuperAdmin.value) {
       error.value = 'Only super admins can create teams. Please refresh the page and try again.'
       creatingTeam.value = false
       return
     }
     
-    // Sync composable with profile data
-    await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
-    
-    // Pass profile data to createTeam to ensure it recognizes super admin status
-    await createTeamFn(newTeam.value.name, { is_super_admin: userProfile.value.is_super_admin })
+    await createTeamFn(newTeam.value.name)
     newTeam.value.name = ''
     showTeamModal.value = false
     await fetchTeams()
@@ -924,25 +823,17 @@ const saveOwnTeam = async () => {
   if (!userProfile.value) return
   
   try {
-    const { error: err } = await supabase
-      .from('user_profiles')
-      .update({
-        team_id: ownTeamData.value.team_id || null
-      } as any)
-      .eq('id', userProfile.value.id)
-    
-    if (err) {
-      error.value = err.message
-      return
-    }
-    
-    // Refresh profile to show updated team
+    await $fetch('/api/auth/me', {
+      method: 'PUT',
+      body: { team_id: ownTeamData.value.team_id || null }
+    })
     await fetchUserProfile()
+    await checkIsSuperAdmin()
     showEditOwnTeamModal.value = false
     ownTeamData.value.team_id = ''
     error.value = ''
   } catch (err: any) {
-    error.value = err.message || 'Failed to update team'
+    error.value = err.data?.message || err.message || 'Failed to update team'
   }
 }
 
@@ -964,28 +855,25 @@ const saveUserEdit = async () => {
   if (!editingUser.value) return
   
   try {
-    const { error: err } = await supabase
-      .from('user_profiles')
-      .update({
+    await $fetch(`/api/admin/users/${editingUser.value.id}`, {
+      method: 'PUT',
+      body: {
         full_name: editUserData.value.full_name || null,
         team_id: editUserData.value.team_id || null,
         is_admin: editUserData.value.is_admin,
         is_super_admin: editUserData.value.is_super_admin,
         is_active: editUserData.value.is_active
-      } as any)
-      .eq('id', editingUser.value.id)
+      }
+    })
     
-    if (err) {
-      error.value = err.message
-      return
-    }
-    
+    const wasEditingSelf = editingUser.value?.id === user.value?.id
     showEditModal.value = false
     editingUser.value = null
     await fetchUsers()
-    await fetchUserProfile() // Refresh own profile if editing self
+    if (wasEditingSelf) await checkIsSuperAdmin()
+    await fetchUserProfile()
   } catch (err: any) {
-    error.value = err.message || 'Failed to update user'
+    error.value = err.data?.message || err.message || 'Failed to update user'
   }
 }
 
@@ -995,17 +883,15 @@ const toggleUserStatus = async (u: any) => {
     return
   }
   
-  const { error: err } = await supabase
-    .from('user_profiles')
-    .update({ is_active: !u.is_active } as any)
-    .eq('id', u.id)
-  
-  if (err) {
-    error.value = err.message
-    return
+  try {
+    await $fetch(`/api/admin/users/${u.id}`, {
+      method: 'PUT',
+      body: { is_active: !u.is_active }
+    })
+    await fetchUsers()
+  } catch (err: any) {
+    error.value = err.data?.message || err.message || 'Failed to update user'
   }
-  
-  await fetchUsers()
 }
 
 // Delete team
@@ -1050,17 +936,8 @@ const handleResetPassword = async () => {
   resettingPassword.value = true
   
   try {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      error.value = 'Not authenticated'
-      return
-    }
-    
     await $fetch('/api/admin/users/reset-password', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${session.access_token}`
-      },
       body: {
         user_id: userToReset.value.id,
         new_password: newPasswordReset.value
@@ -1085,39 +962,25 @@ const handleResetPassword = async () => {
 
 // Fetch profile on mount
 onMounted(async () => {
-  // Wait for user/session to be available with retries
+  await fetchCurrentUser()
   let retries = 0
-  const maxRetries = 20 // Wait up to 2 seconds
+  const maxRetries = 20
   
   while (retries < maxRetries) {
-    // Check both user.value and session
-    const { data: { session } } = await supabase.auth.getSession()
-    
-      if (user.value?.id || session?.user?.id) {
-        await fetchUserProfile()
-        // Wait a bit for profile to load, then check if super admin
-        await new Promise(resolve => setTimeout(resolve, 200))
-        
-        // Check super admin status via composable
-        await checkIsSuperAdmin()
-        
-        // Initialize own team data
-        ownTeamData.value.team_id = userProfile.value?.team_id || ''
-        
-        // If super admin, also fetch users and teams
-        if (userProfile.value?.is_super_admin) {
-          // Sync composable first
-          await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
-          await Promise.all([fetchUsers(), fetchTeams()])
-        }
-        return
+    if (user.value?.id) {
+      await fetchUserProfile()
+      await new Promise(resolve => setTimeout(resolve, 100))
+      await checkIsSuperAdmin()
+      ownTeamData.value.team_id = userProfile.value?.team_id || ''
+      if (isSuperAdmin.value) {
+        await Promise.all([fetchUsers(), fetchTeams()])
       }
-    
+      return
+    }
     await new Promise(resolve => setTimeout(resolve, 100))
     retries++
   }
   
-  // If still no user after retries, show error
   error.value = 'Unable to load user session. Please try logging out and back in.'
 })
 
@@ -1126,21 +989,10 @@ watch(user, async (newUser) => {
   if (newUser?.id) {
     await fetchUserProfile()
     await checkIsSuperAdmin()
-    
-    if (userProfile.value?.is_super_admin) {
-      // Sync composable first
-      await checkIsSuperAdmin({ is_super_admin: userProfile.value.is_super_admin })
+    if (isSuperAdmin.value) {
       await Promise.all([fetchUsers(), fetchTeams()])
     }
   }
 }, { immediate: false })
-
-// Watch for profile changes to reload management data
-watch(() => userProfile.value?.is_super_admin, async (isSuperAdminStatus) => {
-  if (isSuperAdminStatus) {
-    await checkIsSuperAdmin()
-    await Promise.all([fetchUsers(), fetchTeams()])
-  }
-})
 </script>
 

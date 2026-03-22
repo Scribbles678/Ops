@@ -1,6 +1,16 @@
 // Rate limiting middleware for API routes
 // Protects against API abuse and DoS attacks
 
+import type { H3Event } from 'h3'
+
+function getClientIP(event: H3Event): string | undefined {
+  const xForwardedFor = getRequestHeader(event, 'x-forwarded-for')
+  if (xForwardedFor) return xForwardedFor.split(',')[0].trim()
+  const xRealIp = getRequestHeader(event, 'x-real-ip')
+  if (xRealIp) return xRealIp
+  return event.node?.req?.socket?.remoteAddress
+}
+
 interface RateLimitStore {
   [key: string]: {
     count: number

@@ -246,7 +246,7 @@
 
 <script setup lang="ts">
 // Import composables
-const { copySchedule, createAssignment, fetchShifts } = useSchedule()
+const { copySchedule, createAssignment, createAssignmentsBatch, fetchShifts } = useSchedule()
 const { logout } = useAuth()
 const { jobFunctions, fetchJobFunctions } = useJobFunctions()
 const { fetchEmployees, getAllEmployeeTraining } = useEmployees()
@@ -1614,9 +1614,8 @@ const applyAISchedule = async (schedule: any[]) => {
     const batchSize = 200
     for (let i = 0; i < ranges.length; i += batchSize) {
       const batch = ranges.slice(i, i + batchSize)
-      const supabase = useSupabaseClient()
-      const { error } = await supabase.from('schedule_assignments').insert(batch)
-      if (error) throw error
+      const result = await createAssignmentsBatch(batch)
+      if (!result) throw new Error('Failed to create assignments batch')
     }
   } catch (error) {
     console.error('Error applying AI schedule:', error)

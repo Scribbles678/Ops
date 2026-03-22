@@ -1,242 +1,67 @@
 /**
  * Team management composable
- * Handles team isolation and super admin checks
+ * Reads team data from the authenticated user (JWT) via useAuth().
+ * Super admin status is determined by the server-side JWT payload.
  */
 export const useTeam = () => {
-  const supabase = useSupabaseClient()
-  const user = useSupabaseUser()
-  
+  const { user, fetchCurrentUser } = useAuth()
+
   const currentTeam = ref<any>(null)
-  const isSuperAdmin = ref(false)
   const loading = ref(false)
-  
-  /**
-   * Get current user's team
-   */
+
+  const isSuperAdmin = computed(() => user.value?.is_super_admin ?? false)
+
+  const checkIsSuperAdmin = async () => {
+    await fetchCurrentUser()
+  }
+
   const fetchCurrentTeam = async () => {
-    if (!user.value || !user.value.id) {
+    if (!user.value?.team_id) {
       currentTeam.value = null
       return null
     }
-    
     loading.value = true
     try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('*, teams(*)')
-        .eq('id', user.value.id)
-        .maybeSingle()
-      
-      if (error) {
-        console.error('Error fetching team:', error)
-        currentTeam.value = null
-        return null
-      }
-      
-      currentTeam.value = data?.teams || null
-      isSuperAdmin.value = data?.is_super_admin || false
-      
-      return data?.teams || null
-    } catch (error) {
-      console.error('Error fetching team:', error)
+      const teams = await $fetch<any[]>('/api/teams')
+      currentTeam.value = teams.find((t) => t.id === user.value?.team_id) ?? null
+      return currentTeam.value
+    } catch {
       currentTeam.value = null
       return null
     } finally {
       loading.value = false
     }
   }
-  
-  /**
-   * Get current user's team_id
-   */
-  const getCurrentTeamId = async (): Promise<string | null> => {
-    if (!user.value || !user.value.id) return null
-    
-    // If super admin, return null (can access all teams)
-    if (isSuperAdmin.value) return null
-    
-    try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('team_id')
-        .eq('id', user.value.id)
-        .maybeSingle()
-      
-      if (error) {
-        console.error('Error fetching team_id:', error)
-        return null
-      }
-      
-      return data?.team_id || null
-    } catch (error) {
-      console.error('Error fetching team_id:', error)
-      return null
-    }
+
+  const fetchAllTeams = async (): Promise<any[]> => {
+    if (!isSuperAdmin.value) throw new Error('Only super admins can view all teams')
+    return $fetch<any[]>('/api/teams')
   }
-  
-  /**
-   * Check if current user is super admin
-   * Can optionally accept profile data to avoid querying
-   */
-  const checkIsSuperAdmin = async (profileData?: { is_super_admin?: boolean }): Promise<boolean> => {
-    if (!user.value || !user.value.id) {
-      isSuperAdmin.value = false
-      return false
-    }
-    
-    // If profile data is provided, use it directly
-    if (profileData !== undefined) {
-      isSuperAdmin.value = profileData.is_super_admin || false
-      return isSuperAdmin.value
-    }
-    
-    try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('is_super_admin')
-        .eq('id', user.value.id)
-        .maybeSingle()
-      
-      if (error) {
-        console.error('Error checking super admin:', error)
-        console.error('Error details:', JSON.stringify(error, null, 2))
-        isSuperAdmin.value = false
-        return false
-      }
-      
-      if (!data) {
-        console.warn('No profile data returned for user:', user.value.id)
-        isSuperAdmin.value = false
-        return false
-      }
-      
-      isSuperAdmin.value = data.is_super_admin || false
-      console.log('Super admin check result:', { userId: user.value.id, isSuperAdmin: isSuperAdmin.value })
-      return isSuperAdmin.value
-    } catch (error) {
-      console.error('Error checking super admin:', error)
-      isSuperAdmin.value = false
-      return false
-    }
+
+  const createTeam = async (name: string) => {
+    if (!isSuperAdmin.value) throw new Error('Only super admins can create teams')
+    return $fetch('/api/teams', { method: 'POST', body: { name } })
   }
-  
-  /**
-   * Get all teams (super admin only)
-   * Can optionally accept profile data to verify super admin status
-   */
-  const fetchAllTeams = async (profileData?: { is_super_admin?: boolean }): Promise<any[]> => {
-    // Check super admin status - use provided data or check current value
-    let isSuperAdminUser = isSuperAdmin.value
-    
-    if (profileData !== undefined) {
-      isSuperAdminUser = profileData.is_super_admin || false
-      // Sync the composable value
-      if (isSuperAdminUser) {
-        isSuperAdmin.value = true
-      }
-    } else if (!isSuperAdminUser) {
-      // If not set, try checking
-      isSuperAdminUser = await checkIsSuperAdmin()
-    }
-    
-    if (!isSuperAdminUser) {
-      throw new Error('Only super admins can view all teams')
-    }
-    
-    const { data, error } = await supabase
-      .from('teams')
-      .select('*')
-      .order('name')
-    
-    if (error) throw error
-    return data || []
-  }
-  
-  /**
-   * Create a new team (super admin only)
-   * Can optionally accept profile data to verify super admin status
-   */
-  const createTeam = async (name: string, profileData?: { is_super_admin?: boolean }) => {
-    // Check super admin status - use provided data or check current value
-    let isSuperAdminUser = isSuperAdmin.value
-    
-    if (profileData !== undefined) {
-      isSuperAdminUser = profileData.is_super_admin || false
-      // Sync the composable value
-      if (isSuperAdminUser) {
-        isSuperAdmin.value = true
-      }
-    } else if (!isSuperAdminUser) {
-      // If not set, try checking
-      isSuperAdminUser = await checkIsSuperAdmin()
-    }
-    
-    if (!isSuperAdminUser) {
-      throw new Error('Only super admins can create teams')
-    }
-    
-    const { data, error } = await supabase
-      .from('teams')
-      .insert([{ name }])
-      .select()
-      .single()
-    
-    if (error) {
-      // If RLS error, it might be because super admin check failed
-      if (error.message?.includes('permission') || error.message?.includes('policy') || error.message?.includes('row-level security')) {
-        throw new Error('Only super admins can create teams. Please ensure you are logged in as a super admin.')
-      }
-      throw error
-    }
-    return data
-  }
-  
-  /**
-   * Update team (super admin only)
-   */
+
   const updateTeam = async (teamId: string, updates: { name?: string }) => {
-    if (!isSuperAdmin.value) {
-      throw new Error('Only super admins can update teams')
-    }
-    
-    const { data, error } = await supabase
-      .from('teams')
-      .update(updates)
-      .eq('id', teamId)
-      .select()
-      .single()
-    
-    if (error) throw error
-    return data
+    if (!isSuperAdmin.value) throw new Error('Only super admins can update teams')
+    return $fetch(`/api/teams/${teamId}`, { method: 'PUT', body: updates })
   }
-  
-  /**
-   * Delete team (super admin only)
-   */
+
   const deleteTeam = async (teamId: string) => {
-    if (!isSuperAdmin.value) {
-      throw new Error('Only super admins can delete teams')
-    }
-    
-    const { error } = await supabase
-      .from('teams')
-      .delete()
-      .eq('id', teamId)
-    
-    if (error) throw error
+    if (!isSuperAdmin.value) throw new Error('Only super admins can delete teams')
+    return $fetch(`/api/teams/${teamId}`, { method: 'DELETE' })
   }
-  
+
   return {
     currentTeam,
     isSuperAdmin,
+    checkIsSuperAdmin,
     loading,
     fetchCurrentTeam,
-    getCurrentTeamId,
-    checkIsSuperAdmin,
     fetchAllTeams,
     createTeam,
     updateTeam,
-    deleteTeam
+    deleteTeam,
   }
 }
-

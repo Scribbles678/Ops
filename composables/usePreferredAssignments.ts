@@ -1,162 +1,91 @@
-import { ref } from 'vue'
-
 export const usePreferredAssignments = () => {
-  const supabase = useSupabaseClient()
-  const { getCurrentTeamId, isSuperAdmin } = useTeam()
-  
   const preferredAssignments = ref<any[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  // Fetch all preferred assignments
   const fetchPreferredAssignments = async () => {
     loading.value = true
     error.value = null
     try {
-      // Get team_id filter (null for super admins = see all)
-      const teamId = isSuperAdmin.value ? null : await getCurrentTeamId()
-      
-      let query = supabase
-        .from('preferred_assignments')
-        .select(`
-          *,
-          employee:employees(id, first_name, last_name),
-          job_function:job_functions(id, name)
-        `)
-      
-      // Filter by team_id if not super admin
-      if (teamId) {
-        query = query.eq('team_id', teamId)
-      }
-      
-      const { data, error: fetchError } = await query
-        .order('priority', { ascending: false })
-        .order('created_at', { ascending: true })
-
-      if (fetchError) throw fetchError
-      preferredAssignments.value = data || []
+      preferredAssignments.value = await $fetch<any[]>('/api/preferred-assignments')
+      return preferredAssignments.value
     } catch (e: any) {
       error.value = e.message
-      console.error('Error fetching preferred assignments:', e.message)
+      return []
     } finally {
       loading.value = false
     }
   }
 
-  // Get preferred assignments for a specific employee
-  const getPreferredAssignmentsForEmployee = (employeeId: string) => {
-    return preferredAssignments.value.filter(pa => pa.employee_id === employeeId)
+  const createPreferredAssignment = async (data: any) => {
+    loading.value = true
+    error.value = null
+    try {
+      const result = await $fetch('/api/preferred-assignments', { method: 'POST', body: data })
+      await fetchPreferredAssignments()
+      return result
+    } catch (e: any) {
+      error.value = e.message
+      return null
+    } finally {
+      loading.value = false
+    }
   }
 
-  // Get preferred assignments for a specific job function
-  const getPreferredAssignmentsForJobFunction = (jobFunctionId: string) => {
-    return preferredAssignments.value.filter(pa => pa.job_function_id === jobFunctionId)
+  const updatePreferredAssignment = async (id: string, data: any) => {
+    loading.value = true
+    error.value = null
+    try {
+      const result = await $fetch(`/api/preferred-assignments/${id}`, { method: 'PUT', body: data })
+      await fetchPreferredAssignments()
+      return result
+    } catch (e: any) {
+      error.value = e.message
+      return null
+    } finally {
+      loading.value = false
+    }
   }
 
-  // Get preferred assignment mapping (employee_id -> job_function_id -> preferred assignment)
-  const getPreferredAssignmentsMap = () => {
-    const map: Record<string, Record<string, any>> = {}
-    preferredAssignments.value.forEach(pa => {
-      if (!map[pa.employee_id]) {
-        map[pa.employee_id] = {}
-      }
-      map[pa.employee_id][pa.job_function_id] = pa
-    })
-    return map
+  const deletePreferredAssignment = async (id: string) => {
+    loading.value = true
+    error.value = null
+    try {
+      await $fetch(`/api/preferred-assignments/${id}`, { method: 'DELETE' })
+      await fetchPreferredAssignments()
+      return true
+    } catch (e: any) {
+      error.value = e.message
+      return false
+    } finally {
+      loading.value = false
+    }
   }
 
-  // Check if an employee has a preferred/required assignment for a job function
-  const isPreferredAssignment = (employeeId: string, jobFunctionId: string) => {
-    return preferredAssignments.value.some(
-      pa => pa.employee_id === employeeId && pa.job_function_id === jobFunctionId
+  const isPreferredAssignment = (employeeId: string, jobFunctionId: string) =>
+    preferredAssignments.value.some(
+      (pa) => pa.employee_id === employeeId && pa.job_function_id === jobFunctionId
     )
-  }
 
-  // Check if an assignment is required (not just preferred)
-  const isRequiredAssignment = (employeeId: string, jobFunctionId: string) => {
-    const pa = preferredAssignments.value.find(
-      p => p.employee_id === employeeId && p.job_function_id === jobFunctionId
+  const isRequiredAssignment = (employeeId: string, jobFunctionId: string) =>
+    preferredAssignments.value.some(
+      (pa) => pa.employee_id === employeeId && pa.job_function_id === jobFunctionId && pa.is_required
     )
-    return pa?.is_required === true
-  }
 
-  // Get priority for an assignment (higher = should be assigned first)
   const getAssignmentPriority = (employeeId: string, jobFunctionId: string) => {
     const pa = preferredAssignments.value.find(
-      p => p.employee_id === employeeId && p.job_function_id === jobFunctionId
+      (p) => p.employee_id === employeeId && p.job_function_id === jobFunctionId
     )
-    return pa?.priority || 0
+    return pa?.priority ?? 0
   }
 
-  // Create a preferred assignment
-  const createPreferredAssignment = async (assignmentData: {
-    employee_id: string
-    job_function_id: string
-    is_required?: boolean
-    priority?: number
-    notes?: string
-    team_id?: string | null
-  }) => {
-    try {
-      // Get team_id for new preferred assignment
-      const teamId = isSuperAdmin.value ? assignmentData.team_id : await getCurrentTeamId()
-      if (!teamId && !isSuperAdmin.value) {
-        throw new Error('Unable to determine team. Please contact administrator.')
-      }
-      
-      const { data, error: insertError } = await supabase
-        .from('preferred_assignments')
-        .insert({ ...assignmentData, team_id: teamId })
-        .select()
-
-      if (insertError) throw insertError
-      await fetchPreferredAssignments() // Refresh list
-      return data[0]
-    } catch (e: any) {
-      error.value = e.message
-      console.error('Error creating preferred assignment:', e.message)
-      throw e
+  const getPreferredAssignmentsMap = () => {
+    const map: Record<string, Record<string, any>> = {}
+    for (const pa of preferredAssignments.value) {
+      if (!map[pa.employee_id]) map[pa.employee_id] = {}
+      map[pa.employee_id][pa.job_function_id] = pa
     }
-  }
-
-  // Update a preferred assignment
-  const updatePreferredAssignment = async (id: string, updates: {
-    is_required?: boolean
-    priority?: number
-    notes?: string
-  }) => {
-    try {
-      const { data, error: updateError } = await supabase
-        .from('preferred_assignments')
-        .update(updates)
-        .eq('id', id)
-        .select()
-
-      if (updateError) throw updateError
-      await fetchPreferredAssignments() // Refresh list
-      return data[0]
-    } catch (e: any) {
-      error.value = e.message
-      console.error('Error updating preferred assignment:', e.message)
-      throw e
-    }
-  }
-
-  // Delete a preferred assignment
-  const deletePreferredAssignment = async (id: string) => {
-    try {
-      const { error: deleteError } = await supabase
-        .from('preferred_assignments')
-        .delete()
-        .eq('id', id)
-
-      if (deleteError) throw deleteError
-      await fetchPreferredAssignments() // Refresh list
-    } catch (e: any) {
-      error.value = e.message
-      console.error('Error deleting preferred assignment:', e.message)
-      throw e
-    }
+    return map
   }
 
   return {
@@ -164,15 +93,12 @@ export const usePreferredAssignments = () => {
     loading,
     error,
     fetchPreferredAssignments,
-    getPreferredAssignmentsForEmployee,
-    getPreferredAssignmentsForJobFunction,
-    getPreferredAssignmentsMap,
+    createPreferredAssignment,
+    updatePreferredAssignment,
+    deletePreferredAssignment,
     isPreferredAssignment,
     isRequiredAssignment,
     getAssignmentPriority,
-    createPreferredAssignment,
-    updatePreferredAssignment,
-    deletePreferredAssignment
+    getPreferredAssignmentsMap,
   }
 }
-

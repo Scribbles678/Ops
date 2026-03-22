@@ -115,13 +115,10 @@ useHead({
 })
 
 // Redirect if already authenticated
-const user = useSupabaseUser()
+const { user, login } = useAuth()
 if (user.value) {
   await navigateTo('/')
 }
-
-const supabase = useSupabaseClient()
-const router = useRouter()
 
 // State
 const email = ref('')
@@ -130,17 +127,15 @@ const showPassword = ref(false)
 const loading = ref(false)
 const error = ref('')
 
-// Handle login
+// Handle login (uses custom JWT auth via /api/auth/login)
 async function handleLogin() {
   error.value = ''
 
-  // Validation
   if (!email.value || !password.value) {
     error.value = 'Please enter your email and password'
     return
   }
 
-  // Basic email validation
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   if (!emailRegex.test(email.value)) {
     error.value = 'Please enter a valid email address'
@@ -150,98 +145,17 @@ async function handleLogin() {
   loading.value = true
 
   try {
-    const { data, error: signInError } = await supabase.auth.signInWithPassword({
-      email: email.value.trim().toLowerCase(),
-      password: password.value
-    })
-
-    if (signInError) {
-      // Provide user-friendly error messages
-      if (signInError.message.includes('Invalid login credentials')) {
-        error.value = 'Invalid email or password'
-      } else if (signInError.message.includes('Email not confirmed')) {
-        error.value = 'Account not activated. Please contact your administrator.'
-      } else {
-        error.value = signInError.message
-      }
-      return
-    }
-
-    if (data.user) {
-      // Wait for session to be fully established and RLS to recognize it
-      // The @nuxtjs/supabase module should handle this, but we need to wait
-      await new Promise(resolve => setTimeout(resolve, 500))
-
-      // Verify session is loaded
-      const { data: { session: currentSession } } = await supabase.auth.getSession()
-      if (!currentSession) {
-        error.value = 'Session not established. Please try again.'
-        return
-      }
-
-      // Check if user has a profile (was created by admin)
-      // Retry logic for RLS timing issues
-      let profile = null
-      let profileError = null
-      let retries = 0
-      const maxRetries = 3
-
-      while (retries < maxRetries && !profile && !profileError) {
-        const { data: profileData, error: errorData } = await supabase
-          .from('user_profiles')
-          .select('is_active, username, email, is_super_admin')
-          .eq('id', data.user.id)
-          .maybeSingle()
-
-        if (errorData) {
-          // If it's an RLS/permission error, wait and retry
-          if (errorData.message?.includes('permission') || 
-              errorData.message?.includes('policy') || 
-              errorData.message?.includes('RLS') ||
-              errorData.code === '42501') {
-            retries++
-            if (retries < maxRetries) {
-              console.log(`RLS error, retrying... (${retries}/${maxRetries})`)
-              await new Promise(resolve => setTimeout(resolve, 500))
-              continue
-            }
-          }
-          profileError = errorData
-          break
-        }
-
-        profile = profileData
-        break
-      }
-
-      if (profileError) {
-        console.error('Profile lookup error:', profileError)
-        if (profileError.code === 'PGRST116' || profileError.message?.includes('No rows')) {
-          error.value = 'Account not found. Please contact your administrator to create your profile.'
-        } else {
-          error.value = `Account lookup failed: ${profileError.message}. Please contact your administrator.`
-        }
-        await supabase.auth.signOut()
-        return
-      }
-
-      if (!profile) {
-        error.value = 'Account not found. Please contact your administrator to create your profile.'
-        await supabase.auth.signOut()
-        return
-      }
-
-      if (!profile.is_active) {
-        error.value = 'Account is inactive. Please contact your administrator.'
-        await supabase.auth.signOut()
-        return
-      }
-
-      // Redirect to home
-      await router.push('/')
-    }
+    await login(email.value.trim().toLowerCase(), password.value)
+    await navigateTo('/')
   } catch (err: any) {
-    error.value = err.message || 'An unexpected error occurred. Please try again.'
+    const msg = err?.data?.message ?? err?.message ?? 'An unexpected error occurred.'
+    if (msg.includes('Invalid') || msg.includes('credentials')) {
+      error.value = 'Invalid email or password'
+    } else if (msg.includes('inactive')) {
+      error.value = 'Account is inactive. Please contact your administrator.'
+    } else {
+      error.value = msg
+    }
   } finally {
     loading.value = false
   }
