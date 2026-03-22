@@ -5,7 +5,7 @@
  * Matches the distribution center setup from the app's mock data:
  * - Job Function Dashboards: Meter, Locus, Pick, X4, EM9, Speedcell, Helpdesk
  * - Shifts: X4 (day), EM9 (swing), Locus (overnight)
- * - 50 employees, each trained on Locus, Pick, Meter, X4, EM9
+ * - 50 employees, each trained on Locus, Pick, Meter (covers Meter 1-20), X4, EM9
  *
  * Usage:
  *   node scripts/seed-test-data.js           # Add test data (skips if already exists)
@@ -19,13 +19,20 @@ import pg from 'pg'
 const DATABASE_URL =
   process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/scheduling'
 
-// Job functions - Locus, Pick, X4, EM9, Meter (each meter is the same; schedule assigns to specific meter)
+// Job functions - Locus, Pick, X4, EM9, Meter (parent for training), Meter 1-20 (for scheduling)
 const JOB_FUNCTIONS = [
   { name: 'Locus', color: '#FFD700', rate: 30, unit: 'orders/hour', sort: 0 },
   { name: 'Pick', color: '#FFFF00', rate: 55, unit: 'cartons/hour', sort: 1 },
   { name: 'X4', color: '#3B82F6', rate: 50, unit: 'cases/hour', sort: 2 },
   { name: 'EM9', color: '#10B981', rate: 45, unit: 'units/hour', sort: 3 },
   { name: 'Meter', color: '#87CEEB', rate: 50, unit: 'cases/hour', sort: 4 },
+  ...Array.from({ length: 20 }, (_, i) => ({
+    name: `Meter ${i + 1}`,
+    color: '#87CEEB',
+    rate: 50,
+    unit: 'cases/hour',
+    sort: 5 + i,
+  })),
 ]
 
 // Shifts - X4 (day), EM9 (swing), Locus (overnight)
@@ -39,8 +46,8 @@ const SHIFTS = [
 const FIRST_NAMES = ['James', 'Mary', 'John', 'Patricia', 'Robert', 'Jennifer', 'Michael', 'Linda', 'William', 'Elizabeth', 'David', 'Barbara', 'Richard', 'Susan', 'Joseph', 'Jessica', 'Thomas', 'Sarah', 'Charles', 'Karen', 'Christopher', 'Lisa', 'Daniel', 'Nancy', 'Matthew', 'Betty', 'Anthony', 'Margaret', 'Mark', 'Sandra', 'Donald', 'Ashley', 'Steven', 'Kimberly', 'Paul', 'Emily', 'Andrew', 'Donna', 'Joshua', 'Michelle', 'Kenneth', 'Carol', 'Kevin', 'Amanda', 'Brian', 'Dorothy', 'George', 'Melissa', 'Timothy', 'Deborah']
 const LAST_NAMES = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez', 'Hernandez', 'Lopez', 'Gonzalez', 'Wilson', 'Anderson', 'Thomas', 'Taylor', 'Moore', 'Jackson', 'Martin', 'Lee', 'Perez', 'Thompson', 'White', 'Harris', 'Sanchez', 'Clark', 'Ramirez', 'Lewis', 'Robinson', 'Walker', 'Young', 'Allen', 'King', 'Wright', 'Scott', 'Torres', 'Nguyen', 'Hill', 'Flores', 'Green', 'Adams', 'Nelson', 'Baker', 'Hall', 'Rivera', 'Campbell', 'Mitchell', 'Carter', 'Roberts']
 
-// 50 employees - each trained on Locus, Pick, Meter, X4, EM9 (you can edit after seeding)
-const TRAINED_JOBS = ['Locus', 'Pick', 'Meter', 'X4', 'EM9']
+// 50 employees - each trained on Locus, Pick, Meter (covers Meter 1-20), X4, EM9
+const TRAINED_JOBS = ['Locus', 'Pick', 'X4', 'EM9', 'Meter']
 
 function generateEmployees(n) {
   const seen = new Set()

@@ -242,7 +242,7 @@ const {
   updateEmployee,
   deleteEmployee: deleteEmployeeApi
 } = useEmployees()
-const { jobFunctions, loading: functionsLoading, fetchJobFunctions, getGroupedJobFunctions, getAllMeterJobFunctions, isMeterJobFunction } = useJobFunctions()
+const { jobFunctions, loading: functionsLoading, fetchJobFunctions, getGroupedJobFunctions, getAllMeterJobFunctions, getMeterParentJobFunction, isMeterJobFunction } = useJobFunctions()
 const { shifts, fetchShifts } = useSchedule()
 
 const searchQuery = ref('')
@@ -382,9 +382,15 @@ const loadEmployeeShifts = async () => {
 }
 
 const isEmployeeTrained = (employeeId: string, jobFunctionId: string): boolean => {
-  // Special handling for meter group
+  // Special handling for meter group: check Meter parent (one record) or any Meter N
   if (jobFunctionId === 'meter-group') {
-    // Check if employee is trained on ANY meter
+    const meterParent = getMeterParentJobFunction()
+    if (meterParent) {
+      if (pendingChanges.has(employeeId)) {
+        return pendingChanges.get(employeeId)!.includes(meterParent.id)
+      }
+      return employeeTraining.value[employeeId]?.includes(meterParent.id) || false
+    }
     const allMeters = getAllMeterJobFunctions()
     return allMeters.some(meter => {
       if (pendingChanges.has(employeeId)) {
@@ -393,7 +399,7 @@ const isEmployeeTrained = (employeeId: string, jobFunctionId: string): boolean =
       return employeeTraining.value[employeeId]?.includes(meter.id) || false
     })
   }
-  
+
   // Check pending changes first (for immediate UI updates)
   if (pendingChanges.has(employeeId)) {
     return pendingChanges.get(employeeId)!.includes(jobFunctionId)
@@ -435,25 +441,30 @@ const toggleTraining = (employeeId: string, jobFunctionId: string, event?: Event
   
   const currentTraining = pendingChanges.get(employeeId)!
   
-  // Special handling for meter group
+  // Special handling for meter group: save only Meter parent (one record) when it exists
   if (jobFunctionId === 'meter-group') {
-    const allMeters = getAllMeterJobFunctions()
-    
-    if (isNowChecked) {
-      // Add training to all meters
-      allMeters.forEach(meter => {
-        if (!currentTraining.includes(meter.id)) {
-          currentTraining.push(meter.id)
+    const meterParent = getMeterParentJobFunction()
+    if (meterParent) {
+      if (isNowChecked) {
+        if (!currentTraining.includes(meterParent.id)) {
+          currentTraining.push(meterParent.id)
         }
-      })
+      } else {
+        const index = currentTraining.indexOf(meterParent.id)
+        if (index > -1) currentTraining.splice(index, 1)
+      }
     } else {
-      // Remove training from all meters
-      allMeters.forEach(meter => {
-        const index = currentTraining.indexOf(meter.id)
-        if (index > -1) {
-          currentTraining.splice(index, 1)
-        }
-      })
+      const allMeters = getAllMeterJobFunctions()
+      if (isNowChecked) {
+        allMeters.forEach(meter => {
+          if (!currentTraining.includes(meter.id)) currentTraining.push(meter.id)
+        })
+      } else {
+        allMeters.forEach(meter => {
+          const idx = currentTraining.indexOf(meter.id)
+          if (idx > -1) currentTraining.splice(idx, 1)
+        })
+      }
     }
   } else {
     // Regular job function handling - use the ACTUAL checkbox state

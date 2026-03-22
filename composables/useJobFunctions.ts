@@ -70,13 +70,19 @@ export const useJobFunctions = () => {
   }
   const getGroupedJobFunctions = () => {
     const meters = jobFunctions.value.filter((jf) => isMeterJobFunction(jf.name))
-    const nonMeters = jobFunctions.value.filter((jf) => !isMeterJobFunction(jf.name))
+    const meterParent = jobFunctions.value.find((jf) => jf.name === 'Meter')
+    const nonMeters = jobFunctions.value.filter((jf) => !isMeterJobFunction(jf.name) && jf.name !== 'Meter')
     const grouped = [...nonMeters]
     if (meters.length > 0) {
-      grouped.push({ id: 'meter-group', name: 'Meter', _isGroup: true, _meters: meters })
+      if (meterParent) {
+        grouped.push(meterParent)
+      } else {
+        grouped.push({ id: 'meter-group', name: 'Meter', _isGroup: true, _meters: meters })
+      }
     }
     return grouped
   }
+  const getMeterParentJobFunction = () => jobFunctions.value.find((jf) => jf.name === 'Meter') ?? null
   const getAllMeterJobFunctions = () => jobFunctions.value.filter((jf) => isMeterJobFunction(jf.name))
   const getMeterJobFunctionByNumber = (num: number) =>
     jobFunctions.value.find((jf) => jf.name === `Meter ${num}`) ?? null
@@ -94,5 +100,6 @@ export const useJobFunctions = () => {
     getGroupedJobFunctions,
     getAllMeterJobFunctions,
     getMeterJobFunctionByNumber,
+    getMeterParentJobFunction,
   }
 }

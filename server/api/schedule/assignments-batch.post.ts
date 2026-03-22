@@ -20,19 +20,24 @@ export default defineEventHandler(async (event) => {
   }
 
   const inserted: any[] = []
-  for (const a of assignments) {
-    const { employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order = 1 } = a
-    if (!employee_id || !job_function_id || !shift_id || !schedule_date || !start_time || !end_time) {
-      throw createError({ statusCode: 400, message: 'Each assignment must have employee_id, job_function_id, shift_id, schedule_date, start_time, end_time' })
+  try {
+    for (const a of assignments) {
+      const { employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order = 1 } = a
+      if (!employee_id || !job_function_id || !shift_id || !schedule_date || !start_time || !end_time) {
+        throw createError({ statusCode: 400, message: 'Each assignment must have employee_id, job_function_id, shift_id, schedule_date, start_time, end_time' })
+      }
+      const result = await query(
+        `INSERT INTO schedule_assignments
+           (employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order, team_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         RETURNING *`,
+        [employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order, teamId ?? null]
+      )
+      inserted.push(result.rows[0])
     }
-    const result = await query(
-      `INSERT INTO schedule_assignments
-         (employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order, team_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       RETURNING *`,
-      [employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order, teamId ?? null]
-    )
-    inserted.push(result.rows[0])
+    return { inserted, count: inserted.length }
+  } catch (e: any) {
+    const msg = e?.message || e?.data?.message || 'Failed to create assignments batch'
+    throw createError({ statusCode: 500, message: msg })
   }
-  return { inserted, count: inserted.length }
 })
