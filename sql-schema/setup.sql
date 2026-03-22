@@ -259,15 +259,17 @@ CREATE OR REPLACE FUNCTION validate_assignment_training()
 RETURNS TRIGGER AS $$
 DECLARE
   jf_name text;
+  jf_team_id uuid;
   meter_parent_id uuid;
 BEGIN
-  -- Get job function name for the assignment
-  SELECT name INTO jf_name FROM job_functions WHERE id = NEW.job_function_id;
+  -- Get job function name and team for the assignment
+  SELECT name, team_id INTO jf_name, jf_team_id FROM job_functions WHERE id = NEW.job_function_id;
 
   -- Meter N: accept training on specific Meter N OR on parent "Meter"
+  -- Use job function's team_id for parent lookup (fixes super admin case where assignment.team_id is null)
   IF jf_name ~ '^Meter [0-9]+$' THEN
     SELECT id INTO meter_parent_id FROM job_functions
-      WHERE name = 'Meter' AND (team_id IS NOT DISTINCT FROM NEW.team_id)
+      WHERE name = 'Meter' AND (team_id IS NOT DISTINCT FROM jf_team_id)
       LIMIT 1;
     IF EXISTS (
       SELECT 1 FROM employee_training
