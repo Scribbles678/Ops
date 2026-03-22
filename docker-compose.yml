@@ -28,6 +28,19 @@ services:
         condition: service_healthy
     restart: "no"
 
+  seed-test-data:
+    build:
+      context: .
+      target: builder
+    command: node scripts/seed-test-data.js
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/scheduling
+      DATABASE_SSL: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   db:
     image: postgres:16-alpine
     environment:
