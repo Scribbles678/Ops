@@ -3,10 +3,14 @@ export const usePTO = () => {
   const loading = ref(false)
   const error = ref<string | null>(null)
 
+  /** One array of PTO rows per employee (same shape the schedule UI expects). */
   const ptoByEmployeeId = computed(() => {
-    const map: Record<string, any> = {}
+    const map: Record<string, any[]> = {}
     for (const record of ptoRecords.value) {
-      map[record.employee_id] = record
+      const id = record.employee_id
+      if (!id) continue
+      if (!map[id]) map[id] = []
+      map[id].push(record)
     }
     return map
   })
