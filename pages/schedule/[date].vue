@@ -441,9 +441,9 @@
         <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
           <h3 class="text-xl font-bold mb-4">Add Absence</h3>
           <div class="space-y-3">
-            <div v-if="existingPTORecord" class="p-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800">
+            <div v-if="resolvedPtoRecord" class="p-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800">
               Absence already exists for this employee on {{ formatDate(scheduleDate) }}.
-              Update the details below or remove it.
+              Update the details below or use Cancel PTO if they are working.
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
@@ -463,14 +463,21 @@
                 <input v-model="ptoForm.end_time" type="time" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
               </div>
             </div>
-            <div class="flex justify-between gap-2 pt-2">
-              <button v-if="existingPTORecord" @click="deleteCurrentPTO" class="px-4 py-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200">
-                Remove PTO
+            <div class="flex flex-wrap items-center justify-end gap-2 pt-2">
+              <button
+                v-if="resolvedPtoRecord"
+                type="button"
+                @click="deleteCurrentPTO"
+                class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 mr-auto"
+              >
+                Cancel PTO
               </button>
-              <div class="flex gap-2 ml-auto">
-                <button @click="closePTOModal" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
-                <button @click="savePTO" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Save PTO</button>
-              </div>
+              <button type="button" @click="closePTOModal" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                Close
+              </button>
+              <button type="button" @click="savePTO" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                Save PTO
+              </button>
             </div>
           </div>
         </div>
@@ -1572,7 +1579,6 @@ const closeNotificationModal = () => {
 }
 
 const showPTOModal = ref(false)
-const existingPTORecord = ref<any>(null)
 const ptoForm = ref({
   employee_id: '',
   pto_date: '',
@@ -1581,13 +1587,27 @@ const ptoForm = ref({
   end_time: '17:00'
 })
 
+/** Normalize DB / form dates to YYYY-MM-DD so PTO rows match the schedule date. */
+const toYMD = (d: any): string => {
+  if (d == null || d === '') return ''
+  if (typeof d === 'string') return d.slice(0, 10)
+  if (d instanceof Date) return d.toISOString().slice(0, 10)
+  return String(d).slice(0, 10)
+}
+
+const resolvedPtoRecord = computed(() => {
+  if (!showPTOModal.value || !ptoForm.value.employee_id) return null
+  const recs = ptoByEmployeeId.value?.[ptoForm.value.employee_id] || []
+  const target = toYMD(ptoForm.value.pto_date || scheduleDate.value)
+  return recs.find((r: any) => toYMD(r.pto_date) === target) || null
+})
+
 const openPTOModal = (employee: any) => {
   ptoForm.value.employee_id = employee?.id || ''
   ptoForm.value.pto_date = scheduleDate.value
-  const existingRecord = ptoByEmployeeId.value?.[employee?.id || '']?.find(
-    (record: any) => record.pto_date === scheduleDate.value
-  ) || null
-  existingPTORecord.value = existingRecord
+  const recs = ptoByEmployeeId.value?.[employee?.id || ''] || []
+  const target = toYMD(scheduleDate.value)
+  const existingRecord = recs.find((r: any) => toYMD(r.pto_date) === target) || null
 
   if (existingRecord) {
     const isFullDay = !existingRecord.start_time && !existingRecord.end_time
@@ -1612,8 +1632,9 @@ const savePTO = async () => {
     showNotification('Please provide start and end times for partial-day PTO.', 'error')
     return
   }
-  if (existingPTORecord.value?.id) {
-    const removed = await deletePTO(existingPTORecord.value.id)
+  const prior = resolvedPtoRecord.value
+  if (prior?.id) {
+    const removed = await deletePTO(prior.id)
     if (!removed) {
       showNotification('Failed to update PTO. Please try again.', 'error')
       return
@@ -1633,7 +1654,6 @@ const savePTO = async () => {
   const ok = await createPTO(record)
   if (ok) {
     await fetchPTOForDate(scheduleDate.value)
-    existingPTORecord.value = null
     showPTOModal.value = false
     showNotification('PTO saved successfully.', 'success')
   } else {
@@ -1643,15 +1663,15 @@ const savePTO = async () => {
 
 const closePTOModal = () => {
   showPTOModal.value = false
-  existingPTORecord.value = null
 }
 
 const deleteCurrentPTO = async () => {
-  if (!existingPTORecord.value?.id) return
-  const ok = await deletePTO(existingPTORecord.value.id)
+  const rec = resolvedPtoRecord.value
+  if (!rec?.id) return
+  if (!confirm('Remove PTO for this employee on this date? They will show as working.')) return
+  const ok = await deletePTO(rec.id)
   if (ok) {
     await fetchPTOForDate(scheduleDate.value)
-    existingPTORecord.value = null
     showPTOModal.value = false
     showNotification('PTO removed.', 'success')
   } else {
