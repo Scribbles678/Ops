@@ -150,14 +150,14 @@
         <div v-else class="space-y-4">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Max PTO Hours / Week (team-wide)</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Max PTO Hours / Day (team-wide)</label>
               <input
-                v-model.number="ruleFields.max_pto_hours_per_week"
+                v-model.number="ruleFields.max_pto_hours_per_day"
                 type="number"
                 min="0"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
-              <p class="mt-1 text-xs text-gray-400">Total approved PTO hours allowed across the team per week</p>
+              <p class="mt-1 text-xs text-gray-400">Total approved PTO hours allowed across the team per day</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Max Shift Swaps / Day (team-wide)</label>
@@ -170,24 +170,24 @@
               <p class="mt-1 text-xs text-gray-400">Total shift swaps allowed per day across the team</p>
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Max Leave-Early / Employee / Week</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Max Leave-Early / Employee / Day</label>
               <input
-                v-model.number="ruleFields.max_leave_early_per_employee_per_week"
+                v-model.number="ruleFields.max_leave_early_per_employee_per_day"
                 type="number"
                 min="0"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
-              <p class="mt-1 text-xs text-gray-400">How many times one employee can leave early per week</p>
+              <p class="mt-1 text-xs text-gray-400">How many times one employee can leave early per day</p>
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Max Shift Changes / Employee / Week</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Max Shift Changes / Employee / Day</label>
               <input
-                v-model.number="ruleFields.max_shift_change_per_employee_per_week"
+                v-model.number="ruleFields.max_shift_change_per_employee_per_day"
                 type="number"
                 min="0"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
-              <p class="mt-1 text-xs text-gray-400">How many shift change requests one employee can make per week</p>
+              <p class="mt-1 text-xs text-gray-400">How many shift change requests one employee can make per day</p>
             </div>
           </div>
 
@@ -690,10 +690,10 @@ const { fetchSettings, saveSetting, getSetting, loading: teamSettingsLoading, er
 
 // Request rules state
 const ruleFields = ref({
-  max_pto_hours_per_week: 40,
+  max_pto_hours_per_day: 8,
   max_shift_swaps_per_day: 3,
-  max_leave_early_per_employee_per_week: 1,
-  max_shift_change_per_employee_per_week: 1,
+  max_leave_early_per_employee_per_day: 1,
+  max_shift_change_per_employee_per_day: 1,
 })
 const savingRules = ref(false)
 const teamSettingsSuccess = ref('')
@@ -1063,10 +1063,10 @@ const saveRequestRules = async () => {
 const loadRequestRules = async () => {
   await fetchSettings()
   ruleFields.value = {
-    max_pto_hours_per_week: parseInt(getSetting('max_pto_hours_per_week', '40'), 10),
+    max_pto_hours_per_day: parseInt(getSetting('max_pto_hours_per_day', '8'), 10),
     max_shift_swaps_per_day: parseInt(getSetting('max_shift_swaps_per_day', '3'), 10),
-    max_leave_early_per_employee_per_week: parseInt(getSetting('max_leave_early_per_employee_per_week', '1'), 10),
-    max_shift_change_per_employee_per_week: parseInt(getSetting('max_shift_change_per_employee_per_week', '1'), 10),
+    max_leave_early_per_employee_per_day: parseInt(getSetting('max_leave_early_per_employee_per_day', '1'), 10),
+    max_shift_change_per_employee_per_day: parseInt(getSetting('max_shift_change_per_employee_per_day', '1'), 10),
   }
 }
 

@@ -16,7 +16,7 @@
       <!-- Header -->
       <div class="text-center mb-4 sm:mb-6 flex-shrink-0">
         <h1 class="text-2xl sm:text-3xl md:text-4xl font-bold text-gray-800 mb-2">
-          Operations Scheduling Tool
+          Operations Staffing Planner
         </h1>
         <p class="text-sm sm:text-base md:text-lg text-gray-600">
           Distribution Center Schedule Management

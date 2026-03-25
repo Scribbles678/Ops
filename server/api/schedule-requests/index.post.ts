@@ -83,45 +83,35 @@ export default defineEventHandler(async (event) => {
     const hoursUntil = (reqDate.getTime() - now.getTime()) / (1000 * 60 * 60)
     ruleResults['24h_advance'] = hoursUntil >= 24
 
-    // Calculate ISO week boundaries (Mon-Sun) for the request date
-    const dayOfWeek = reqDate.getDay() // 0=Sun, 1=Mon, ...
-    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
-    const weekStart = new Date(reqDate)
-    weekStart.setDate(reqDate.getDate() + mondayOffset)
-    const weekStartStr = weekStart.toISOString().split('T')[0]
-    const weekEnd = new Date(weekStart)
-    weekEnd.setDate(weekStart.getDate() + 6)
-    const weekEndStr = weekEnd.toISOString().split('T')[0]
-
-    // Rule 2: Leave early — max per employee per week
+    // Rule 2: Leave early — max per employee per day
     if (request_type === 'leave_early') {
-      const maxLeaveEarly = getSetting('max_leave_early_per_employee_per_week', 1)
+      const maxLeaveEarly = getSetting('max_leave_early_per_employee_per_day', 1)
       const countResult = await client.query(
         `SELECT COUNT(*)::int as cnt FROM schedule_requests
          WHERE employee_id = $1 AND request_type = 'leave_early' AND status = 'approved'
-           AND request_date BETWEEN $2 AND $3`,
-        [employee_id, weekStartStr, weekEndStr]
+           AND request_date = $2`,
+        [employee_id, request_date]
       )
-      ruleResults['max_leave_early_per_week'] = (countResult.rows[0] as any).cnt < maxLeaveEarly
+      ruleResults['max_leave_early_per_day'] = (countResult.rows[0] as any).cnt < maxLeaveEarly
     }
 
-    // Rule 3: Shift swap — max per employee per week
+    // Rule 3: Shift swap — max per employee per day
     if (request_type === 'shift_swap') {
-      const maxShiftChange = getSetting('max_shift_change_per_employee_per_week', 1)
+      const maxShiftChange = getSetting('max_shift_change_per_employee_per_day', 1)
       const countResult = await client.query(
         `SELECT COUNT(*)::int as cnt FROM schedule_requests
          WHERE employee_id = $1 AND request_type = 'shift_swap' AND status = 'approved'
-           AND request_date BETWEEN $2 AND $3`,
-        [employee_id, weekStartStr, weekEndStr]
+           AND request_date = $2`,
+        [employee_id, request_date]
       )
-      ruleResults['max_shift_swap_per_week'] = (countResult.rows[0] as any).cnt < maxShiftChange
+      ruleResults['max_shift_swap_per_day'] = (countResult.rows[0] as any).cnt < maxShiftChange
     }
 
-    // Rule 4: Max PTO hours per week (team-wide)
+    // Rule 4: Max PTO hours per day (team-wide)
     if (['pto_full_day', 'pto_partial', 'leave_early'].includes(request_type)) {
-      const maxPtoHours = getSetting('max_pto_hours_per_week', 40)
+      const maxPtoHours = getSetting('max_pto_hours_per_day', 8)
 
-      // Sum existing approved PTO hours for this team this week
+      // Sum existing approved PTO hours for this team on this day
       const existingResult = await client.query(
         `SELECT COALESCE(SUM(
           CASE
@@ -135,8 +125,8 @@ export default defineEventHandler(async (event) => {
         FROM schedule_requests
         WHERE team_id = $1 AND status = 'approved'
           AND request_type IN ('pto_full_day', 'pto_partial', 'leave_early')
-          AND request_date BETWEEN $2 AND $3`,
-        [teamId, weekStartStr, weekEndStr]
+          AND request_date = $2`,
+        [teamId, request_date]
       )
       const existingHours = parseFloat((existingResult.rows[0] as any).total_hours) || 0
 
@@ -144,13 +134,12 @@ export default defineEventHandler(async (event) => {
       if (request_type === 'pto_full_day') requestedHours = 8
       else if (request_type === 'leave_early') requestedHours = 2
       else if (request_type === 'pto_partial' && start_time && end_time) {
-        // Parse HH:MM times to calculate hours
         const [sh, sm] = start_time.split(':').map(Number)
         const [eh, em] = end_time.split(':').map(Number)
         requestedHours = (eh * 60 + em - sh * 60 - sm) / 60
       }
 
-      ruleResults['max_pto_hours_per_week'] = (existingHours + requestedHours) <= maxPtoHours
+      ruleResults['max_pto_hours_per_day'] = (existingHours + requestedHours) <= maxPtoHours
     }
 
     // Rule 5: Max shift swaps per day (team-wide)
@@ -175,9 +164,9 @@ export default defineEventHandler(async (event) => {
       const failed = Object.entries(ruleResults).filter(([, v]) => !v).map(([k]) => k)
       const labels: Record<string, string> = {
         '24h_advance': 'Requests must be made at least 24 hours in advance',
-        'max_leave_early_per_week': 'Max leave-early requests per week reached',
-        'max_shift_swap_per_week': 'Max shift change requests per week reached',
-        'max_pto_hours_per_week': 'Team PTO hours limit for the week exceeded',
+        'max_leave_early_per_day': 'Max leave-early requests for the day reached',
+        'max_shift_swap_per_day': 'Max shift change requests for the day reached',
+        'max_pto_hours_per_day': 'Team PTO hours limit for the day exceeded',
         'max_shift_swaps_per_day': 'Max shift swaps for the day exceeded',
       }
       rejectionReason = failed.map(k => labels[k] || k).join('; ')

@@ -3,7 +3,7 @@ import { requireAuth, getTeamFilter } from '../../utils/authorize'
 
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
-  const teamId = getTeamFilter(user)
+  const teamId = getTeamFilter(user) || user.team_id
 
   let sql = `SELECT * FROM team_settings`
   const params: unknown[] = []

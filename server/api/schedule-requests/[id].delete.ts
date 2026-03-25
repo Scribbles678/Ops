@@ -1,17 +1,21 @@
 import { query, transaction } from '../../utils/db'
-import { requireAdmin } from '../../utils/authorize'
+import { requireAdmin, getTeamFilter } from '../../utils/authorize'
 
 /**
  * Cancel/delete a schedule request. Also deletes any downstream pto_days or shift_swaps records.
  */
 export default defineEventHandler(async (event) => {
-  requireAdmin(event)
+  const user = requireAdmin(event)
+  const teamId = getTeamFilter(user)
   const id = getRouterParam(event, 'id')
 
   await transaction(async (client) => {
     const current = await client.query('SELECT * FROM schedule_requests WHERE id = $1', [id])
     const request = (current.rows as any[])[0]
     if (!request) {
+      throw createError({ statusCode: 404, message: 'Request not found' })
+    }
+    if (teamId && request.team_id !== teamId) {
       throw createError({ statusCode: 404, message: 'Request not found' })
     }
 

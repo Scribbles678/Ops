@@ -3,7 +3,7 @@ import { requireAdmin, getTeamFilter } from '../../utils/authorize'
 
 export default defineEventHandler(async (event) => {
   const user = requireAdmin(event)
-  const teamId = getTeamFilter(user)
+  const teamId = getTeamFilter(user) || user.team_id
   const body = await readBody(event)
   const { setting_key, setting_value } = body
 
@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
   }
 
   if (!teamId) {
-    throw createError({ statusCode: 400, message: 'Team context required' })
+    throw createError({ statusCode: 400, message: 'Team context required — assign yourself to a team first' })
   }
 
   const result = await query(

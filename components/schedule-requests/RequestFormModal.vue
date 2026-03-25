@@ -64,7 +64,15 @@
           <div v-if="weekAvailability.length > 0" class="rounded-lg border border-gray-200 bg-gray-50 p-3">
             <div class="flex items-center justify-between mb-2">
               <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Week Availability</h3>
-              <span class="text-[10px] text-gray-400">{{ weekLabel }}</span>
+              <div class="flex items-center gap-2">
+                <button type="button" @click="weekOffset--" class="text-gray-400 hover:text-gray-700 p-0.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+                </button>
+                <span class="text-[10px] text-gray-400">{{ weekLabel }}</span>
+                <button type="button" @click="weekOffset++" class="text-gray-400 hover:text-gray-700 p-0.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                </button>
+              </div>
             </div>
             <div class="grid grid-cols-7 gap-1.5">
               <div
@@ -90,9 +98,6 @@
                       : 'text-red-700 bg-red-100'"
                 >
                   {{ day.hoursRemaining }}h left
-                </div>
-                <div v-if="day.swapsRemaining !== null" class="text-[9px] text-gray-400 mt-0.5">
-                  {{ day.swapsRemaining }} swaps
                 </div>
               </div>
             </div>
@@ -261,9 +266,10 @@ const loginError = ref('')
 const loggingIn = ref(false)
 
 // Weekly availability data
-const maxPtoHoursPerWeek = ref(40)
-const maxSwapsPerDay = ref(3)
+const maxPtoHoursPerDay = ref(8)
 const weekRequests = ref<any[]>([])
+const weekPtoDays = ref<any[]>([])
+const weekOffset = ref(0)
 
 // Default date = tomorrow
 const tomorrow = new Date()
@@ -296,7 +302,9 @@ const formatDateStr = (d: Date): string => {
 
 const selectedWeekMonday = computed(() => {
   const d = form.value.request_date ? new Date(form.value.request_date + 'T00:00:00') : new Date()
-  return getMonday(d)
+  const mon = getMonday(d)
+  mon.setDate(mon.getDate() + weekOffset.value * 7)
+  return mon
 })
 
 const weekLabel = computed(() => {
@@ -313,39 +321,55 @@ const weekAvailability = computed(() => {
   const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
   const days = []
 
-  // Sum approved PTO hours for the whole week
-  let weekPtoUsed = 0
-  for (const req of weekRequests.value) {
-    if (req.status !== 'approved') continue
-    if (!['pto_full_day', 'pto_partial', 'leave_early'].includes(req.request_type)) continue
-    if (req.request_type === 'pto_full_day') weekPtoUsed += 8
-    else if (req.request_type === 'leave_early') weekPtoUsed += 2
-    else if (req.request_type === 'pto_partial' && req.start_time && req.end_time) {
-      const [sh, sm] = String(req.start_time).split(':').map(Number)
-      const [eh, em] = String(req.end_time).split(':').map(Number)
-      weekPtoUsed += Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
-    }
-  }
-  const weekHoursRemaining = Math.max(0, maxPtoHoursPerWeek.value - weekPtoUsed)
+  // Build a set of pto_day IDs linked from requests to avoid double-counting
+  const linkedPtoIds = new Set(
+    weekRequests.value
+      .filter(r => r.created_pto_id)
+      .map(r => r.created_pto_id)
+  )
 
   for (let i = 0; i < 7; i++) {
     const d = new Date(mon)
     d.setDate(mon.getDate() + i)
     const dateStr = formatDateStr(d)
 
-    // Count approved swaps for this specific day
-    const daySwaps = weekRequests.value.filter(
-      r => r.request_type === 'shift_swap' && r.status === 'approved'
-        && (r.request_date === dateStr || r.request_date?.split('T')[0] === dateStr)
-    ).length
+    // Sum approved PTO hours from schedule_requests for this day
+    let dayPtoUsed = 0
+    for (const req of weekRequests.value) {
+      const reqDate = req.request_date?.split('T')[0] ?? req.request_date
+      if (reqDate !== dateStr) continue
+      if (req.status !== 'approved') continue
+      if (!['pto_full_day', 'pto_partial', 'leave_early'].includes(req.request_type)) continue
+      if (req.request_type === 'pto_full_day') dayPtoUsed += 8
+      else if (req.request_type === 'leave_early') dayPtoUsed += 2
+      else if (req.request_type === 'pto_partial' && req.start_time && req.end_time) {
+        const [sh, sm] = String(req.start_time).split(':').map(Number)
+        const [eh, em] = String(req.end_time).split(':').map(Number)
+        dayPtoUsed += Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
+      }
+    }
+
+    // Also count manually-entered pto_days for this day (not linked to requests)
+    for (const pto of weekPtoDays.value) {
+      if (linkedPtoIds.has(pto.id)) continue
+      const ptoDate = pto.pto_date?.split('T')[0] ?? pto.pto_date
+      if (ptoDate !== dateStr) continue
+      if (pto.pto_type === 'full_day') dayPtoUsed += 8
+      else if (pto.start_time && pto.end_time) {
+        const [sh, sm] = String(pto.start_time).split(':').map(Number)
+        const [eh, em] = String(pto.end_time).split(':').map(Number)
+        dayPtoUsed += Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
+      } else {
+        dayPtoUsed += 2
+      }
+    }
 
     days.push({
       date: dateStr,
       dayName: dayNames[i],
       dayNum: d.getDate(),
       isToday: dateStr === todayStr,
-      hoursRemaining: weekHoursRemaining,
-      swapsRemaining: maxSwapsPerDay.value - daySwaps,
+      hoursRemaining: Math.max(0, maxPtoHoursPerDay.value - dayPtoUsed),
     })
   }
   return days
@@ -362,6 +386,11 @@ watch(() => form.value.request_type, () => {
 // Reload availability when the selected week changes
 watch(selectedWeekMonday, () => {
   loadWeekAvailability()
+})
+
+// Reset week offset when the date field changes
+watch(() => form.value.request_date, () => {
+  weekOffset.value = 0
 })
 
 const handleSubmit = async () => {
@@ -407,22 +436,25 @@ const loadWeekAvailability = async () => {
     const mon = selectedWeekMonday.value
     const sun = new Date(mon)
     sun.setDate(mon.getDate() + 6)
+    const dateFrom = formatDateStr(mon)
+    const dateTo = formatDateStr(sun)
 
-    const [requests, settings] = await Promise.all([
+    const [requests, calendar, settings] = await Promise.all([
       $fetch<any[]>('/api/schedule-requests', {
-        params: { date_from: formatDateStr(mon), date_to: formatDateStr(sun) },
+        params: { date_from: dateFrom, date_to: dateTo },
+      }),
+      $fetch<any>('/api/pto-calendar', {
+        params: { date_from: dateFrom, date_to: dateTo },
       }),
       $fetch<any[]>('/api/team-settings'),
     ])
 
     weekRequests.value = requests
+    weekPtoDays.value = calendar?.pto_days || []
 
     for (const s of settings) {
-      if (s.setting_key === 'max_pto_hours_per_week') {
-        maxPtoHoursPerWeek.value = parseInt(s.setting_value, 10) || 40
-      }
-      if (s.setting_key === 'max_shift_swaps_per_day') {
-        maxSwapsPerDay.value = parseInt(s.setting_value, 10) || 3
+      if (s.setting_key === 'max_pto_hours_per_day') {
+        maxPtoHoursPerDay.value = parseInt(s.setting_value, 10) || 8
       }
     }
   } catch {
