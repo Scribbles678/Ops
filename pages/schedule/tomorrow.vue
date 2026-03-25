@@ -90,7 +90,7 @@
               {{ generating ? '⏳ Generating AI Schedule...' : '🤖 AI Generated Schedule' }}
             </h3>
             <p class="text-gray-600">
-              {{ generating ? 'Please wait while the AI creates your optimized schedule...' : 'Generate an optimized schedule from your business rules, training, and shifts' }}
+              {{ generating ? 'Please wait while the AI creates your optimized schedule...' : 'Generate an optimized schedule with exact staffing requirements for X4, EM9, and Locus' }}
             </p>
           </div>
         </div>
@@ -110,7 +110,7 @@
       </div>
 
       <!-- Manage Business Rules Button -->
-      <div class="text-center mt-6 flex flex-wrap justify-center gap-3">
+      <div class="text-center mt-6">
         <NuxtLink
           to="/admin/business-rules"
           class="inline-flex items-center px-6 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
@@ -120,12 +120,6 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
           Manage Business Rules
-        </NuxtLink>
-        <NuxtLink
-          to="/admin/staffing-designer"
-          class="inline-flex items-center px-6 py-3 border border-indigo-200 rounded-lg text-indigo-800 bg-indigo-50 hover:bg-indigo-100 transition"
-        >
-          Day staffing designer (beta)
         </NuxtLink>
       </div>
 

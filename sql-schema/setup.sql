@@ -595,23 +595,6 @@ CREATE TRIGGER update_business_rules_updated_at
   BEFORE UPDATE ON business_rules
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Draft staffing profiles (parallel day-designer UI; publish → business_rules)
-CREATE TABLE IF NOT EXISTS staffing_day_drafts (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  team_id uuid,
-  job_function_name text NOT NULL,
-  segments jsonb NOT NULL DEFAULT '[]'::jsonb,
-  day_start time without time zone,
-  day_end time without time zone,
-  updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT staffing_day_drafts_pkey PRIMARY KEY (id),
-  CONSTRAINT staffing_day_drafts_team_id_fkey FOREIGN KEY (team_id) REFERENCES teams (id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_staffing_day_drafts_team ON staffing_day_drafts USING btree (team_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_staffing_drafts_scope_job
-  ON staffing_day_drafts ((COALESCE(team_id::text, 'GLOBAL')), job_function_name);
-
 -- ============================================================
 -- CLEANUP LOG
 -- ============================================================
