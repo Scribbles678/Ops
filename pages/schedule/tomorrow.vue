@@ -87,10 +87,10 @@
               </div>
             </div>
             <h3 class="text-xl font-bold text-gray-800 mb-2">
-              {{ generating ? '⏳ Generating AI Schedule...' : '🤖 AI Generated Schedule' }}
+              {{ generating ? '⏳ Generating Schedule...' : 'Automated Schedule Builder' }}
             </h3>
             <p class="text-gray-600">
-              {{ generating ? 'Please wait while the AI creates your optimized schedule...' : 'Generate an optimized schedule with exact staffing requirements for X4, EM9, and Locus' }}
+              {{ generating ? 'Please wait while we create your optimized schedule...' : 'Generate an optimized schedule based on business rules, training, and staffing requirements' }}
             </p>
           </div>
         </div>
@@ -133,7 +133,7 @@
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
             </div>
-            <h3 class="text-2xl font-bold text-gray-800 mb-2">Generating AI Schedule</h3>
+            <h3 class="text-2xl font-bold text-gray-800 mb-2">Generating Schedule</h3>
             <p class="text-gray-600 mb-4">
               Creating optimized schedule for {{ formatDate(selectedDate || '') }}
             </p>
@@ -305,25 +305,6 @@ const closeNotificationModal = () => {
   notificationMessage.value = ''
 }
 
-// Mock employee data (same as schedule page)
-const employees = ref([
-  { id: '1', first_name: 'John', last_name: 'Smith', trained_job_functions: ['RT Pick', 'Pick'] },
-  { id: '2', first_name: 'Sarah', last_name: 'Johnson', trained_job_functions: ['Pick', 'Meter'] },
-  { id: '3', first_name: 'Mike', last_name: 'Davis', trained_job_functions: ['RT Pick', 'Locus'] },
-  { id: '4', first_name: 'Lisa', last_name: 'Wilson', trained_job_functions: ['Meter', 'Helpdesk'] },
-  { id: '5', first_name: 'Tom', last_name: 'Brown', trained_job_functions: ['Locus', 'Coordinator'] },
-  { id: '6', first_name: 'Emma', last_name: 'Garcia', trained_job_functions: ['Team Lead', 'Helpdesk'] },
-  { id: '7', first_name: 'Chris', last_name: 'Martinez', trained_job_functions: ['RT Pick', 'Pick', 'Meter'] },
-  { id: '8', first_name: 'Amy', last_name: 'Anderson', trained_job_functions: ['Pick', 'Locus'] },
-  { id: '9', first_name: 'David', last_name: 'Taylor', trained_job_functions: ['Meter', 'Helpdesk'] },
-  { id: '10', first_name: 'Jessica', last_name: 'Thomas', trained_job_functions: ['Locus', 'Coordinator'] },
-  { id: '11', first_name: 'Kevin', last_name: 'Jackson', trained_job_functions: ['Team Lead', 'Helpdesk'] },
-  { id: '12', first_name: 'Rachel', last_name: 'White', trained_job_functions: ['RT Pick', 'Pick'] },
-  { id: '13', first_name: 'Mark', last_name: 'Harris', trained_job_functions: ['Pick', 'Meter'] },
-  { id: '14', first_name: 'Nicole', last_name: 'Martin', trained_job_functions: ['RT Pick', 'Locus'] },
-  { id: '15', first_name: 'Steve', last_name: 'Thompson', trained_job_functions: ['Meter', 'Helpdesk'] }
-])
-
 // Functions
 const formatDate = (dateString: string) => {
   if (!dateString) return ''
@@ -366,7 +347,6 @@ const copyTodaySchedule = async () => {
 }
 
 const generateAISchedule = async () => {
-  if (confirm('Generate AI schedule for ' + formatDate(selectedDate.value || '') + '? This will create assignments based on exact business rules.')) {
     try {
       generating.value = true
       scheduleWarnings.value = [] // Reset warnings
@@ -384,7 +364,7 @@ const generateAISchedule = async () => {
           showWarningsModal.value = true
         } else {
           // No warnings - show success and navigate
-          showNotification(`✅ AI schedule generated successfully!\n\nCreated ${schedule.length} assignments for ${formatDate(selectedDate.value || '')}.\n\nRedirecting to schedule view...`, 'success')
+          showNotification(`✅ Schedule generated successfully!\n\nCreated ${schedule.length} assignments for ${formatDate(selectedDate.value || '')}.\n\nRedirecting to schedule view...`, 'success')
           // Wait a moment for modal to show, then navigate
           setTimeout(() => {
             navigateTo(`/schedule/${selectedDate.value || ''}`)
@@ -396,12 +376,11 @@ const generateAISchedule = async () => {
         showWarningsModal.value = true
       }
     } catch (error) {
-      console.error('Error generating AI schedule:', error)
-      showNotification('❌ Error generating AI schedule.\n\nPlease try again or check the console for details.', 'error')
+      console.error('Error generating schedule:', error)
+      showNotification('❌ Error generating schedule.\n\nPlease try again or check the console for details.', 'error')
     } finally {
       generating.value = false
     }
-  }
 }
 
 const closeWarningsModal = () => {
@@ -416,9 +395,7 @@ const goToManualSchedule = () => {
 }
 
 const handleLogout = async () => {
-  if (confirm('Are you sure you want to logout?')) {
-    await logout()
-  }
+  await logout()
 }
 
 // Date helper functions
