@@ -47,6 +47,8 @@ export const usePTO = () => {
     error.value = null
     try {
       await $fetch(`/api/pto/${id}`, { method: 'DELETE' })
+      // Immediately remove from local state so UI updates even if re-fetch is cached
+      ptoRecords.value = ptoRecords.value.filter(r => r.id !== id)
       return true
     } catch (e: any) {
       error.value = e.message

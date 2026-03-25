@@ -1675,7 +1675,6 @@ const closePTOModal = () => {
 const deleteCurrentPTO = async () => {
   const rec = resolvedPtoRecord.value
   if (!rec?.id) return
-  if (!confirm('Remove PTO for this employee on this date? They will show as working.')) return
   const ok = await deletePTO(rec.id)
   if (ok) {
     await fetchPTOForDate(scheduleDate.value)
