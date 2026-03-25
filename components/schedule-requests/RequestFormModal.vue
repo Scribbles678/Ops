@@ -17,7 +17,7 @@
                 v-model="loginEmail"
                 type="email"
                 required
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
                 placeholder="you@example.com"
               />
             </div>
@@ -27,7 +27,7 @@
                 v-model="loginPassword"
                 type="password"
                 required
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
               />
             </div>
             <div v-if="loginError" class="bg-red-50 border border-red-200 rounded-md p-3">
@@ -66,7 +66,7 @@
             <select
               v-model="form.employee_id"
               required
-              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
             >
               <option value="">Select employee...</option>
               <option v-for="emp in employees" :key="emp.id" :value="emp.id">
@@ -81,7 +81,7 @@
             <select
               v-model="form.request_type"
               required
-              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
             >
               <option value="">Select type...</option>
               <option value="leave_early">Leave Early</option>
@@ -98,7 +98,7 @@
               v-model="form.request_date"
               type="date"
               required
-              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
             />
           </div>
 
@@ -109,7 +109,7 @@
               v-model="form.start_time"
               type="time"
               required
-              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
             />
           </div>
 
@@ -121,7 +121,7 @@
                 v-model="form.start_time"
                 type="time"
                 required
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
               />
             </div>
             <div>
@@ -130,7 +130,7 @@
                 v-model="form.end_time"
                 type="time"
                 required
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
               />
             </div>
           </div>
@@ -142,7 +142,7 @@
               <select
                 v-model="form.original_shift_id"
                 required
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
               >
                 <option value="">Select current shift...</option>
                 <option v-for="s in shifts" :key="s.id" :value="s.id">
@@ -155,7 +155,7 @@
               <select
                 v-model="form.requested_shift_id"
                 required
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
               >
                 <option value="">Select requested shift...</option>
                 <option v-for="s in shifts" :key="s.id" :value="s.id" :disabled="s.id === form.original_shift_id">
@@ -171,7 +171,7 @@
             <textarea
               v-model="form.notes"
               rows="2"
-              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
               placeholder="Any additional details..."
             ></textarea>
           </div>

@@ -1,83 +1,118 @@
 <template>
-  <div class="display-page min-h-screen text-white text-[10px] md:text-[11px]" style="background: linear-gradient(to bottom, #2E4AED, #1a2eb0, #2E4AED)">
-    <div class="max-w-[1400px] mx-auto px-2.5 py-2 space-y-1.5">
-      <!-- Loading -->
-      <div v-if="loading" class="flex items-center justify-center h-[60vh]">
-        <div class="flex flex-col items-center gap-2 text-white/60">
-          <svg class="animate-spin h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24">
+  <div class="display-page min-h-screen text-white" style="background: linear-gradient(135deg, #1a1f4e 0%, #182078 50%, #1a1f4e 100%)">
+    <!-- Header bar -->
+    <div class="sticky top-0 z-30 px-4 py-2 flex items-center justify-between" style="background: rgba(15, 18, 60, 0.9); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(255,255,255,0.08)">
+      <div class="flex items-center gap-3">
+        <h1 class="text-sm font-bold tracking-wide text-white/90">Today's Schedule</h1>
+        <span class="text-xs text-white/40">{{ formattedDate }}</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-[10px] text-white/30 uppercase tracking-widest">{{ lastUpdated ? `Updated ${lastUpdated}` : '' }}</span>
+        <button
+          @click="showRequestModal = true"
+          class="px-3 py-1.5 rounded-md text-[11px] text-white font-medium tracking-wide transition-colors"
+          style="background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.15)"
+          onmouseover="this.style.background='rgba(255,255,255,0.2)'"
+          onmouseout="this.style.background='rgba(255,255,255,0.12)'"
+        >
+          Time Off / Schedule Change
+        </button>
+      </div>
+    </div>
+
+    <div class="max-w-[1500px] mx-auto px-4 py-3 space-y-3">
+      <!-- Loading (initial load only) -->
+      <div v-if="!initialLoadDone" class="flex items-center justify-center h-[60vh]">
+        <div class="flex flex-col items-center gap-3 text-white/60">
+          <svg class="animate-spin h-6 w-6 text-blue-300" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
-          <p>Syncing schedule data...</p>
+          <p class="text-sm">Loading schedule...</p>
         </div>
       </div>
 
       <!-- Schedule -->
-      <div v-else class="space-y-1.5">
+      <div v-else class="space-y-3">
         <section
           v-for="shift in shiftsWithAssignments"
           :key="shift.id"
-          class="rounded-md border border-gray-200 bg-white shadow-[0_4px_12px_rgba(0,0,0,0.15)] overflow-hidden"
+          class="rounded-lg overflow-hidden"
+          style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08)"
         >
-          <div class="flex items-center justify-between px-2.5 py-1 border-b border-gray-200 bg-gray-50">
-            <h2 class="text-[10px] font-semibold tracking-wide text-gray-800">{{ shift.name }}</h2>
-            <span v-if="shift.employees && shift.employees.length" class="text-[8px] text-gray-500 uppercase tracking-[0.2em]">
-              {{ shift.employees.length }} staff
-            </span>
+          <!-- Shift header -->
+          <div class="flex items-center justify-between px-4 py-2" style="background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.06)">
+            <div class="flex items-center gap-2">
+              <div class="w-1 h-5 rounded-full bg-blue-400"></div>
+              <h2 class="text-xs font-bold tracking-wide text-white/90 uppercase">{{ shift.name }}</h2>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-[10px] text-white/40 uppercase tracking-widest">
+                {{ getAssignedCount(shift) }} assigned
+              </span>
+              <span class="text-[10px] text-white/25 uppercase tracking-widest">
+                {{ shift.employees?.length || 0 }} total
+              </span>
+            </div>
           </div>
 
-          <div v-if="shift.employees && shift.employees.length > 0" class="divide-y divide-gray-100">
+          <!-- Assigned employees -->
+          <div v-if="getAssignedEmployees(shift).length > 0" class="divide-y divide-white/5">
             <article
-              v-for="employee in shift.employees"
+              v-for="employee in getAssignedEmployees(shift)"
               :key="employee.id"
-              class="flex items-start gap-2 px-2.5 py-1.25 hover:bg-gray-50 transition-colors"
+              class="flex items-center gap-4 px-4 py-1.5"
             >
-              <div class="w-28 flex-shrink-0 text-[9px] font-semibold uppercase tracking-[0.2em] text-gray-600">
+              <div class="w-36 flex-shrink-0 text-[11px] font-semibold uppercase tracking-wider text-white/70">
                 {{ employee.last_name }}, {{ employee.first_name }}
               </div>
-              <div class="flex flex-wrap gap-0.75">
+              <div class="flex flex-wrap gap-1.5 flex-1">
                 <div
                   v-for="item in getEmployeeScheduleItems(employee)"
                   :key="item.id"
-                  class="relative flex items-center gap-0.5 px-1.25 py-0.5 rounded border border-white/15 shadow-md shadow-black/25 min-w-[4.75rem] max-w-[5.5rem]"
+                  class="flex items-center gap-1.5 px-2.5 py-1 rounded-md min-w-[8rem]"
                   :style="{
-                    backgroundColor: addAlpha(item.assignment.job_function.color_code, 0.85),
-                    borderColor: addAlpha(darkenColor(item.assignment.job_function.color_code), 0.8),
+                    backgroundColor: addAlpha(item.assignment.job_function.color_code, 0.9),
                     color: getTextColor(item.assignment.job_function.color_code),
-                    boxShadow: '0 5px 9px -8px rgba(0,0,0,0.6)'
                   }"
                 >
-                  <div class="w-0.5 h-5 rounded" :style="{ backgroundColor: darkenColor(item.assignment.job_function.color_code) }"></div>
+                  <div class="w-0.5 h-5 rounded-full" :style="{ backgroundColor: darkenColor(item.assignment.job_function.color_code) }"></div>
                   <div class="flex flex-col leading-tight">
-                    <span class="font-semibold text-[9px] uppercase tracking-wide truncate">{{ item.assignment.job_function.name }}</span>
-                    <span class="text-[8px] font-medium opacity-70">{{ item.timeRange }}</span>
+                    <span class="font-bold text-[10px] uppercase tracking-wide">{{ item.assignment.job_function.name }}</span>
+                    <span class="text-[9px] font-medium opacity-75">{{ item.timeRange }}</span>
                   </div>
                 </div>
               </div>
             </article>
           </div>
 
-          <div v-else class="px-2.5 py-1.5 text-[9px] text-gray-400 text-center bg-gray-50">
+          <!-- Unassigned employees (collapsed) -->
+          <div v-if="getUnassignedEmployees(shift).length > 0" class="px-4 py-1.5" style="background: rgba(255,255,255,0.02); border-top: 1px solid rgba(255,255,255,0.04)">
+            <div class="flex flex-wrap gap-x-4 gap-y-0.5">
+              <span class="text-[10px] text-white/25 uppercase tracking-wider font-medium mr-1">Unassigned:</span>
+              <span
+                v-for="emp in getUnassignedEmployees(shift)"
+                :key="emp.id"
+                class="text-[10px] text-white/30"
+              >
+                {{ emp.last_name }}, {{ emp.first_name }}
+              </span>
+            </div>
+          </div>
+
+          <div v-if="!shift.employees || shift.employees.length === 0" class="px-4 py-3 text-xs text-white/25 text-center">
             No team members assigned to this shift
           </div>
         </section>
 
-        <div v-if="shiftsWithAssignments.length === 0" class="text-center py-10 text-white/50 text-sm">
-          <p>No schedule available for today</p>
-          <NuxtLink to="/" class="inline-flex items-center text-blue-300 hover:text-blue-200 text-[10px] mt-1 underline decoration-dotted">
+        <div v-if="shiftsWithAssignments.length === 0" class="text-center py-16 text-white/40">
+          <p class="text-sm">No schedule available for today</p>
+          <NuxtLink to="/" class="inline-flex items-center text-blue-300 hover:text-blue-200 text-xs mt-2 underline decoration-dotted">
             Open Operations Console
           </NuxtLink>
         </div>
       </div>
     </div>
-
-    <!-- Time Off / Schedule Change Request Button -->
-    <button
-      @click="showRequestModal = true"
-      class="fixed top-3 right-3 px-3 py-1.5 rounded-lg bg-blue-600/90 hover:bg-blue-500 border border-blue-400/30 text-[10px] text-white font-medium tracking-wide backdrop-blur shadow-lg transition-colors z-40"
-    >
-      Time Off / Schedule Change
-    </button>
 
     <!-- Request Modal -->
     <ScheduleRequestsRequestFormModal
@@ -85,19 +120,14 @@
       @close="showRequestModal = false"
       @submitted="onRequestSubmitted"
     />
-
-    <footer class="fixed bottom-2 right-2 px-1.5 py-0.75 rounded-full bg-white/10 border border-white/20 text-[8px] text-white/60 uppercase tracking-[0.25em] backdrop-blur">
-      Auto Refresh · 2m
-    </footer>
   </div>
 </template>
 
 <script setup lang="ts">
 const { formatTime, formatDate } = useLaborCalculations()
-const { 
+const {
   scheduleAssignments: assignments,
   shifts,
-  loading,
   fetchShifts,
   fetchScheduleForDate
 } = useSchedule()
@@ -121,6 +151,7 @@ const onRequestSubmitted = () => {
   loadData()
 }
 
+const initialLoadDone = ref(false)
 const lastUpdated = ref('')
 const refreshInterval = ref<NodeJS.Timeout | null>(null)
 const rolloverInterval = ref<NodeJS.Timeout | null>(null)
@@ -303,14 +334,7 @@ onUnmounted(() => {
 })
 
 const loadData = async () => {
-  // Don't show loading state for background refreshes
-  const wasLoading = loading.value
-  if (!wasLoading) {
-    loading.value = true
-  }
-  
   try {
-    console.log('Refreshing display data...')
     await Promise.all([
       fetchShifts(),
       fetchEmployees(),
@@ -319,11 +343,9 @@ const loadData = async () => {
       fetchShiftSwapsForDate(today.value)
     ])
     updateLastUpdated()
-    console.log('Display data refreshed')
-  } finally {
-    if (!wasLoading) {
-      loading.value = false
-    }
+    initialLoadDone.value = true
+  } catch (e) {
+    console.error('Failed to load display data:', e)
   }
 }
 
@@ -367,6 +389,19 @@ const darkenColor = (hex: string): string => {
   }
   
   return `#${toHex(darken(r))}${toHex(darken(g))}${toHex(darken(b))}`
+}
+
+// Helpers for assigned vs unassigned employees within a shift
+const getAssignedEmployees = (shift: any) => {
+  return (shift.employees || []).filter((emp: any) => emp.assignments && emp.assignments.length > 0)
+}
+
+const getUnassignedEmployees = (shift: any) => {
+  return (shift.employees || []).filter((emp: any) => !emp.assignments || emp.assignments.length === 0)
+}
+
+const getAssignedCount = (shift: any) => {
+  return getAssignedEmployees(shift).length
 }
 
 const getTextColor = (hex: string): string => {
