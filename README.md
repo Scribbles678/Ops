@@ -1,251 +1,190 @@
-# Operations Scheduling Tool - MVP
+# Operations Scheduling Tool
 
-A modern web-based scheduling application for distribution center operations, built with Nuxt 3, Vue 3, Supabase, and Tailwind CSS.
+A web-based scheduling application for distribution center operations. Built with Nuxt 4, Vue 3, PostgreSQL, and Tailwind CSS. Runs as a Docker container with no external service dependencies.
 
-## 🚀 Features
+## Features
 
-- **Landing Page**: Quick access to all main features
-- **Update Training**: Manage employee job function training matrix
-- **Details Page**: Configure job functions, view shifts, and manage employees
-- **Schedule Management**: Create and edit daily schedules with drag-and-drop functionality
-- **Labor Hours Tracking**: Real-time calculation of staffing levels vs targets
-- **Copy Schedule**: Duplicate today's schedule for tomorrow
-- **Display Mode**: Full-screen TV view with auto-refresh every 30 seconds
-- **Validation**: Ensure employees are trained, prevent double-booking
-- **Color Coding**: Visual job function identification
+- **Daily Schedule Management** - Visual grid editor for employee assignments with 15-minute granularity
+- **Automated Schedule Builder** - Generates optimized schedules from staffing targets, employee training, and required assignments using a two-halves algorithm (AM/PM blocks per employee)
+- **Staffing Targets** - Set target headcount per job function per hour in a simple grid UI
+- **Employee Training Matrix** - Track which employees are trained for which job functions, with auto-save
+- **Required Assignments** - Lock specific employees to specific functions daily
+- **PTO Management** - Mark employees as off for specific dates, with hours tracking
+- **Shift Swap Tracking** - Record and manage shift swaps between employees
+- **Copy Schedule** - Duplicate a previous day's schedule to a new date
+- **Display Mode** - Full-screen TV view with auto-refresh for floor visibility
+- **Multi-Tenant Teams** - Data isolation by team with role-based access
+- **Authentication** - JWT-based auth with HttpOnly cookies, role hierarchy (Super Admin, Admin, User, Display)
 
-## 📋 Prerequisites
+## Tech Stack
 
-- Node.js 18+ installed
-- A Supabase account (free tier works great)
-- Git for version control
+- **Frontend**: Nuxt 4 / Vue 3 / Tailwind CSS
+- **Backend**: Nitro server (file-based API routes with method suffixes)
+- **Database**: PostgreSQL 16 (direct `pg` library, no ORM)
+- **Auth**: Custom JWT with bcrypt password hashing
+- **Deployment**: Docker (multi-stage build), Kubernetes/Rancher ready
 
-## 🛠️ Setup Instructions
+## Quick Start (Local Development)
 
-### 1. Supabase Setup
-
-1. Go to [supabase.com](https://supabase.com) and create a new project
-2. Wait for the database to initialize (takes ~2 minutes)
-3. Go to the SQL Editor in your Supabase dashboard
-4. Run the database schema files from the `sql-schema/` folder:
-   - Start with `teams.sql` and `user_profiles.sql`
-   - Then run all other table schema files
-   - Finally run `rls-policies.sql` for security
-5. See `sql-schema/README.md` for the complete list of schema files
-
-### 2. Environment Variables
-
-1. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Get your Supabase credentials:
-   - Go to Project Settings → API
-   - Copy the `Project URL` and `anon/public` key
-
-3. Update `.env` with your credentials:
-   ```
-   SUPABASE_URL=your_project_url_here
-   SUPABASE_ANON_KEY=your_anon_key_here
-   ```
-
-### 3. Install Dependencies
+### Using Docker Compose (recommended)
 
 ```bash
-npm install
+# Start the app + database
+docker compose up -d
+
+# First time only: seed the admin user
+docker compose run --rm seed
+
+# Open in browser
+open http://localhost:3000
 ```
 
-### 4. Run Development Server
+Default login: `admin@example.com` / `admin123`
+
+### Manual Setup
 
 ```bash
+# Prerequisites: Node.js 20+, PostgreSQL 16+
+
+# Install dependencies
+npm install
+
+# Set up environment
+cp .env.example .env
+# Edit .env with your DATABASE_URL and JWT_SECRET
+
+# Run the database schema
+psql $DATABASE_URL -f sql-schema/setup.sql
+
+# Seed the first admin user
+node scripts/seed-first-user.js
+
+# Start dev server
 npm run dev
 ```
 
-The application will be available at `http://localhost:3000`
+## Environment Variables
 
-## 📱 Pages & Routes
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:postgres@localhost:5432/scheduling` |
+| `DATABASE_SSL` | Enable SSL for DB connection | `false` |
+| `JWT_SECRET` | Secret for signing auth tokens (32+ chars) | `dev-secret-...` (change in production) |
+| `NODE_ENV` | `development` or `production` | `development` |
 
-- `/` - Landing page with main navigation
-- `/training` - Employee training management
-- `/details` - Job functions, shifts, and employee configuration
-- `/schedule/[date]` - Edit schedule for a specific date
-  - Example: `/schedule/2025-10-21`
-- `/schedule/tomorrow` - Create tomorrow's schedule (blank or copy)
-- `/display` - TV display mode (read-only, auto-refresh)
+## Pages & Routes
 
-## 🎨 Database Schema
+| Route | Description |
+|-------|-------------|
+| `/` | Home - navigation to all features |
+| `/login` | Login page |
+| `/schedule/tomorrow` | Create schedule (Copy, Automated Builder, or Manual) |
+| `/schedule/[date]` | View/edit schedule for a specific date |
+| `/training` | Employee training matrix (auto-saves) |
+| `/details` | Manage job functions, shifts, and employees |
+| `/display` | TV display mode (read-only, auto-refresh) |
+| `/settings` | User settings and password management |
+| `/admin/business-rules` | Staffing targets grid + required assignments |
+| `/admin/users` | User account management |
+| `/admin/cleanup` | Database cleanup utilities |
 
-The application uses 6 main tables:
-
-1. **employees** - Employee information
-2. **job_functions** - Job roles with colors and productivity rates
-3. **employee_training** - Junction table for employee-job training
-4. **shifts** - Shift schedules with break times
-5. **schedule_assignments** - Daily employee assignments
-6. **daily_targets** - Production targets by job function
-
-See the `sql-schema/` folder for individual table schemas and `sql-schema/README.md` for documentation.
-
-## 🚢 Deployment (Netlify)
-
-### 1. Push to GitHub
-
-```bash
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin your-repo-url
-git push -u origin main
-```
-
-### 2. Deploy to Netlify
-
-1. Go to [netlify.com](https://netlify.com) and sign in
-2. Click "Add new site" → "Import an existing project"
-3. Connect your GitHub repository
-4. Configure build settings:
-   - **Build command**: `npm run generate`
-   - **Publish directory**: `.output/public`
-5. Add environment variables:
-   - `SUPABASE_URL`: Your Supabase project URL
-   - `SUPABASE_ANON_KEY`: Your Supabase anon key
-6. Click "Deploy site"
-
-Your app will be live at `your-site-name.netlify.app`
-
-## 📖 Usage Guide
-
-### Managing Employees & Job Functions
-
-1. Click **Details** from the home page
-2. Use the **Job Functions** tab to add/edit job roles and set colors
-3. Use the **Employees** tab to add/edit team members
-4. View configured shifts in the **Shifts** tab
-
-### Setting Up Training
-
-1. Click **Update Training** from the home page
-2. Check boxes to indicate which employees are trained in which functions
-3. Click **Save Changes** to persist updates
-
-### Creating Schedules
-
-1. Click **Edit Today's Schedule** to modify current day
-2. Click **Make Tomorrow's Schedule** to create next day's schedule
-3. Choose to start blank or copy today's schedule
-4. Click **+ Add Assignment** to create new assignments
-5. Fill in: Employee, Job Function, Shift, Start/End times
-6. Set daily targets in the sidebar for labor hour calculations
-
-### Display Mode for TVs
-
-1. Click **Open Display Mode** from the home page
-2. Full-screen the browser (F11 on most browsers)
-3. The display auto-refreshes every 30 seconds
-4. Shows today's schedule in a clean, large format
-
-## 🎯 Key Validation Rules
-
-- ✅ Employees can only be assigned to jobs they're trained in
-- ✅ Employees cannot be double-booked (same time, different jobs)
-- ✅ Assignment duration must be at least 30 minutes
-- ✅ Assignments must fit within shift boundaries
-
-## 🎨 Customization
-
-### Colors
-
-Job function colors are fully customizable in the Details page. Use the color picker to set any hex color.
-
-### Shifts
-
-Shifts are pre-configured but can be edited directly in Supabase if needed. Future versions will include a shift editor UI.
-
-## 🔧 Development
-
-### Project Structure
+## Project Structure
 
 ```
-scheduling-app/
-├── app/
-│   └── app.vue                 # Root app component
-├── assets/
-│   └── css/
-│       └── main.css            # Global styles
+scheduling-app-v2/
 ├── components/
-│   ├── details/                # Settings components
-│   ├── schedule/               # Schedule components
-│   └── training/               # Training components
-├── composables/                # Reusable logic
-│   ├── useEmployees.ts
-│   ├── useJobFunctions.ts
-│   ├── useLaborCalculations.ts
-│   └── useSchedule.ts
-├── pages/                      # Route pages
-│   ├── index.vue
-│   ├── training.vue
-│   ├── details.vue
-│   ├── display.vue
-│   └── schedule/
-│       ├── [date].vue
-│       └── tomorrow.vue
-├── plugins/
-│   └── supabase.client.ts      # Supabase client
-├── utils/                      # Helper functions
-│   └── validationRules.ts
-└── nuxt.config.ts              # Nuxt configuration
+│   ├── details/              # Job function, shift, employee editors
+│   ├── schedule/             # Schedule grid, shift groups, assignment cards
+│   └── training/             # Training matrix components
+├── composables/              # Shared reactive logic
+│   ├── useAIScheduleBuilder.ts   # Automated schedule generation algorithm
+│   ├── useAuth.ts                # JWT authentication
+│   ├── useEmployees.ts           # Employee CRUD + training
+│   ├── useJobFunctions.ts        # Job function CRUD
+│   ├── useSchedule.ts            # Schedule assignments CRUD
+│   ├── useStaffingTargets.ts     # Staffing targets CRUD
+│   ├── useBusinessRules.ts       # Legacy business rules
+│   ├── usePreferredAssignments.ts # Required/preferred assignments
+│   ├── usePTO.ts                 # PTO management
+│   ├── useShiftSwaps.ts          # Shift swap tracking
+│   ├── useLaborCalculations.ts   # Hours/staffing calculations
+│   └── useTeam.ts                # Team management
+├── pages/                    # File-based routing
+│   ├── admin/                # Admin pages
+│   ├── schedule/             # Schedule pages
+│   └── ...
+├── server/
+│   ├── api/                  # Nitro API routes (method suffix convention)
+│   │   ├── employees/
+│   │   ├── job-functions/
+│   │   ├── schedule/
+│   │   ├── staffing-targets/
+│   │   ├── shifts/
+│   │   └── ...
+│   └── utils/
+│       ├── db.ts             # PostgreSQL connection pool
+│       ├── authorize.ts      # Auth middleware (JWT verification)
+│       ├── jwt.ts            # Token signing/verification
+│       └── email.ts          # Email utilities
+├── sql-schema/
+│   ├── setup.sql             # Full database schema (run once)
+│   ├── staffing_targets.sql  # Staffing targets table
+│   └── ...                   # Individual table schemas for reference
+├── scripts/
+│   ├── seed-first-user.js    # Create initial admin account
+│   └── seed-test-data1.js    # Optional test data
+├── docker-compose.yml        # Local development stack
+├── Dockerfile                # Multi-stage production build
+└── docs/                     # Documentation
+    ├── RANCHER-DEPLOYMENT.md # Production deployment guide
+    ├── CONTEXT.md            # Technical context document
+    └── ...
 ```
 
-### Key Composables
+## Database Schema
 
-- `useEmployees()` - CRUD operations for employees and training
-- `useJobFunctions()` - CRUD operations for job functions
-- `useSchedule()` - Schedule management and assignments
-- `useLaborCalculations()` - Hours calculations and formatting
+Core tables:
 
-## 🐛 Troubleshooting
+| Table | Purpose |
+|-------|---------|
+| `teams` | Multi-tenant team isolation |
+| `user_profiles` | User accounts with roles and password hashes |
+| `employees` | Employee records (name, shift, active status) |
+| `job_functions` | Job roles with colors and settings |
+| `training_assignments` | Which employees are trained for which functions |
+| `shifts` | Shift definitions with break/lunch times |
+| `schedule_assignments` | Daily employee-to-function assignments |
+| `staffing_targets` | Target headcount per function per hour |
+| `preferred_assignments` | Required/preferred employee-function pairings |
+| `pto_days` | PTO records by employee and date |
+| `shift_swaps` | Shift swap records |
+| `daily_targets` | Daily production targets |
+| `business_rules` | Legacy staffing rules (replaced by staffing_targets) |
 
-### "Failed to fetch" errors
+## Automated Schedule Builder
 
-- Check that your Supabase URL and keys are correct in `.env`
-- Verify your Supabase project is active
-- Check browser console for specific error messages
+The builder uses a **two-halves algorithm**:
 
-### Schedules not saving
+1. Each employee's day is split into AM (shift start to lunch) and PM (lunch to shift end) based on their shift's lunch times
+2. Required employees are assigned their locked function for both halves
+3. Remaining employees are assigned by demand — functions with highest unmet staffing targets get filled first
+4. Most-constrained employees (fewest training options) are assigned first to avoid dead ends
+5. Any unassigned halves get Flex
+6. Gaps (unfilled targets) are reported as warnings, never errors
 
-- Verify Row Level Security policies are set up (included in schema SQL)
-- Check Supabase logs for permission errors
-- Ensure all required fields are filled in assignment forms
+Input: staffing targets (headcount per function per hour) + employee training + required assignments + shift lunch times
 
-### Display mode not refreshing
+## Deployment
 
-- Check browser console for errors
-- Verify internet connection
-- Clear browser cache and reload
+See [docs/RANCHER-DEPLOYMENT.md](docs/RANCHER-DEPLOYMENT.md) for production deployment instructions on Rancher/Kubernetes.
 
-## 📝 Future Enhancements
+## Validation Rules
 
-- [ ] Authentication (team lead vs display-only access)
-- [ ] Drag-and-drop schedule builder
-- [ ] Mobile app for on-floor managers
-- [ ] Attendance tracking integration
-- [ ] Historical schedule archive
-- [ ] Analytics dashboard
-- [ ] Notification system for changes
-- [ ] Print-friendly view
-- [ ] Multi-week planning
-- [ ] Employee availability/time-off requests
+- Employees can only be assigned to functions they're trained for (enforced by DB trigger)
+- Assignment duration must be at least 30 minutes (enforced by DB constraint)
+- Assignments must fall within shift boundaries
+- Multi-tenant data isolation via `team_id` on all tables
 
-## 📄 License
+## License
 
-This project is for internal use. All rights reserved.
-
-## 🤝 Support
-
-For issues or questions, please contact the development team.
-
----
-
-**Built with ❤️ using Nuxt 3, Vue 3, Supabase, and Tailwind CSS**
+Internal use. All rights reserved.
