@@ -1,5 +1,5 @@
 <template>
-  <div class="display-page min-h-screen text-white text-[10px] md:text-[11px]" style="background: linear-gradient(to bottom, #000075, #00004d, #000075)">
+  <div class="display-page min-h-screen text-white text-[10px] md:text-[11px]" style="background: linear-gradient(to bottom, #2E4AED, #1a2eb0, #2E4AED)">
     <div class="max-w-[1400px] mx-auto px-2.5 py-2 space-y-1.5">
       <!-- Loading -->
       <div v-if="loading" class="flex items-center justify-center h-[60vh]">
@@ -17,22 +17,22 @@
         <section
           v-for="shift in shiftsWithAssignments"
           :key="shift.id"
-          class="rounded-md border border-white/10 bg-white/5 backdrop-blur-sm shadow-[0_4px_12px_rgba(0,0,0,0.25)] overflow-hidden"
+          class="rounded-md border border-gray-200 bg-white shadow-[0_4px_12px_rgba(0,0,0,0.15)] overflow-hidden"
         >
-          <div class="flex items-center justify-between px-2.5 py-1 border-b border-white/10 bg-gradient-to-r from-white/6 to-transparent">
-            <h2 class="text-[10px] font-semibold tracking-wide text-white">{{ shift.name }}</h2>
-            <span v-if="shift.employees && shift.employees.length" class="text-[8px] text-white/50 uppercase tracking-[0.2em]">
+          <div class="flex items-center justify-between px-2.5 py-1 border-b border-gray-200 bg-gray-50">
+            <h2 class="text-[10px] font-semibold tracking-wide text-gray-800">{{ shift.name }}</h2>
+            <span v-if="shift.employees && shift.employees.length" class="text-[8px] text-gray-500 uppercase tracking-[0.2em]">
               {{ shift.employees.length }} staff
             </span>
           </div>
 
-          <div v-if="shift.employees && shift.employees.length > 0" class="divide-y divide-white/10">
+          <div v-if="shift.employees && shift.employees.length > 0" class="divide-y divide-gray-100">
             <article
               v-for="employee in shift.employees"
               :key="employee.id"
-              class="flex items-start gap-2 px-2.5 py-1.25 hover:bg-white/8 transition-colors"
+              class="flex items-start gap-2 px-2.5 py-1.25 hover:bg-gray-50 transition-colors"
             >
-              <div class="w-28 flex-shrink-0 text-[9px] font-semibold uppercase tracking-[0.2em] text-white/70">
+              <div class="w-28 flex-shrink-0 text-[9px] font-semibold uppercase tracking-[0.2em] text-gray-600">
                 {{ employee.last_name }}, {{ employee.first_name }}
               </div>
               <div class="flex flex-wrap gap-0.75">
@@ -57,7 +57,7 @@
             </article>
           </div>
 
-          <div v-else class="px-2.5 py-1.5 text-[9px] text-white/50 text-center bg-white/4">
+          <div v-else class="px-2.5 py-1.5 text-[9px] text-gray-400 text-center bg-gray-50">
             No team members assigned to this shift
           </div>
         </section>
