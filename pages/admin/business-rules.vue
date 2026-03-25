@@ -37,6 +37,12 @@
           </svg>
           Required Assignments
         </button>
+        <NuxtLink
+          to="/admin/staffing-designer"
+          class="btn-secondary-sm md:btn-secondary inline-flex items-center border border-indigo-200 bg-indigo-50 text-indigo-800"
+        >
+          Day staffing designer (beta)
+        </NuxtLink>
       </div>
 
       <!-- Success Toast -->
