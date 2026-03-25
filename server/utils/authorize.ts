@@ -10,6 +10,7 @@ export interface AuthUser {
   is_super_admin: boolean
   is_display_user: boolean
   is_active: boolean
+  employee_id: string | null
 }
 
 /**

@@ -97,6 +97,25 @@
             </p>
           </div>
         </NuxtLink>
+
+        <!-- PTO Calendar Button -->
+        <NuxtLink
+          to="/pto-calendar"
+          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 flex items-center justify-center"
+        >
+          <div class="flex flex-col items-center justify-center">
+            <div class="bg-teal-100 rounded-full p-2 mb-2">
+              <svg class="w-10 h-10 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11v4m0 0h-2m2 0h2" />
+              </svg>
+            </div>
+            <h2 class="text-sm md:text-base font-bold text-gray-800 mb-1 text-center">PTO Calendar</h2>
+            <p class="text-xs text-gray-600 text-center px-2 leading-tight">
+              View time off and schedule change requests
+            </p>
+          </div>
+        </NuxtLink>
       </div>
 
       <!-- Settings Link -->

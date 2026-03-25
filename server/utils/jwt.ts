@@ -24,6 +24,7 @@ export function signToken(user: AuthUser): string {
       is_super_admin: user.is_super_admin,
       is_display_user: user.is_display_user,
       is_active: user.is_active,
+      employee_id: user.employee_id ?? null,
     },
     getJwtSecret(),
     { expiresIn: TOKEN_EXPIRY }

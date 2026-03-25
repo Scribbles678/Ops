@@ -141,6 +141,75 @@
         </dl>
       </div>
 
+      <!-- Request Rules Section (Admin/Super Admin only) -->
+      <div v-if="userProfile?.is_admin || userProfile?.is_super_admin" class="bg-white shadow rounded-lg p-6 mb-6">
+        <h2 class="text-xl font-semibold text-gray-900 mb-1">Request Rules</h2>
+        <p class="text-sm text-gray-500 mb-4">Configure auto-approval limits for time-off and schedule change requests.</p>
+
+        <div v-if="teamSettingsLoading" class="text-sm text-gray-500">Loading settings...</div>
+        <div v-else class="space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Max PTO Hours / Week (team-wide)</label>
+              <input
+                v-model.number="ruleFields.max_pto_hours_per_week"
+                type="number"
+                min="0"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p class="mt-1 text-xs text-gray-400">Total approved PTO hours allowed across the team per week</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Max Shift Swaps / Day (team-wide)</label>
+              <input
+                v-model.number="ruleFields.max_shift_swaps_per_day"
+                type="number"
+                min="0"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p class="mt-1 text-xs text-gray-400">Total shift swaps allowed per day across the team</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Max Leave-Early / Employee / Week</label>
+              <input
+                v-model.number="ruleFields.max_leave_early_per_employee_per_week"
+                type="number"
+                min="0"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p class="mt-1 text-xs text-gray-400">How many times one employee can leave early per week</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Max Shift Changes / Employee / Week</label>
+              <input
+                v-model.number="ruleFields.max_shift_change_per_employee_per_week"
+                type="number"
+                min="0"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p class="mt-1 text-xs text-gray-400">How many shift change requests one employee can make per week</p>
+            </div>
+          </div>
+
+          <div v-if="teamSettingsError" class="bg-red-50 border border-red-200 rounded-md p-3">
+            <p class="text-sm text-red-600">{{ teamSettingsError }}</p>
+          </div>
+          <div v-if="teamSettingsSuccess" class="bg-green-50 border border-green-200 rounded-md p-3">
+            <p class="text-sm text-green-600">{{ teamSettingsSuccess }}</p>
+          </div>
+
+          <div class="flex justify-end">
+            <button
+              @click="saveRequestRules"
+              :disabled="savingRules"
+              class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+            >
+              {{ savingRules ? 'Saving...' : 'Save Rules' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Super Admin Management Section -->
       <div v-if="userProfile?.is_super_admin" class="space-y-6">
         <!-- Users Management -->
@@ -617,6 +686,17 @@
 const route = useRoute()
 const { user, fetchCurrentUser, changePassword: changePasswordApi } = useAuth()
 const { isSuperAdmin, checkIsSuperAdmin, fetchAllTeams, createTeam: createTeamFn, deleteTeam: deleteTeamFn } = useTeam()
+const { fetchSettings, saveSetting, getSetting, loading: teamSettingsLoading, error: teamSettingsError } = useTeamSettings()
+
+// Request rules state
+const ruleFields = ref({
+  max_pto_hours_per_week: 40,
+  max_shift_swaps_per_day: 3,
+  max_leave_early_per_employee_per_week: 1,
+  max_shift_change_per_employee_per_week: 1,
+})
+const savingRules = ref(false)
+const teamSettingsSuccess = ref('')
 
 // Password change state
 const currentPassword = ref('')
@@ -961,6 +1041,35 @@ const handleResetPassword = async () => {
   }
 }
 
+// Save request rules
+const saveRequestRules = async () => {
+  savingRules.value = true
+  teamSettingsSuccess.value = ''
+  try {
+    const keys = Object.keys(ruleFields.value) as (keyof typeof ruleFields.value)[]
+    for (const key of keys) {
+      await saveSetting(key, ruleFields.value[key])
+    }
+    teamSettingsSuccess.value = 'Rules saved successfully!'
+    setTimeout(() => { teamSettingsSuccess.value = '' }, 3000)
+  } catch (err: any) {
+    // error is set by composable
+  } finally {
+    savingRules.value = false
+  }
+}
+
+// Load request rules from team settings
+const loadRequestRules = async () => {
+  await fetchSettings()
+  ruleFields.value = {
+    max_pto_hours_per_week: parseInt(getSetting('max_pto_hours_per_week', '40'), 10),
+    max_shift_swaps_per_day: parseInt(getSetting('max_shift_swaps_per_day', '3'), 10),
+    max_leave_early_per_employee_per_week: parseInt(getSetting('max_leave_early_per_employee_per_week', '1'), 10),
+    max_shift_change_per_employee_per_week: parseInt(getSetting('max_shift_change_per_employee_per_week', '1'), 10),
+  }
+}
+
 // Fetch profile on mount
 onMounted(async () => {
   await fetchCurrentUser()
@@ -971,6 +1080,9 @@ onMounted(async () => {
     if (user.value?.id) {
       await fetchUserProfile()
       ownTeamData.value.team_id = userProfile.value?.team_id || ''
+      if (user.value?.is_admin || user.value?.is_super_admin) {
+        await loadRequestRules()
+      }
       if (isSuperAdmin.value) {
         await Promise.all([fetchUsers(), fetchTeams()])
       }

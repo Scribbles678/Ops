@@ -71,6 +71,21 @@
       </div>
     </div>
 
+    <!-- Time Off / Schedule Change Request Button -->
+    <button
+      @click="showRequestModal = true"
+      class="fixed top-3 right-3 px-3 py-1.5 rounded-lg bg-blue-600/90 hover:bg-blue-500 border border-blue-400/30 text-[10px] text-white font-medium tracking-wide backdrop-blur shadow-lg transition-colors z-40"
+    >
+      Time Off / Schedule Change
+    </button>
+
+    <!-- Request Modal -->
+    <ScheduleRequestsRequestFormModal
+      v-if="showRequestModal"
+      @close="showRequestModal = false"
+      @submitted="onRequestSubmitted"
+    />
+
     <footer class="fixed bottom-2 right-2 px-1.5 py-0.75 rounded-full bg-white/10 border border-white/20 text-[8px] text-white/60 uppercase tracking-[0.25em] backdrop-blur">
       Auto Refresh · 2m
     </footer>
@@ -98,6 +113,13 @@ const {
   loading: employeesLoading,
   fetchEmployees
 } = useEmployees()
+
+const showRequestModal = ref(false)
+
+const onRequestSubmitted = () => {
+  // Refresh data after a request is submitted (approved PTO/swap may affect display)
+  loadData()
+}
 
 const lastUpdated = ref('')
 const refreshInterval = ref<NodeJS.Timeout | null>(null)
