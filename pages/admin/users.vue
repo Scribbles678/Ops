@@ -473,9 +473,7 @@
 </template>
 
 <script setup lang="ts">
-definePageMeta({
-  middleware: 'auth'
-})
+// Auth is enforced by middleware/auth.global.ts (no separate middleware/auth.ts)
 
 const { user, fetchCurrentUser } = useAuth()
 const { isSuperAdmin, checkIsSuperAdmin, fetchAllTeams, createTeam: createTeamFn, updateTeam: updateTeamFn, deleteTeam: deleteTeamFn } = useTeam()

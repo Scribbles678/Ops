@@ -190,6 +190,13 @@
                 >
                   DG Pick
                 </button>
+                <button 
+                  @click="activeDashboard = 'runner'"
+                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
+                  :class="activeDashboard === 'runner' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                >
+                  Runner
+                </button>
               </div>
             </div>
             <!-- Job Function Hours Breakdown -->
@@ -239,7 +246,7 @@
                   <!-- Meter Dashboard -->
                   <template v-if="activeDashboard === 'meter'">
                     <div
-                      v-for="meterNumber in 20"
+                      v-for="meterNumber in 16"
                       :key="meterNumber"
                       class="flex border-b border-gray-100 hover:bg-gray-50/50 transition-colors"
                     >
@@ -687,7 +694,7 @@ const saveProgress = ref('')
 const targetHours = ref({})
 
 // Dashboard state - tracks which dashboard view is active
-const activeDashboard = ref<'jobFunctions' | 'meter' | 'locus' | 'pick' | 'x4' | 'em9' | 'speedcell' | 'helpdesk' | 'rtPick' | 'projects' | 'dgPick'>('jobFunctions')
+const activeDashboard = ref<'jobFunctions' | 'meter' | 'locus' | 'pick' | 'x4' | 'em9' | 'speedcell' | 'helpdesk' | 'rtPick' | 'projects' | 'dgPick' | 'runner'>('jobFunctions')
 const meterBookings = ref<Record<string, number>>({}) // Changed to number to track count of bookings
 
 // Get route params - use client-only for date to avoid hydration mismatch
@@ -1852,7 +1859,8 @@ const getDashboardLabel = (dashboard: string): string => {
     'helpdesk': 'Helpdesk',
     'rtPick': 'RT Pick',
     'projects': 'Projects',
-    'dgPick': 'DG Pick'
+    'dgPick': 'DG Pick',
+    'runner': 'Runner'
   }
   return labels[dashboard] || dashboard
 }
@@ -1869,7 +1877,8 @@ const normalizeJobFunctionName = (name: string): string => {
     'helpdesk': 'Helpdesk',
     'rtpick': 'RT Pick',
     'projects': 'Projects',
-    'dgpick': 'DG Pick'
+    'dgpick': 'DG Pick',
+    'runner': 'Runner'
   }
   return mapping[name.toLowerCase()] || name
 }
@@ -1996,7 +2005,7 @@ const syncMeterBookings = () => {
         if (data && data.assignment && data.assignment.startsWith('Meter ')) {
           const meterNumber = parseInt(data.assignment.split(' ')[1])
           
-          if (meterNumber >= 1 && meterNumber <= 20) {
+          if (meterNumber >= 1 && meterNumber <= 16) {
             const startTime = timeSlot
             const endTime = data.until
             

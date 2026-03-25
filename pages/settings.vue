@@ -144,7 +144,7 @@
       <!-- Super Admin Management Section -->
       <div v-if="userProfile?.is_super_admin" class="space-y-6">
         <!-- Users Management -->
-        <div class="bg-white shadow rounded-lg p-6">
+        <div id="user-management" class="bg-white shadow rounded-lg p-6 scroll-mt-8">
           <div class="flex justify-between items-center mb-4">
             <div>
               <h2 class="text-xl font-semibold text-gray-900">User Management</h2>
@@ -614,6 +614,7 @@
 <script setup lang="ts">
 // Page is protected by auth.global.ts middleware
 
+const route = useRoute()
 const { user, fetchCurrentUser, changePassword: changePasswordApi } = useAuth()
 const { isSuperAdmin, checkIsSuperAdmin, fetchAllTeams, createTeam: createTeamFn, deleteTeam: deleteTeamFn } = useTeam()
 
@@ -972,6 +973,10 @@ onMounted(async () => {
       ownTeamData.value.team_id = userProfile.value?.team_id || ''
       if (isSuperAdmin.value) {
         await Promise.all([fetchUsers(), fetchTeams()])
+      }
+      if (route.hash === '#user-management') {
+        await nextTick()
+        document.getElementById('user-management')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       }
       return
     }

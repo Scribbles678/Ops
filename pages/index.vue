@@ -115,7 +115,7 @@
         <!-- Admin Link (Super Admin Only) -->
         <NuxtLink
           v-if="isSuperAdmin"
-          to="/admin/users"
+          to="/settings#user-management"
           class="inline-flex items-center px-6 py-3 border border-purple-300 rounded-lg text-purple-700 bg-purple-50 hover:bg-purple-100 transition"
         >
           <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
