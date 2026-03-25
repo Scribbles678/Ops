@@ -41,7 +41,7 @@ export default defineEventHandler(async (event) => {
   const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''
 
   const sql = `
-    SELECT sr.*, e.name as employee_name
+    SELECT sr.*, e.last_name || ', ' || e.first_name as employee_name
     FROM schedule_requests sr
     LEFT JOIN employees e ON e.id = sr.employee_id
     ${where}

@@ -6,7 +6,7 @@ export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id')
 
   const result = await query(
-    `SELECT sr.*, e.name as employee_name
+    `SELECT sr.*, e.last_name || ', ' || e.first_name as employee_name
      FROM schedule_requests sr
      LEFT JOIN employees e ON e.id = sr.employee_id
      WHERE sr.id = $1`,

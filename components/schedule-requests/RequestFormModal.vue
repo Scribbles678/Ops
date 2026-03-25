@@ -1,6 +1,6 @@
 <template>
   <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" @click.self="$emit('close')">
-    <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+    <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
       <div class="p-6">
         <div class="flex justify-between items-center mb-4">
           <h2 class="text-xl font-bold text-gray-900">Time Off / Schedule Change</h2>
@@ -60,6 +60,44 @@
 
         <!-- Form -->
         <form v-else @submit.prevent="handleSubmit" class="space-y-4">
+          <!-- Weekly Availability Strip -->
+          <div v-if="weekAvailability.length > 0" class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <div class="flex items-center justify-between mb-2">
+              <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Week Availability</h3>
+              <span class="text-[10px] text-gray-400">{{ weekLabel }}</span>
+            </div>
+            <div class="grid grid-cols-7 gap-1.5">
+              <div
+                v-for="day in weekAvailability"
+                :key="day.date"
+                class="text-center rounded-md py-1.5 px-1 cursor-pointer transition-colors border"
+                :class="[
+                  form.request_date === day.date
+                    ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-300'
+                    : 'border-transparent hover:bg-gray-100',
+                  day.isToday ? 'font-bold' : ''
+                ]"
+                @click="form.request_date = day.date"
+              >
+                <div class="text-[10px] text-gray-500">{{ day.dayName }}</div>
+                <div class="text-sm font-semibold" :class="day.isToday ? 'text-blue-600' : 'text-gray-800'">{{ day.dayNum }}</div>
+                <div
+                  class="text-[10px] font-medium mt-0.5 rounded px-1"
+                  :class="day.hoursRemaining > 8
+                    ? 'text-green-700 bg-green-100'
+                    : day.hoursRemaining > 0
+                      ? 'text-yellow-700 bg-yellow-100'
+                      : 'text-red-700 bg-red-100'"
+                >
+                  {{ day.hoursRemaining }}h left
+                </div>
+                <div v-if="day.swapsRemaining !== null" class="text-[9px] text-gray-400 mt-0.5">
+                  {{ day.swapsRemaining }} swaps
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Employee selector -->
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Employee</label>
@@ -222,6 +260,11 @@ const loginPassword = ref('')
 const loginError = ref('')
 const loggingIn = ref(false)
 
+// Weekly availability data
+const maxPtoHoursPerWeek = ref(40)
+const maxSwapsPerDay = ref(3)
+const weekRequests = ref<any[]>([])
+
 // Default date = tomorrow
 const tomorrow = new Date()
 tomorrow.setDate(tomorrow.getDate() + 1)
@@ -238,12 +281,87 @@ const form = ref({
   notes: '',
 })
 
+// Week helpers
+const getMonday = (d: Date): Date => {
+  const date = new Date(d)
+  const day = date.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  date.setDate(date.getDate() + diff)
+  return date
+}
+
+const formatDateStr = (d: Date): string => {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const selectedWeekMonday = computed(() => {
+  const d = form.value.request_date ? new Date(form.value.request_date + 'T00:00:00') : new Date()
+  return getMonday(d)
+})
+
+const weekLabel = computed(() => {
+  const mon = selectedWeekMonday.value
+  const sun = new Date(mon)
+  sun.setDate(mon.getDate() + 6)
+  return `${formatDateStr(mon)} — ${formatDateStr(sun)}`
+})
+
+const todayStr = formatDateStr(new Date())
+
+const weekAvailability = computed(() => {
+  const mon = selectedWeekMonday.value
+  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  const days = []
+
+  // Sum approved PTO hours for the whole week
+  let weekPtoUsed = 0
+  for (const req of weekRequests.value) {
+    if (req.status !== 'approved') continue
+    if (!['pto_full_day', 'pto_partial', 'leave_early'].includes(req.request_type)) continue
+    if (req.request_type === 'pto_full_day') weekPtoUsed += 8
+    else if (req.request_type === 'leave_early') weekPtoUsed += 2
+    else if (req.request_type === 'pto_partial' && req.start_time && req.end_time) {
+      const [sh, sm] = String(req.start_time).split(':').map(Number)
+      const [eh, em] = String(req.end_time).split(':').map(Number)
+      weekPtoUsed += Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
+    }
+  }
+  const weekHoursRemaining = Math.max(0, maxPtoHoursPerWeek.value - weekPtoUsed)
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(mon)
+    d.setDate(mon.getDate() + i)
+    const dateStr = formatDateStr(d)
+
+    // Count approved swaps for this specific day
+    const daySwaps = weekRequests.value.filter(
+      r => r.request_type === 'shift_swap' && r.status === 'approved'
+        && (r.request_date === dateStr || r.request_date?.split('T')[0] === dateStr)
+    ).length
+
+    days.push({
+      date: dateStr,
+      dayName: dayNames[i],
+      dayNum: d.getDate(),
+      isToday: dateStr === todayStr,
+      hoursRemaining: weekHoursRemaining,
+      swapsRemaining: maxSwapsPerDay.value - daySwaps,
+    })
+  }
+  return days
+})
+
 // Clear type-specific fields when type changes
 watch(() => form.value.request_type, () => {
   form.value.start_time = ''
   form.value.end_time = ''
   form.value.original_shift_id = ''
   form.value.requested_shift_id = ''
+})
+
+// Reload availability when the selected week changes
+watch(selectedWeekMonday, () => {
+  loadWeekAvailability()
 })
 
 const handleSubmit = async () => {
@@ -284,6 +402,34 @@ const resetForm = () => {
   }
 }
 
+const loadWeekAvailability = async () => {
+  try {
+    const mon = selectedWeekMonday.value
+    const sun = new Date(mon)
+    sun.setDate(mon.getDate() + 6)
+
+    const [requests, settings] = await Promise.all([
+      $fetch<any[]>('/api/schedule-requests', {
+        params: { date_from: formatDateStr(mon), date_to: formatDateStr(sun) },
+      }),
+      $fetch<any[]>('/api/team-settings'),
+    ])
+
+    weekRequests.value = requests
+
+    for (const s of settings) {
+      if (s.setting_key === 'max_pto_hours_per_week') {
+        maxPtoHoursPerWeek.value = parseInt(s.setting_value, 10) || 40
+      }
+      if (s.setting_key === 'max_shift_swaps_per_day') {
+        maxSwapsPerDay.value = parseInt(s.setting_value, 10) || 3
+      }
+    }
+  } catch {
+    // silently fail — availability strip just won't show
+  }
+}
+
 const loadFormData = async () => {
   try {
     const [empData, shiftData] = await Promise.all([
@@ -293,6 +439,7 @@ const loadFormData = async () => {
     employees.value = empData
     shifts.value = shiftData
     needsLogin.value = false
+    await loadWeekAvailability()
   } catch (e: any) {
     if (e.statusCode === 401 || e.status === 401) {
       needsLogin.value = true
@@ -314,7 +461,6 @@ const handleLogin = async () => {
 }
 
 onMounted(async () => {
-  // If already authenticated, try fetching user first
   if (!user.value) {
     await fetchCurrentUser()
   }

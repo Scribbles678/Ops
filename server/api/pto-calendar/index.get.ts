@@ -30,23 +30,23 @@ export default defineEventHandler(async (event) => {
 
   // Fetch approved PTO days
   const ptoResult = await query(
-    `SELECT p.*, e.name as employee_name
+    `SELECT p.*, e.last_name || ', ' || e.first_name as employee_name
      FROM pto_days p
      LEFT JOIN employees e ON e.id = p.employee_id
      WHERE p.pto_date BETWEEN $1 AND $2 ${teamWhere.replace(/team_id/g, 'p.team_id')}
-     ORDER BY p.pto_date, e.name`,
+     ORDER BY p.pto_date, e.last_name, e.first_name`,
     values
   )
 
   // Fetch schedule requests (approved + pending)
   const requestResult = await query(
-    `SELECT sr.*, e.name as employee_name
+    `SELECT sr.*, e.last_name || ', ' || e.first_name as employee_name
      FROM schedule_requests sr
      LEFT JOIN employees e ON e.id = sr.employee_id
      WHERE sr.request_date BETWEEN $1 AND $2
        AND sr.status IN ('approved', 'pending')
        ${teamWhere.replace(/team_id/g, 'sr.team_id')}
-     ORDER BY sr.request_date, e.name`,
+     ORDER BY sr.request_date, e.last_name, e.first_name`,
     values
   )
 
