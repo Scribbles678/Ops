@@ -90,7 +90,7 @@
               {{ generating ? '⏳ Generating Schedule...' : 'Automated Schedule Builder' }}
             </h3>
             <p class="text-gray-600">
-              {{ generating ? 'Please wait while we create your optimized schedule...' : 'Generate an optimized schedule based on business rules, training, and staffing requirements' }}
+              {{ generating ? 'Please wait while we create your optimized schedule...' : 'Generate an optimized schedule based on staffing targets, training, and required assignments' }}
             </p>
           </div>
         </div>
@@ -119,7 +119,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          Manage Business Rules
+          Manage Staffing Targets
         </NuxtLink>
       </div>
 
@@ -138,7 +138,7 @@
               Creating optimized schedule for {{ formatDate(selectedDate || '') }}
             </p>
             <p class="text-sm text-gray-500">
-              This may take a few moments while we process business rules and create assignments...
+              This may take a few moments while we process staffing targets and create assignments...
             </p>
             <div class="mt-6 flex items-center justify-center space-x-2">
               <div class="w-2 h-2 bg-purple-600 rounded-full animate-pulse"></div>
@@ -186,47 +186,67 @@
             </button>
           </div>
           
-          <div v-if="scheduleWarnings.length > 0 && scheduleWarnings.some(w => w.includes('trained') || w.includes('Available') || w.includes('Required'))" class="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-            <p class="text-green-800 font-medium">
-              ✅ Schedule generated successfully, but some requirements could not be fulfilled.
+          <!-- Success with gaps -->
+          <div v-if="scheduleGaps.length > 0" class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <p class="text-yellow-800 font-medium">
+              Schedule generated, but some staffing targets could not be met.
             </p>
           </div>
 
+          <!-- Success with warnings only -->
+          <div v-else-if="scheduleWarnings.length > 0 && !scheduleWarnings.some(w => w.includes('Error') || w.includes('No schedule') || w.includes('not configured'))" class="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+            <p class="text-green-800 font-medium">
+              Schedule generated successfully with some notes.
+            </p>
+          </div>
+
+          <!-- Errors -->
           <div v-else-if="scheduleWarnings.length > 0" class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
             <p class="text-red-800 font-medium">
-              ❌ Schedule could not be generated. Please review the issues below.
+              Schedule could not be generated. Please review the issues below.
             </p>
           </div>
 
-          <div class="mb-6">
-            <h4 v-if="scheduleWarnings.some(w => w.includes('trained') || w.includes('Available') || w.includes('Required'))" class="text-lg font-semibold text-gray-700 mb-3">⚠️ Training Gaps Detected:</h4>
-            <h4 v-else class="text-lg font-semibold text-red-700 mb-3">❌ Issues Found:</h4>
+          <!-- Staffing Gaps Table -->
+          <div v-if="scheduleGaps.length > 0" class="mb-6">
+            <h4 class="text-lg font-semibold text-gray-700 mb-3">Uncovered Staffing Gaps:</h4>
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-sm border border-gray-200 rounded-lg">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Job Function</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Hour</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Short By</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  <tr v-for="(gap, index) in scheduleGaps" :key="index" class="bg-yellow-50">
+                    <td class="px-4 py-2 font-medium text-gray-900">{{ gap.job_function_name }}</td>
+                    <td class="px-4 py-2 text-gray-600">{{ gap.hour }}</td>
+                    <td class="px-4 py-2 text-yellow-700 font-semibold">{{ gap.shortfall }} {{ gap.shortfall === 1 ? 'person' : 'people' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Other warnings -->
+          <div v-if="scheduleWarnings.length > 0" class="mb-6">
+            <h4 class="text-lg font-semibold text-gray-700 mb-3">Details:</h4>
             <div class="space-y-2">
               <div
                 v-for="(warning, index) in scheduleWarnings"
                 :key="index"
-                :class="warning.includes('No') || warning.includes('not') || warning.includes('Error') || warning.includes('No schedule') 
-                  ? 'p-3 bg-red-50 border border-red-200 rounded-lg' 
+                :class="warning.includes('Error') || warning.includes('No schedule') || warning.includes('not configured')
+                  ? 'p-3 bg-red-50 border border-red-200 rounded-lg'
                   : 'p-3 bg-yellow-50 border border-yellow-200 rounded-lg'"
               >
-                <p :class="warning.includes('No') || warning.includes('not') || warning.includes('Error') || warning.includes('No schedule')
+                <p :class="warning.includes('Error') || warning.includes('No schedule') || warning.includes('not configured')
                   ? 'text-sm text-red-800'
                   : 'text-sm text-yellow-800'"
                 >{{ warning }}</p>
               </div>
             </div>
-          </div>
-
-          <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg mb-4">
-            <p class="text-sm text-blue-800">
-              <strong>Next Steps:</strong>
-              <span v-if="scheduleWarnings.some(w => w.includes('trained') || w.includes('Available') || w.includes('Required'))">
-                Review employee training assignments in the "Details & Settings" page and assign training for the missing job functions, then regenerate the schedule.
-              </span>
-              <span v-else>
-                Please address the issues listed above and try generating the schedule again. Common fixes include: adding employees, configuring shifts, setting up job functions, and assigning employee training.
-              </span>
-            </p>
           </div>
 
           <div class="flex justify-end">
@@ -288,6 +308,7 @@ const isWeekend = computed(() => {
 const generating = ref(false)
 const showWarningsModal = ref(false)
 const scheduleWarnings = ref<string[]>([])
+const scheduleGaps = ref<{ job_function_name: string; hour: string; shortfall: number }[]>([])
 
 // Notification modal state
 const showNotificationModal = ref(false)
@@ -349,29 +370,26 @@ const copyTodaySchedule = async () => {
 const generateAISchedule = async () => {
     try {
       generating.value = true
-      scheduleWarnings.value = [] // Reset warnings
-      
-      const { schedule, warnings, errors } = await generateAIScheduleFromBuilder()
-      
+      scheduleWarnings.value = []
+      scheduleGaps.value = []
+
+      const { schedule, warnings, errors, gaps } = await generateAIScheduleFromBuilder()
+
       if (schedule.length > 0) {
         await applyAISchedule(schedule, selectedDate.value || '')
-        
-        // Store warnings for modal display
+
         scheduleWarnings.value = warnings
-        
-        // If there are warnings, show the modal instead of alert
-        if (warnings.length > 0) {
+        scheduleGaps.value = gaps || []
+
+        if (warnings.length > 0 || scheduleGaps.value.length > 0) {
           showWarningsModal.value = true
         } else {
-          // No warnings - show success and navigate
-          showNotification(`✅ Schedule generated successfully!\n\nCreated ${schedule.length} assignments for ${formatDate(selectedDate.value || '')}.\n\nRedirecting to schedule view...`, 'success')
-          // Wait a moment for modal to show, then navigate
+          showNotification(`Schedule generated successfully! Created ${schedule.length} assignments for ${formatDate(selectedDate.value || '')}. Redirecting...`, 'success')
           setTimeout(() => {
             navigateTo(`/schedule/${selectedDate.value || ''}`)
           }, 500)
         }
       } else {
-        // Show detailed error modal with specific issues
         scheduleWarnings.value = errors
         showWarningsModal.value = true
       }

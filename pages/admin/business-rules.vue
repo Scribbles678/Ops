@@ -4,8 +4,8 @@
       <!-- Header -->
       <div class="flex items-center justify-between mb-4 md:mb-6">
         <div>
-          <h1 class="text-2xl md:text-3xl font-semibold text-gray-800 leading-tight">Business Rules</h1>
-          <p class="text-gray-600 mt-1 text-xs md:text-sm">Configure AI schedule generation rules</p>
+          <h1 class="text-2xl md:text-3xl font-semibold text-gray-800 leading-tight">Staffing Targets</h1>
+          <p class="text-gray-600 mt-1 text-xs md:text-sm">Set target headcount per job function per hour for automated scheduling</p>
         </div>
         <div class="flex space-x-2 md:space-x-3">
           <button @click="handleLogout" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs md:text-sm font-medium transition-colors">
@@ -17,17 +17,8 @@
         </div>
       </div>
 
-      <!-- Add New Rule Button and Required Assignments Button -->
+      <!-- Action Buttons -->
       <div class="mb-4 flex flex-wrap gap-2">
-        <button
-          @click="openAddModal"
-          class="btn-primary-sm md:btn-primary flex items-center"
-        >
-          <svg class="w-4 h-4 md:w-5 md:h-5 mr-1.5 md:mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-          </svg>
-          Add Business Rule
-        </button>
         <button
           @click="openPreferredAssignmentsModal"
           class="btn-secondary-sm md:btn-secondary flex items-center"
@@ -50,153 +41,65 @@
         <span class="font-medium">{{ successToastMessage }}</span>
       </div>
 
-      <!-- Rules Table -->
+      <!-- Staffing Targets Grid -->
       <div class="card p-3 md:p-4">
         <div v-if="loading" class="text-center py-5 text-sm text-gray-600">
-          Loading rules...
-        </div>
-        
-        <div v-else-if="error" class="text-center py-5 text-sm text-red-600">
-          Error: {{ error }}
+          Loading staffing targets...
         </div>
 
-        <div v-else-if="businessRules.length === 0" class="text-center py-5 text-sm text-gray-600">
-          No business rules found. Click "Add Business Rule" to create one.
+        <div v-else-if="gridError" class="text-center py-5 text-sm text-red-600">
+          Error: {{ gridError }}
         </div>
 
-        <div v-else class="overflow-x-auto -mx-1 md:-mx-2">
-          <table class="min-w-full divide-y divide-gray-200 text-xs md:text-sm">
-            <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
-              <tr>
-                <th class="px-3 md:px-4 py-2 text-left">Job Function</th>
-                <th class="px-3 md:px-4 py-2 text-left">Time Slot</th>
-                <th class="px-3 md:px-4 py-2 text-left">Target Hrs</th>
-                <th class="px-3 md:px-4 py-2 text-left">Status</th>
-                <th class="px-3 md:px-4 py-2 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-              <tr v-for="rule in sortedRules" :key="rule.id" :class="{ 'bg-gray-50': !rule.is_active }">
-                <td class="px-3 md:px-4 py-2 whitespace-nowrap font-medium text-gray-900">
-                  <div class="flex items-center space-x-2">
-                    <span>{{ rule.job_function_name }}</span>
-                    <span
-                      v-if="rule.fan_out_enabled"
-                      class="px-1.5 py-0.5 text-[10px] uppercase tracking-wide bg-blue-100 text-blue-700 rounded-full"
-                    >
-                      Fan-out
-                    </span>
-                  </div>
-                </td>
-                <td class="px-3 md:px-4 py-2 whitespace-nowrap text-gray-600">
-                  {{ formatTime(rule.time_slot_start) }} - {{ formatTime(rule.time_slot_end) }}
-                </td>
-                <td class="px-3 md:px-4 py-2 whitespace-nowrap text-gray-600">
-                  {{ formatTargetHours(rule) }}
-                </td>
-                <td class="px-3 md:px-4 py-2 whitespace-nowrap">
-                  <span 
-                    class="px-1.5 py-0.5 inline-flex text-[10px] leading-4 font-semibold rounded-full"
-                    :class="rule.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'"
+        <div v-else-if="gridJobFunctions.length === 0" class="text-center py-5 text-sm text-gray-600">
+          No job functions found. Please create job functions first.
+        </div>
+
+        <div v-else>
+          <div class="overflow-x-auto -mx-1 md:-mx-2">
+            <table class="min-w-full text-xs md:text-sm">
+              <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                <tr>
+                  <th class="px-3 md:px-4 py-2 text-left sticky left-0 bg-gray-50 z-10 min-w-[140px]">Job Function</th>
+                  <th
+                    v-for="hour in gridHours"
+                    :key="hour.value"
+                    class="px-2 py-2 text-center min-w-[60px]"
                   >
-                    {{ rule.is_active ? 'Active' : 'Inactive' }}
-                  </span>
-                </td>
-                <td class="px-3 md:px-4 py-2 whitespace-nowrap text-right font-medium space-x-2">
-                  <button
-                    @click="editRule(rule)"
-                    class="text-blue-600 hover:text-blue-800 text-xs"
+                    {{ hour.label }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr v-for="jf in gridJobFunctions" :key="jf.id">
+                  <td class="px-3 md:px-4 py-2 whitespace-nowrap font-medium text-gray-900 sticky left-0 bg-white z-10">
+                    {{ jf.name }}
+                  </td>
+                  <td
+                    v-for="hour in gridHours"
+                    :key="hour.value"
+                    class="px-1 py-1 text-center"
                   >
-                    Edit
-                  </button>
-                  <button
-                    @click="deleteRule(rule.id)"
-                    class="text-red-600 hover:text-red-800 text-xs"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Add/Edit Modal -->
-      <div v-if="showModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-4 md:p-5 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-          <h3 class="text-lg md:text-xl font-semibold mb-3">
-            {{ editingRule ? 'Edit Business Rule' : 'Add Business Rule' }}
-          </h3>
-
-          <div class="space-y-3">
-            <!-- Job Function -->
-            <div>
-              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Job Function Name</label>
-              <select
-                v-model="ruleForm.job_function_name"
-                class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                :disabled="editingRule !== null"
-              >
-                <option value="">Select a job function...</option>
-                <option v-for="jf in sortedJobFunctions" :key="jf.id" :value="jf.name">
-                  {{ jf.name }}
-                </option>
-              </select>
-              <p class="mt-1 text-xs text-gray-500">
-                {{ editingRule ? 'Job function cannot be changed when editing' : 'Must match exactly with job function names in your system' }}
-              </p>
-            </div>
-
-            <!-- Time Slot -->
-            <div class="grid grid-cols-2 gap-3">
-              <div>
-                <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Start Time</label>
-                <input
-                  v-model="ruleForm.time_slot_start"
-                  type="time"
-                  class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-              <div>
-                <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">End Time</label>
-                <input
-                  v-model="ruleForm.time_slot_end"
-                  type="time"
-                  class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-            </div>
-
-            <!-- Target Hours -->
-            <div>
-              <label class="block text-xs md:text-sm font-medium text-gray-700 mb-1">Target Hours</label>
-              <input
-                v-model.number="ruleForm.target_hours"
-                type="number"
-                min="0.5"
-                step="0.5"
-                class="w-full px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="e.g., 6"
-              />
-              <p class="mt-1 text-xs text-gray-500">Total labor hours needed for this function during the time window (staff count is calculated from slot duration)</p>
-            </div>
+                    <input
+                      type="number"
+                      min="0"
+                      :value="getGridValue(jf.id, hour.value)"
+                      @input="setGridValue(jf.id, hour.value, ($event.target as HTMLInputElement).value)"
+                      class="w-14 px-1 py-1 text-center border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
 
-          <!-- Modal Actions -->
-          <div class="flex justify-end space-x-2 mt-4">
+          <div class="flex justify-end mt-4">
             <button
-              @click="closeModal"
-              class="px-3 py-1.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 text-sm"
+              @click="saveAllTargets"
+              :disabled="saving || !hasChanges"
+              class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors"
             >
-              Cancel
-            </button>
-            <button
-              @click="saveRule"
-              :disabled="!ruleForm.job_function_name || !ruleForm.time_slot_start || !ruleForm.time_slot_end || !ruleForm.target_hours || ruleForm.target_hours < 0.5"
-              class="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-            >
-              {{ editingRule ? 'Update Rule' : 'Create Rule' }}
+              {{ saving ? 'Saving...' : 'Save All' }}
             </button>
           </div>
         </div>
@@ -214,7 +117,6 @@
             </button>
           </div>
 
-          <!-- Add Button -->
           <div class="mb-6">
             <button @click="openAddPreferredAssignmentModal" class="btn-primary flex items-center">
               <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -224,21 +126,18 @@
             </button>
           </div>
 
-          <!-- Loading State -->
           <div v-if="preferredAssignmentsLoading" class="text-center py-8">
             <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
             <p class="mt-2 text-gray-600">Loading required assignments...</p>
           </div>
 
-          <!-- Error State -->
           <div v-else-if="preferredAssignmentsError" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
             <p class="text-red-600">Error loading required assignments: {{ preferredAssignmentsError }}</p>
           </div>
 
-          <!-- Required Assignments List -->
           <div v-else class="space-y-4">
-            <div 
-              v-for="pref in preferredAssignments" 
+            <div
+              v-for="pref in preferredAssignments"
               :key="pref.id"
               class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition"
             >
@@ -256,13 +155,13 @@
                   </div>
                 </div>
                 <div class="flex space-x-2 ml-4">
-                  <button 
+                  <button
                     @click="openEditPreferredAssignmentModal(pref)"
                     class="px-4 py-2 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition"
                   >
                     Edit
                   </button>
-                  <button 
+                  <button
                     @click="deletePreferredAssignmentHandler(pref.id)"
                     class="px-4 py-2 bg-red-100 text-red-600 rounded hover:bg-red-200 transition"
                   >
@@ -271,7 +170,7 @@
                 </div>
               </div>
             </div>
-            
+
             <div v-if="preferredAssignments.length === 0" class="text-center py-8 text-gray-500">
               <p>No required assignments configured yet.</p>
               <p class="text-sm mt-2">Click "+ Add Required Assignment" to create one.</p>
@@ -281,9 +180,8 @@
           <!-- Add/Edit Required Assignment Modal -->
           <div v-if="showPreferredAssignmentFormModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
             <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 relative">
-              <!-- Saved Icon Indicator -->
-              <div 
-                v-if="showSavedIcon" 
+              <div
+                v-if="showSavedIcon"
                 class="absolute inset-0 bg-white bg-opacity-95 flex items-center justify-center z-10 rounded-lg transition-opacity duration-300"
               >
                 <div class="flex flex-col items-center">
@@ -293,7 +191,7 @@
                   <span class="text-lg font-semibold text-green-600">Saved</span>
                 </div>
               </div>
-              
+
               <h4 class="text-xl font-bold mb-4">
                 {{ editingPreferredAssignment ? 'Edit Required Assignment' : 'Add Required Assignment' }}
               </h4>
@@ -306,9 +204,9 @@
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select employee...</option>
-                    <option 
-                      v-for="employee in employees" 
-                      :key="employee.id" 
+                    <option
+                      v-for="employee in employees"
+                      :key="employee.id"
                       :value="employee.id"
                     >
                       {{ employee.first_name }} {{ employee.last_name }}
@@ -323,9 +221,9 @@
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select job function...</option>
-                    <option 
-                      v-for="jf in sortedJobFunctions" 
-                      :key="jf.id" 
+                    <option
+                      v-for="jf in sortedJobFunctions"
+                      :key="jf.id"
                       :value="jf.id"
                     >
                       {{ jf.name }}
@@ -358,18 +256,9 @@
 
 <script setup lang="ts">
 const { logout } = useAuth()
-const { 
-  businessRules, 
-  loading, 
-  error, 
-  fetchBusinessRules, 
-  createBusinessRule, 
-  updateBusinessRule, 
-  deleteBusinessRule 
-} = useBusinessRules()
-
 const { jobFunctions, fetchJobFunctions } = useJobFunctions()
 const { employees, fetchEmployees } = useEmployees()
+const { targets, loading: targetsLoading, error: targetsError, fetchTargets, saveTargets } = useStaffingTargets()
 const {
   preferredAssignments,
   loading: preferredAssignmentsLoading,
@@ -380,67 +269,47 @@ const {
   deletePreferredAssignment
 } = usePreferredAssignments()
 
-const showModal = ref(false)
-const editingRule = ref<any>(null)
+const loading = ref(true)
+const saving = ref(false)
+const gridError = ref<string | null>(null)
+const showSuccessToast = ref(false)
+const successToastMessage = ref('')
+let successTimeout: ReturnType<typeof setTimeout> | null = null
 
 // Required Assignments Modal State
 const showPreferredAssignmentsModal = ref(false)
 const showPreferredAssignmentFormModal = ref(false)
 const editingPreferredAssignment = ref<any>(null)
-const preferredAssignmentFormData = ref({
-  employee_id: '',
-  job_function_id: ''
-})
+const preferredAssignmentFormData = ref({ employee_id: '', job_function_id: '' })
 const showSavedIcon = ref(false)
-const showSuccessToast = ref(false)
-const successToastMessage = ref('')
-let successTimeout: ReturnType<typeof setTimeout> | null = null
 
-const ruleForm = ref({
-  job_function_name: '',
-  time_slot_start: '08:00',
-  time_slot_end: '17:00',
-  target_hours: null as number | null
+// Grid data: { "jfId|hour": headcount }
+const gridData = ref<Record<string, number>>({})
+const originalGridData = ref<Record<string, number>>({})
+
+// Hours columns: 6AM through 4PM
+const gridHours = computed(() => {
+  const hours = []
+  for (let h = 6; h <= 16; h++) {
+    const value = `${h.toString().padStart(2, '0')}:00`
+    const period = h >= 12 ? 'PM' : 'AM'
+    const display = h > 12 ? h - 12 : h === 0 ? 12 : h
+    hours.push({ value, label: `${display}${period}` })
+  }
+  return hours
 })
 
-const sortedRules = computed(() => {
-  return [...businessRules.value].sort((a, b) => {
-    if (a.job_function_name !== b.job_function_name) {
-      return a.job_function_name.localeCompare(b.job_function_name)
-    }
-    if (a.priority !== b.priority) {
-      return (a.priority || 0) - (b.priority || 0)
-    }
-    return a.time_slot_start.localeCompare(b.time_slot_start)
-  })
+// Job functions for the grid (active, exclude individual Meter N — use parent Meter)
+const gridJobFunctions = computed(() => {
+  return [...(jobFunctions.value || [])]
+    .filter(jf => jf.is_active !== false && !/^Meter [0-9]+$/.test(jf.name || ''))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
 })
-
-const formatTargetHours = (rule: any) => {
-  const staffCount = rule.max_staff ?? rule.min_staff ?? null
-  if (staffCount == null) return '-'
-  const slotHours = getSlotDurationHours(rule.time_slot_start, rule.time_slot_end)
-  if (slotHours <= 0) return staffCount
-  const targetHours = staffCount * slotHours
-  return targetHours % 1 === 0 ? targetHours : targetHours.toFixed(1)
-}
-
-const formatTime = (time: string | null | undefined) => {
-  if (!time) return '-'
-  const [hourPart = '0', minutePart = '00'] = String(time).split(':')
-  let hour = parseInt(hourPart, 10)
-  if (Number.isNaN(hour)) return '-'
-  const minutes = minutePart.slice(0, 2)
-  const period = hour >= 12 ? 'PM' : 'AM'
-  hour = hour % 12
-  if (hour === 0) hour = 12
-  return `${hour}:${minutes} ${period}`
-}
 
 const sortedJobFunctions = computed(() => {
   return [...(jobFunctions.value || [])]
     .filter(jf => jf.is_active !== false)
     .sort((a, b) => {
-      // Sort by name, but put individual meters last
       const aIsMeter = a.name?.startsWith('Meter ')
       const bIsMeter = b.name?.startsWith('Meter ')
       if (aIsMeter && !bIsMeter) return 1
@@ -449,122 +318,59 @@ const sortedJobFunctions = computed(() => {
     })
 })
 
-const timeToMinutes = (time: string): number => {
-  const parts = String(time || '00:00').split(':').map(Number)
-  return (parts[0] || 0) * 60 + (parts[1] || 0)
+const hasChanges = computed(() => {
+  return JSON.stringify(gridData.value) !== JSON.stringify(originalGridData.value)
+})
+
+const gridKey = (jfId: string, hour: string) => `${jfId}|${hour}`
+
+const getGridValue = (jfId: string, hour: string): number => {
+  return gridData.value[gridKey(jfId, hour)] ?? 0
 }
 
-const getSlotDurationHours = (start: string, end: string): number => {
-  const startMin = timeToMinutes(start)
-  const endMin = timeToMinutes(end)
-  if (endMin <= startMin) return 0
-  return (endMin - startMin) / 60
+const setGridValue = (jfId: string, hour: string, rawValue: string) => {
+  const val = parseInt(rawValue, 10)
+  gridData.value[gridKey(jfId, hour)] = isNaN(val) || val < 0 ? 0 : val
 }
 
-const openAddModal = () => {
-  editingRule.value = null
-  ruleForm.value = {
-    job_function_name: '',
-    time_slot_start: '08:00',
-    time_slot_end: '17:00',
-    target_hours: null
+const loadGridFromTargets = () => {
+  const data: Record<string, number> = {}
+  for (const t of targets.value) {
+    data[gridKey(t.job_function_id, t.hour_start)] = t.headcount
   }
-  showModal.value = true
+  gridData.value = { ...data }
+  originalGridData.value = { ...data }
 }
 
-const editRule = (rule: any) => {
-  editingRule.value = rule
-  const staffCount = rule.max_staff ?? rule.min_staff ?? null
-  const slotHours = getSlotDurationHours(rule.time_slot_start, rule.time_slot_end)
-  const targetHours = staffCount != null && slotHours > 0 ? staffCount * slotHours : null
-  ruleForm.value = {
-    job_function_name: rule.job_function_name,
-    time_slot_start: rule.time_slot_start,
-    time_slot_end: rule.time_slot_end,
-    target_hours: targetHours
-  }
-  showModal.value = true
-}
-
-const closeModal = () => {
-  showModal.value = false
-  editingRule.value = null
-}
-
-const saveRule = async () => {
-  if (!ruleForm.value.job_function_name) {
-    alert('Please enter a job function name')
-    return
-  }
-
-  if (!ruleForm.value.target_hours || ruleForm.value.target_hours < 0.5) {
-    alert('Please enter a valid target hours (at least 0.5)')
-    return
-  }
-
-  const slotHours = getSlotDurationHours(ruleForm.value.time_slot_start, ruleForm.value.time_slot_end)
-  if (slotHours <= 0) {
-    alert('End time must be after start time')
-    return
-  }
-
-  const staffCount = Math.max(1, Math.ceil(ruleForm.value.target_hours / slotHours))
-  const ruleData: any = {
-    job_function_name: ruleForm.value.job_function_name.trim(),
-    time_slot_start: ruleForm.value.time_slot_start,
-    time_slot_end: ruleForm.value.time_slot_end,
-    min_staff: staffCount,
-    max_staff: staffCount,
-    block_size_minutes: 0,
-    priority: 0,
-    is_active: true,
-    notes: null,
-    fan_out_enabled: false,
-    fan_out_prefix: null
-  }
-
+const saveAllTargets = async () => {
+  saving.value = true
   try {
-    if (editingRule.value) {
-      await updateBusinessRule(editingRule.value.id, ruleData)
-      showSuccessIndicator('Business rule updated')
-    } else {
-      await createBusinessRule(ruleData)
-      showSuccessIndicator('Business rule created')
+    const items: { job_function_id: string; hour_start: string; headcount: number }[] = []
+    for (const jf of gridJobFunctions.value) {
+      for (const hour of gridHours.value) {
+        const headcount = getGridValue(jf.id, hour.value)
+        items.push({ job_function_id: jf.id, hour_start: hour.value, headcount })
+      }
     }
-    closeModal()
+    await saveTargets(items)
+    loadGridFromTargets()
+    showSuccessIndicator('Staffing targets saved')
   } catch (e: any) {
-    alert(`Error saving rule: ${e.message || 'Unknown error'}`)
-  }
-}
-
-const deleteRule = async (id: string) => {
-  try {
-    const success = await deleteBusinessRule(id)
-    if (!success) {
-      alert('Error deleting rule. Please try again.')
-      return
-    }
-    showSuccessIndicator('Business rule deleted')
-  } catch (e: any) {
-    alert(`Error deleting rule: ${e.message || 'Unknown error'}`)
+    gridError.value = e.message || 'Error saving targets'
+  } finally {
+    saving.value = false
   }
 }
 
 const showSuccessIndicator = (message: string) => {
   successToastMessage.value = message
   showSuccessToast.value = true
-  if (successTimeout) {
-    clearTimeout(successTimeout)
-  }
-  successTimeout = setTimeout(() => {
-    showSuccessToast.value = false
-  }, 2000)
+  if (successTimeout) clearTimeout(successTimeout)
+  successTimeout = setTimeout(() => { showSuccessToast.value = false }, 2000)
 }
 
 const handleLogout = async () => {
-  if (confirm('Are you sure you want to logout?')) {
-    await logout()
-  }
+  await logout()
 }
 
 // Required Assignments Functions
@@ -572,7 +378,7 @@ const openPreferredAssignmentsModal = async () => {
   showPreferredAssignmentsModal.value = true
   await fetchPreferredAssignments()
   if (employees.value.length === 0) {
-    await fetchEmployees(false) // Get all employees including inactive
+    await fetchEmployees(false)
   }
 }
 
@@ -584,10 +390,7 @@ const closePreferredAssignmentsModal = () => {
 
 const openAddPreferredAssignmentModal = () => {
   editingPreferredAssignment.value = null
-  preferredAssignmentFormData.value = {
-    employee_id: '',
-    job_function_id: ''
-  }
+  preferredAssignmentFormData.value = { employee_id: '', job_function_id: '' }
   showPreferredAssignmentFormModal.value = true
 }
 
@@ -618,43 +421,42 @@ const handlePreferredAssignmentSubmit = async () => {
     } else {
       await createPreferredAssignment(payload)
     }
-    await fetchPreferredAssignments() // Refresh list
-    
-    // Show saved icon
+    await fetchPreferredAssignments()
     showSavedIcon.value = true
     setTimeout(() => {
       showSavedIcon.value = false
       closePreferredAssignmentFormModal()
-    }, 1500) // Hide icon and close modal after 1.5 seconds
+    }, 1500)
   } catch (e: any) {
     alert(`Error saving required assignment: ${e.message || 'Unknown error'}`)
   }
 }
 
 const deletePreferredAssignmentHandler = async (id: string) => {
-  if (confirm('Are you sure you want to delete this required assignment?')) {
-    try {
-      await deletePreferredAssignment(id)
-      await fetchPreferredAssignments() // Refresh list
-    } catch (e: any) {
-      alert(`Error deleting preferred assignment: ${e.message || 'Unknown error'}`)
-    }
+  try {
+    await deletePreferredAssignment(id)
+    await fetchPreferredAssignments()
+  } catch (e: any) {
+    alert(`Error deleting preferred assignment: ${e.message || 'Unknown error'}`)
   }
 }
 
-// Load rules and job functions on mount
 onMounted(async () => {
-  await Promise.all([
-    fetchBusinessRules(),
-    fetchJobFunctions(),
-    fetchEmployees(false) // Get all employees including inactive
-  ])
+  try {
+    await Promise.all([
+      fetchTargets(),
+      fetchJobFunctions(),
+      fetchEmployees(false)
+    ])
+    loadGridFromTargets()
+  } catch (e: any) {
+    gridError.value = e.message || 'Error loading data'
+  } finally {
+    loading.value = false
+  }
 })
 
 onBeforeUnmount(() => {
-  if (successTimeout) {
-    clearTimeout(successTimeout)
-  }
+  if (successTimeout) clearTimeout(successTimeout)
 })
 </script>
-
