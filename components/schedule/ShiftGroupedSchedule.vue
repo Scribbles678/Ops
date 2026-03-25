@@ -5,7 +5,7 @@
       v-for="shift in shiftsWithEmployees"
       :key="shift.id"
       class="shift-group mb-3"
-      :style="{ width: `${16 + EMPLOYEE_COLUMN_WIDTH + (getShiftTimeBlocks(shift).length * BLOCK_WIDTH)}px`, maxWidth: '100%' }"
+      style="width: 100%"
     >
       <!-- Shift Header -->
       <div class="shift-header">
@@ -634,7 +634,7 @@ const getTextColor = (hex: string): string => {
 const getGridTemplateColumns = (shift: any) => {
   const cols = getShiftTimeBlocks(shift).length
   // Fixed column width for crisp alignment and predictable wrapping
-  return `repeat(${cols}, ${BLOCK_WIDTH}px)`
+  return `repeat(${cols}, minmax(${BLOCK_WIDTH}px, 1fr))`
 }
 
 const timeToColumnIndex = (time: string, shift: any) => {

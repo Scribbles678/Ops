@@ -365,7 +365,7 @@
       
       <!-- Full-width schedule container with horizontal scroll -->
       <div v-else class="w-full overflow-x-auto">
-        <div class="min-w-max">
+        <div>
           <ShiftGroupedSchedule
             :employees="employees"
             :schedule-assignments="scheduleAssignments"
