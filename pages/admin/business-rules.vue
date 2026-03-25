@@ -287,10 +287,10 @@ const showSavedIcon = ref(false)
 const gridData = ref<Record<string, number>>({})
 const originalGridData = ref<Record<string, number>>({})
 
-// Hours columns: 6AM through 4PM
+// Hours columns: 6AM through 8PM (covers up to 8:30PM end-of-shift)
 const gridHours = computed(() => {
   const hours = []
-  for (let h = 6; h <= 16; h++) {
+  for (let h = 6; h <= 20; h++) {
     const value = `${h.toString().padStart(2, '0')}:00`
     const period = h >= 12 ? 'PM' : 'AM'
     const display = h > 12 ? h - 12 : h === 0 ? 12 : h

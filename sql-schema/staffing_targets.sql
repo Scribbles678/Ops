@@ -2,7 +2,7 @@
 -- Stores target headcount per job function per hour for schedule generation
 
 CREATE TABLE public.staffing_targets (
-  id uuid NOT NULL DEFAULT extensions.uuid_generate_v4(),
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
   job_function_id uuid NOT NULL,
   hour_start time WITHOUT TIME ZONE NOT NULL,
   headcount integer NOT NULL DEFAULT 0,
