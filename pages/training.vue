@@ -65,10 +65,6 @@
                     {{ employee.last_name }}, {{ employee.first_name }}
                   </h3>
                   
-                  <!-- Individual Save Status Indicators -->
-                  <div :data-status-indicator="employee.id" class="flex items-center space-x-1">
-                    <!-- Status will be dynamically inserted here via DOM manipulation -->
-                  </div>
                 </div>
                 
                 <!-- Shift Selection -->
@@ -89,14 +85,23 @@
               
               <!-- Employee Actions -->
               <div class="flex items-center space-x-1.5">
-                <button
-                  :data-save-button="employee.id"
-                  @click="saveEmployeeTraining(employee.id)"
-                  disabled
-                  class="px-2.5 py-1 bg-gray-300 text-gray-500 rounded cursor-not-allowed text-xs md:text-sm"
-                >
+                <span v-if="employeeSaveState[employee.id] === 'saving'" class="px-2.5 py-1 bg-yellow-100 text-yellow-700 rounded text-xs md:text-sm flex items-center space-x-1">
+                  <svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                  <span>Saving...</span>
+                </span>
+                <span v-else-if="employeeSaveState[employee.id] === 'saved'" class="px-2.5 py-1 bg-green-100 text-green-700 rounded text-xs md:text-sm flex items-center space-x-1">
+                  <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                  <span>Saved</span>
+                </span>
+                <span v-else-if="employeeSaveState[employee.id] === 'error'" class="px-2.5 py-1 bg-red-100 text-red-700 rounded text-xs md:text-sm cursor-pointer hover:bg-red-200" @click="saveEmployeeTraining(employee.id)">
+                  Error - Click to Retry
+                </span>
+                <span v-else-if="employeeSaveState[employee.id] === 'pending'" class="px-2.5 py-1 bg-blue-100 text-blue-600 rounded text-xs md:text-sm">
+                  Unsaved
+                </span>
+                <span v-else class="px-2.5 py-1 bg-gray-100 text-gray-400 rounded text-xs md:text-sm">
                   No Changes
-                </button>
+                </span>
                 <button
                   @click="openEditEmployeeModal(employee)"
                   class="px-2.5 py-1 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition text-xs md:text-sm"
@@ -147,7 +152,7 @@
                 <svg class="w-3.5 h-3.5 mr-1 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
                   <path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2H4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
                 </svg>
-                Click checkboxes to make changes, then click "Save Changes" for each employee
+                Click checkboxes to update training — changes auto-save after a moment
               </span>
             </div>
           </div>
@@ -254,6 +259,12 @@ const trainingDataLoading = ref(false)
 // Non-reactive state for pending changes (no Vue reactivity)
 const pendingChanges = new Map<string, string[]>()
 const saveStates = new Map<string, 'idle' | 'saving' | 'saved' | 'error'>()
+const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+// Reactive save state for Vue-driven UI (replaces DOM manipulation)
+const employeeSaveState = ref<Record<string, 'idle' | 'pending' | 'saving' | 'saved' | 'error'>>({})
+
+const AUTOSAVE_DELAY = 1500 // ms to wait after last checkbox click before saving
 
 // Employee modal state
 const showEmployeeModal = ref(false)
@@ -317,21 +328,15 @@ watch(() => employees.value.length, async (newLength, oldLength) => {
   }
 })
 
-// Navigation warning (backup safety measure)
-onBeforeRouteLeave((to, from, next) => {
-  // Since we're auto-saving, this is just a backup warning
-  // In case auto-save fails, we can still warn the user
-  const hasUnsavedChanges = JSON.stringify(employeeTraining.value) !== JSON.stringify(originalTraining.value)
-  
-  if (hasUnsavedChanges) {
-    if (confirm('You have unsaved training changes. Are you sure you want to leave this page?')) {
-      next()
-    } else {
-      next(false)
-    }
-  } else {
-    next()
+// Flush any pending auto-saves before leaving the page
+onBeforeRouteLeave(async (to, from, next) => {
+  // Fire all pending debounced saves immediately
+  for (const [employeeId, timer] of debounceTimers) {
+    clearTimeout(timer)
+    debounceTimers.delete(employeeId)
+    await saveEmployeeTraining(employeeId)
   }
+  next()
 })
 
 const loadTrainingData = async () => {
@@ -485,139 +490,57 @@ const toggleTraining = (employeeId: string, jobFunctionId: string, event?: Event
   // Ensure we have a clean array (no duplicates, no invalid IDs)
   const cleanTraining = Array.from(new Set(currentTraining.filter(id => id && id !== 'meter-group')))
   pendingChanges.set(employeeId, cleanTraining)
-  
-  // Update save button state
-  updateSaveButtonState(employeeId)
+
+  // Mark as pending and schedule auto-save
+  employeeSaveState.value[employeeId] = 'pending'
+  scheduleAutoSave(employeeId)
 }
 
-// Update save button appearance based on pending changes
-const updateSaveButtonState = (employeeId: string) => {
-  const saveButton = document.querySelector(`[data-save-button="${employeeId}"]`) as HTMLButtonElement
-  if (!saveButton) return
-  
-  const hasChanges = pendingChanges.has(employeeId) && 
-    JSON.stringify(pendingChanges.get(employeeId)) !== JSON.stringify(employeeTraining.value[employeeId] || [])
-  
-  if (hasChanges) {
-    saveButton.disabled = false
-    saveButton.textContent = 'Save Changes'
-    saveButton.className = 'px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 transition text-sm'
-  } else {
-    saveButton.disabled = true
-    saveButton.textContent = 'No Changes'
-    saveButton.className = 'px-3 py-1 bg-gray-300 text-gray-500 rounded cursor-not-allowed text-sm'
+// Debounced auto-save: waits for user to stop clicking, then saves
+const scheduleAutoSave = (employeeId: string) => {
+  // Clear any existing timer for this employee
+  if (debounceTimers.has(employeeId)) {
+    clearTimeout(debounceTimers.get(employeeId)!)
   }
+  // Set a new timer
+  debounceTimers.set(employeeId, setTimeout(() => {
+    debounceTimers.delete(employeeId)
+    saveEmployeeTraining(employeeId)
+  }, AUTOSAVE_DELAY))
 }
 
-// Save changes for a specific employee
+// Save changes for a specific employee (called automatically via debounce)
 const saveEmployeeTraining = async (employeeId: string) => {
   if (!pendingChanges.has(employeeId)) return
-  
-  // Ensure training data is loaded before saving
-  if (trainingDataLoading.value) {
-    alert('Training data is still loading. Please wait before saving.')
-    return
-  }
-  
-  const saveButton = document.querySelector(`[data-save-button="${employeeId}"]`) as HTMLButtonElement
-  const statusIndicator = document.querySelector(`[data-status-indicator="${employeeId}"]`)
-  
-  if (!saveButton) {
-    console.error('Save button not found for employee:', employeeId)
-    return
-  }
-  
-  // Set saving state
-  saveStates.set(employeeId, 'saving')
-  saveButton.disabled = true
-  saveButton.textContent = 'Saving...'
-  saveButton.className = 'px-3 py-1 bg-yellow-600 text-white rounded cursor-not-allowed text-sm'
-  
-  if (statusIndicator) {
-    statusIndicator.innerHTML = `
-      <div class="flex items-center">
-        <svg class="animate-spin h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        <span class="text-xs text-blue-500 ml-1">Saving...</span>
-      </div>
-    `
-  }
-  
+
+  if (trainingDataLoading.value) return
+
+  employeeSaveState.value[employeeId] = 'saving'
+
   try {
     const newTraining = pendingChanges.get(employeeId)!
-    
-    // Ensure we have a clean array of IDs (no duplicates, no nulls)
     const cleanTraining = Array.from(new Set(newTraining.filter(id => id && id !== 'meter-group')))
-    
+
     const result = await updateEmployeeTraining(employeeId, cleanTraining)
-    
-    // Verify the save actually succeeded
-    if (!result) {
-      throw new Error('Save operation returned false')
-    }
-    
-    // Reload training data from database to ensure consistency
+    if (!result) throw new Error('Save operation returned false')
+
+    // Reload from database to ensure consistency
     await loadTrainingData()
-    
-    // Update reactive state with what was actually saved (from database)
-    const finalTraining = employeeTraining.value[employeeId] || []
-    
-    // Update reactive state
-    employeeTraining.value[employeeId] = finalTraining
-    originalTraining.value[employeeId] = [...finalTraining]
-    
+
     // Clear pending changes
     pendingChanges.delete(employeeId)
-    saveStates.set(employeeId, 'saved')
-    
-    // Show success state
-    saveButton.textContent = 'Saved!'
-    saveButton.className = 'px-3 py-1 bg-green-600 text-white rounded text-sm'
-    
-    if (statusIndicator) {
-      statusIndicator.innerHTML = `
-        <div class="flex items-center animate-pulse">
-          <svg class="h-4 w-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
-          </svg>
-          <span class="text-xs text-green-500 ml-1">Saved</span>
-        </div>
-      `
-    }
-    
-    // Reset button after 2 seconds
+    employeeSaveState.value[employeeId] = 'saved'
+
+    // Reset to idle after 2 seconds
     setTimeout(() => {
-      updateSaveButtonState(employeeId)
-      if (statusIndicator) {
-        statusIndicator.innerHTML = ''
+      if (employeeSaveState.value[employeeId] === 'saved') {
+        employeeSaveState.value[employeeId] = 'idle'
       }
     }, 2000)
-    
   } catch (e: any) {
     console.error('Error saving training:', e)
-    saveStates.set(employeeId, 'error')
-    
-    // Show error message to user
-    const errorMessage = e?.message || 'Failed to save training. Please try again.'
-    
-    saveButton.textContent = 'Error - Try Again'
-    saveButton.className = 'px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition text-sm'
-    saveButton.disabled = false
-    
-    if (statusIndicator) {
-      statusIndicator.innerHTML = `
-        <div class="flex items-center" title="${errorMessage}">
-          <svg class="h-4 w-4 text-red-500" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
-          </svg>
-          <span class="text-xs text-red-500 ml-1">Error</span>
-        </div>
-      `
-    }
-    
-    // Don't clear pending changes on error - allow user to retry
+    employeeSaveState.value[employeeId] = 'error'
+    // Don't clear pending changes on error - user can retry
   }
 }
 

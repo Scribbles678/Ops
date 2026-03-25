@@ -624,7 +624,7 @@ const {
 
 // PTO composable
 const {
-  pto,
+  ptoRecords,
   ptoByEmployeeId,
   fetchPTOForDate,
   createPTO,
@@ -1039,12 +1039,12 @@ const unassignedEmployees = computed(() => {
 })
 
 const totalPTOHours = computed(() => {
-  if (!pto.value || pto.value.length === 0 || !employees.value || !scheduleData.value) return 0
-  
+  if (!ptoRecords.value || ptoRecords.value.length === 0 || !employees.value || !scheduleData.value) return 0
+
   let totalHours = 0
-  
+
   // Process each PTO record
-  pto.value.forEach((ptoRecord: any) => {
+  ptoRecords.value.forEach((ptoRecord: any) => {
     const employee = employees.value.find((e: any) => e.id === ptoRecord.employee_id)
     if (!employee) return
     
