@@ -7,8 +7,44 @@
           <button @click="$emit('close')" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
         </div>
 
+        <!-- Inline login (when not authenticated) -->
+        <div v-if="needsLogin">
+          <p class="text-sm text-gray-600 mb-3">Please sign in to submit a request.</p>
+          <form @submit.prevent="handleLogin" class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <input
+                v-model="loginEmail"
+                type="email"
+                required
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="you@example.com"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input
+                v-model="loginPassword"
+                type="password"
+                required
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            <div v-if="loginError" class="bg-red-50 border border-red-200 rounded-md p-3">
+              <p class="text-sm text-red-600">{{ loginError }}</p>
+            </div>
+            <button
+              type="submit"
+              :disabled="loggingIn"
+              class="w-full px-4 py-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-medium"
+            >
+              {{ loggingIn ? 'Signing in...' : 'Sign In' }}
+            </button>
+          </form>
+        </div>
+
         <!-- Result banner (shown after submit) -->
-        <div v-if="submitResult" class="mb-4">
+        <div v-else-if="submitResult" class="mb-4">
           <ScheduleRequestsRequestResultBanner
             :status="submitResult.status"
             :rule-results="submitResult.ruleResults"
@@ -34,7 +70,7 @@
             >
               <option value="">Select employee...</option>
               <option v-for="emp in employees" :key="emp.id" :value="emp.id">
-                {{ emp.name }}
+                {{ emp.last_name }}, {{ emp.first_name }}
               </option>
             </select>
           </div>
@@ -173,11 +209,18 @@ const emit = defineEmits<{
 
 const { submitRequest } = useScheduleRequests()
 
+const { user, login: authLogin, fetchCurrentUser } = useAuth()
+
 const employees = ref<any[]>([])
 const shifts = ref<any[]>([])
 const submitting = ref(false)
 const submitError = ref<string | null>(null)
 const submitResult = ref<SubmitResult | null>(null)
+const needsLogin = ref(false)
+const loginEmail = ref('')
+const loginPassword = ref('')
+const loginError = ref('')
+const loggingIn = ref(false)
 
 // Default date = tomorrow
 const tomorrow = new Date()
@@ -241,12 +284,40 @@ const resetForm = () => {
   }
 }
 
+const loadFormData = async () => {
+  try {
+    const [empData, shiftData] = await Promise.all([
+      $fetch<any[]>('/api/employees', { params: { active: 'true' } }),
+      $fetch<any[]>('/api/shifts'),
+    ])
+    employees.value = empData
+    shifts.value = shiftData
+    needsLogin.value = false
+  } catch (e: any) {
+    if (e.statusCode === 401 || e.status === 401) {
+      needsLogin.value = true
+    }
+  }
+}
+
+const handleLogin = async () => {
+  loggingIn.value = true
+  loginError.value = ''
+  try {
+    await authLogin(loginEmail.value, loginPassword.value)
+    await loadFormData()
+  } catch (e: any) {
+    loginError.value = e.data?.message || e.message || 'Login failed'
+  } finally {
+    loggingIn.value = false
+  }
+}
+
 onMounted(async () => {
-  const [empData, shiftData] = await Promise.all([
-    $fetch<any[]>('/api/employees', { params: { active: 'true' } }),
-    $fetch<any[]>('/api/shifts'),
-  ])
-  employees.value = empData
-  shifts.value = shiftData
+  // If already authenticated, try fetching user first
+  if (!user.value) {
+    await fetchCurrentUser()
+  }
+  await loadFormData()
 })
 </script>

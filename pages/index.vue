@@ -116,31 +116,24 @@
             </p>
           </div>
         </NuxtLink>
-      </div>
 
-      <!-- Settings Link -->
-      <div class="text-center mt-6">
+        <!-- Settings Button -->
         <NuxtLink
           to="/settings"
-          class="inline-flex items-center px-6 py-3 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 transition mr-4"
+          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 flex items-center justify-center"
         >
-          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          Settings
-        </NuxtLink>
-
-        <!-- Admin Link (Super Admin Only) -->
-        <NuxtLink
-          v-if="isSuperAdmin"
-          to="/settings#user-management"
-          class="inline-flex items-center px-6 py-3 border border-purple-300 rounded-lg text-purple-700 bg-purple-50 hover:bg-purple-100 transition"
-        >
-          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-          </svg>
-          User Management
+          <div class="flex flex-col items-center justify-center">
+            <div class="bg-gray-100 rounded-full p-2 mb-2">
+              <svg class="w-10 h-10 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <h2 class="text-sm md:text-base font-bold text-gray-800 mb-1 text-center">Settings</h2>
+            <p class="text-xs text-gray-600 text-center px-2 leading-tight">
+              Account, request rules, and user management
+            </p>
+          </div>
         </NuxtLink>
       </div>
 
@@ -162,7 +155,6 @@
 
 <script setup lang="ts">
 const { logout } = useAuth()
-const { isSuperAdmin } = useTeam()
 
 const today = computed(() => {
   const date = new Date()

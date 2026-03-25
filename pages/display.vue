@@ -1,5 +1,5 @@
 <template>
-  <div class="display-page min-h-screen bg-gradient-to-b from-gray-950 via-black to-gray-950 text-white text-[10px] md:text-[11px]">
+  <div class="display-page min-h-screen text-white text-[10px] md:text-[11px]" style="background: linear-gradient(to bottom, #000075, #00004d, #000075)">
     <div class="max-w-[1400px] mx-auto px-2.5 py-2 space-y-1.5">
       <!-- Loading -->
       <div v-if="loading" class="flex items-center justify-center h-[60vh]">
