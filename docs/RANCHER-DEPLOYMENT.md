@@ -119,6 +119,20 @@ CREATE TABLE IF NOT EXISTS public.staffing_targets (
 CREATE INDEX IF NOT EXISTS idx_staffing_targets_team ON public.staffing_targets USING btree (team_id);
 ```
 
+Then apply the incremental migrations from `sql-schema/migrations/` (safe to re-run — all use `IF NOT EXISTS`):
+
+```sql
+-- add-coverage-requirements.sql
+-- Adds lunch/break coverage flags to job_functions. Used by the Automated
+-- Schedule Builder to decide which functions need another trained employee
+-- scheduled to cover the primary's lunch/break window.
+ALTER TABLE job_functions
+  ADD COLUMN IF NOT EXISTS lunch_coverage_required boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS break_coverage_required boolean NOT NULL DEFAULT false;
+```
+
+Check the `sql-schema/migrations/` folder for any newer migrations added since this guide was last updated and apply each one the same way.
+
 Type `\q` to exit psql when done.
 
 ---
@@ -209,7 +223,15 @@ docker push your-registry.example.com/scheduling-app:latest
 
 Then in Rancher, go to the `scheduling-app` workload and click **Redeploy**. It will pull the new image and restart.
 
-No need to re-run the seed script or schema unless the update instructions say so.
+No need to re-run the seed script or base schema.
+
+**Check for new migrations.** Look in `sql-schema/migrations/` for any files added since your last deploy. If there are new ones, open the `scheduling-db` pod shell and apply them:
+
+```bash
+psql -U postgres -d scheduling
+```
+
+Then paste the contents of each new migration file. Migrations are safe to re-run (all use `IF NOT EXISTS` / `COALESCE` patterns), but skipping a required one will cause API errors like *"column X does not exist"* after the app container updates.
 
 ---
 

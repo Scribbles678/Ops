@@ -1904,10 +1904,18 @@ const isHourlyMarker = (time: string): boolean => {
   return minutes === 0
 }
 
-// Active meter stations shown in the Meter dashboard.
-// Meter 7, 15, and 16 were retired — keeping the list explicit so the UI and
-// assignment-parsing bounds check stay in sync.
-const ACTIVE_METER_NUMBERS = [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]
+// Active meter stations are derived from the live job_functions list so the
+// dashboard stays in sync with whatever "Meter N" rows exist in the DB.
+// Delete a Meter in the Job Functions UI → its row disappears here automatically.
+const ACTIVE_METER_NUMBERS = computed<number[]>(() => {
+  const nums = new Set<number>()
+  for (const jf of jobFunctions.value || []) {
+    if (jf?.is_active === false) continue
+    const m = /^Meter (\d+)$/.exec(jf?.name || '')
+    if (m && m[1]) nums.add(parseInt(m[1], 10))
+  }
+  return Array.from(nums).sort((a, b) => a - b)
+})
 
 const isMeterBooked = (meterNumber: number, timeSlot: string): boolean => {
   const key = `meter-${meterNumber}-${timeSlot}`
@@ -2116,7 +2124,7 @@ const syncMeterBookings = () => {
         if (data && data.assignment && data.assignment.startsWith('Meter ')) {
           const meterNumber = parseInt(data.assignment.split(' ')[1])
           
-          if (ACTIVE_METER_NUMBERS.includes(meterNumber)) {
+          if (ACTIVE_METER_NUMBERS.value.includes(meterNumber)) {
             const startTime = timeSlot
             const endTime = data.until
             
