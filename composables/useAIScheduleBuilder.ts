@@ -151,7 +151,8 @@ const buildSchedule = (
   trainingData: Record<string, string[]>,
   staffingTargets: StaffingTarget[],
   preferredAssignmentsMap: Record<string, Record<string, any>>,
-  warnings: string[]
+  warnings: string[],
+  ptoByEmployee: Record<string, any> = {}
 ): { schedule: ScheduleAssignment[]; gaps: Gap[] } => {
   const gaps: Gap[] = []
 
@@ -186,6 +187,84 @@ const buildSchedule = (
       pmAssigned: null,
       trainedFunctionIds: trained,
     })
+  }
+
+  // Apply PTO adjustments: remove full-day employees, clip partial-day blocks
+  if (Object.keys(ptoByEmployee).length > 0) {
+    let fullDayCount = 0
+    let partialDayCount = 0
+
+    for (let i = empInfos.length - 1; i >= 0; i--) {
+      const emp = empInfos[i]
+      const pto = ptoByEmployee[emp.id]
+      if (!pto) continue
+
+      // Full-day PTO → exclude entirely
+      if (pto.pto_type === 'full_day' || (!pto.start_time && !pto.end_time)) {
+        empInfos.splice(i, 1)
+        fullDayCount++
+        continue
+      }
+
+      // Partial-day PTO → clip blocks
+      if (pto.start_time && pto.end_time) {
+        const ptoStart = timeToMinutes(pto.start_time)
+        const ptoEnd = timeToMinutes(pto.end_time)
+
+        // If PTO covers entire shift → treat as full-day
+        if (ptoStart <= emp.shiftStart && ptoEnd >= emp.shiftEnd) {
+          empInfos.splice(i, 1)
+          fullDayCount++
+          continue
+        }
+
+        // Clip AM block
+        if (ptoStart <= emp.amStart && ptoEnd > emp.amStart) {
+          // Late start: PTO covers beginning of AM block
+          emp.amStart = Math.min(ptoEnd, emp.amEnd)
+        } else if (ptoStart > emp.amStart && ptoStart < emp.amEnd) {
+          // Early leave from AM: PTO cuts into end of AM block
+          emp.amEnd = ptoStart
+        }
+
+        // Clip PM block if it exists
+        if (emp.pmStart != null && emp.pmEnd != null) {
+          if (ptoStart <= emp.pmStart && ptoEnd > emp.pmStart) {
+            emp.pmStart = Math.min(ptoEnd, emp.pmEnd)
+          } else if (ptoStart > emp.pmStart && ptoStart < emp.pmEnd) {
+            emp.pmEnd = ptoStart
+          }
+          // Invalidate PM if too short (< 30 min)
+          if (emp.pmEnd! - emp.pmStart! < 30) {
+            emp.pmStart = null
+            emp.pmEnd = null
+          }
+        }
+
+        // Invalidate AM if too short (< 30 min) — zero-duration = skipped by algorithm
+        if (emp.amEnd - emp.amStart < 30) {
+          emp.amStart = emp.amEnd
+        }
+
+        // If both blocks are now empty → remove employee
+        const amOk = emp.amEnd > emp.amStart
+        const pmOk = emp.pmStart != null && emp.pmEnd != null
+        if (!amOk && !pmOk) {
+          empInfos.splice(i, 1)
+          fullDayCount++
+          continue
+        }
+
+        partialDayCount++
+      }
+    }
+
+    if (fullDayCount > 0) {
+      warnings.push(`${fullDayCount} employee(s) on PTO will not be scheduled.`)
+    }
+    if (partialDayCount > 0) {
+      warnings.push(`${partialDayCount} employee(s) have adjusted hours due to partial-day PTO.`)
+    }
   }
 
   // Expand fan-out targets
@@ -273,10 +352,12 @@ const buildSchedule = (
       // Validate training for AM (using Meter parent lookup)
       if (!isTrainedFor(emp.id, amJfIdRaw, jobFunctions, trainingData)) continue
 
-      // Resolve Meter parent → best child for each half
-      const amJfId = resolveMeterChild(amJfIdRaw, emp.amStart, emp.amEnd)
-      emp.amAssigned = amJfId
-      decrementDemand(amJfId, emp.amStart, emp.amEnd)
+      // Resolve Meter parent → best child for each half (only if block has duration)
+      if (emp.amEnd > emp.amStart) {
+        const amJfId = resolveMeterChild(amJfIdRaw, emp.amStart, emp.amEnd)
+        emp.amAssigned = amJfId
+        decrementDemand(amJfId, emp.amStart, emp.amEnd)
+      }
 
       if (emp.pmStart != null && emp.pmEnd != null) {
         const pmJfId = resolveMeterChild(pmJfIdRaw, emp.pmStart, emp.pmEnd)
@@ -393,7 +474,7 @@ const buildSchedule = (
 
   const schedule: ScheduleAssignment[] = []
   for (const emp of empInfos) {
-    if (emp.amAssigned) {
+    if (emp.amAssigned && emp.amEnd > emp.amStart) {
       const name = jfNameById.get(emp.amAssigned)
       if (name) {
         schedule.push({
@@ -431,7 +512,7 @@ export function useAIScheduleBuilder() {
   const { fetchPreferredAssignments, getPreferredAssignmentsMap } = usePreferredAssignments()
   const { fetchTargets: fetchStaffingTargets } = useStaffingTargets()
 
-  const generateAISchedule = async (): Promise<{
+  const generateAISchedule = async (scheduleDate: string = ''): Promise<{
     schedule: ScheduleAssignment[]
     warnings: string[]
     errors: string[]
@@ -500,6 +581,22 @@ export function useAIScheduleBuilder() {
       }
 
       const preferredAssignmentsMap = getPreferredAssignmentsMap()
+
+      // Fetch PTO records for the schedule date
+      let ptoByEmployee: Record<string, any> = {}
+      if (scheduleDate) {
+        try {
+          const ptoDays = await $fetch<any[]>(`/api/pto/${scheduleDate}`)
+          if (Array.isArray(ptoDays)) {
+            for (const pto of ptoDays) {
+              if (pto?.employee_id) ptoByEmployee[pto.employee_id] = pto
+            }
+          }
+        } catch (e: any) {
+          warnings.push(`Could not load PTO data: ${e?.message || 'Unknown error'}`)
+        }
+      }
+
       const { schedule, gaps } = buildSchedule(
         employees,
         jobFunctionsList,
@@ -507,7 +604,8 @@ export function useAIScheduleBuilder() {
         trainingData,
         staffingTargets,
         preferredAssignmentsMap,
-        warnings
+        warnings,
+        ptoByEmployee
       )
 
       if (!schedule.length) {
