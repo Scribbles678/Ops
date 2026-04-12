@@ -126,8 +126,6 @@ interface EmployeeScheduleInfo {
   amEnd: number
   pmStart: number | null
   pmEnd: number | null
-  amAssigned: string | null  // job_function_id
-  pmAssigned: string | null
   trainedFunctionIds: string[]
 }
 
@@ -183,8 +181,6 @@ const buildSchedule = (
       amEnd: lunchStart ?? shiftEnd,
       pmStart: lunchEnd ?? null,
       pmEnd: lunchEnd ? shiftEnd : null,
-      amAssigned: null,
-      pmAssigned: null,
       trainedFunctionIds: trained,
     })
   }
@@ -322,9 +318,6 @@ const buildSchedule = (
     }
   }
 
-  // Helper: count training options for an employee (fewer = more constrained)
-  const trainingCount = (emp: EmployeeScheduleInfo): number => emp.trainedFunctionIds.length
-
   // Helper: resolve a job function ID — if it's a Meter parent, pick the child
   // with the highest remaining demand for the given time block.
   const resolveMeterChild = (jfId: string, blockStart: number, blockEnd: number): string => {
@@ -343,9 +336,54 @@ const buildSchedule = (
     return bestChild ? bestChild.id : jfId
   }
 
-  // STEP 1: Assign required employees
-  // Supports separate AM and PM functions via am_job_function_id / pm_job_function_id.
-  // Falls back to job_function_id for both halves when specific halves aren't set.
+  // Core tracking structures for multi-block assignment
+  const empAvailable = new Map<string, {start: number, end: number}[]>()
+  const allAssignments: {empId: string, jfId: string, start: number, end: number}[] = []
+
+  // Initialize empAvailable from each employee's shift blocks
+  for (const emp of empInfos) {
+    const windows: {start: number, end: number}[] = []
+    if (emp.amEnd > emp.amStart) windows.push({start: emp.amStart, end: emp.amEnd})
+    if (emp.pmStart != null && emp.pmEnd != null) windows.push({start: emp.pmStart, end: emp.pmEnd})
+    if (windows.length > 0) empAvailable.set(emp.id, windows)
+  }
+
+  // Helper: carve a used time window out of an employee's remaining availability
+  const useEmpTime = (empId: string, aStart: number, aEnd: number) => {
+    const windows = empAvailable.get(empId) ?? []
+    const updated: {start: number, end: number}[] = []
+    for (const w of windows) {
+      if (aEnd <= w.start || aStart >= w.end) {
+        updated.push(w)
+      } else {
+        if (aStart > w.start) updated.push({start: w.start, end: aStart})
+        if (aEnd < w.end) updated.push({start: aEnd, end: w.end})
+      }
+    }
+    if (updated.length === 0) empAvailable.delete(empId)
+    else empAvailable.set(empId, updated)
+  }
+
+  // Helper: find first contiguous demand block for jfId within [wStart, wEnd]
+  const findDemandWindow = (jfId: string, wStart: number, wEnd: number): {start: number, end: number} | null => {
+    const jfDemand = demand[jfId]
+    if (!jfDemand) return null
+    let blockStart: number | null = null
+    let blockEnd = 0
+    for (const h of getHoursCovered(wStart, wEnd)) {
+      const hMin = timeToMinutes(h)
+      if ((jfDemand[h] ?? 0) > 0) {
+        if (blockStart === null) blockStart = hMin
+        blockEnd = hMin + 60
+      } else if (blockStart !== null) {
+        break // stop at first gap in demand
+      }
+    }
+    if (blockStart === null) return null
+    return {start: Math.max(wStart, blockStart), end: Math.min(wEnd, blockEnd)}
+  }
+
+  // STEP 1: Assign required employees (full AM/PM blocks pinned to configured function)
   for (const emp of empInfos) {
     const preferred = preferredAssignmentsMap[emp.id]
     if (!preferred) continue
@@ -353,112 +391,97 @@ const buildSchedule = (
     for (const pa of Object.values(preferred)) {
       if (!pa?.is_required) continue
 
-      // Determine the intended function for each half
       const amJfIdRaw: string = pa.am_job_function_id ?? pa.job_function_id
       const pmJfIdRaw: string = pa.pm_job_function_id ?? pa.job_function_id
 
-      // Validate training for AM (using Meter parent lookup)
       if (!isTrainedFor(emp.id, amJfIdRaw, jobFunctions, trainingData)) continue
 
-      // Resolve Meter parent → best child for each half (only if block has duration)
       if (emp.amEnd > emp.amStart) {
         const amJfId = resolveMeterChild(amJfIdRaw, emp.amStart, emp.amEnd)
-        emp.amAssigned = amJfId
+        allAssignments.push({empId: emp.id, jfId: amJfId, start: emp.amStart, end: emp.amEnd})
         decrementDemand(amJfId, emp.amStart, emp.amEnd)
+        useEmpTime(emp.id, emp.amStart, emp.amEnd)
       }
 
       if (emp.pmStart != null && emp.pmEnd != null) {
         const pmJfId = resolveMeterChild(pmJfIdRaw, emp.pmStart, emp.pmEnd)
-        emp.pmAssigned = pmJfId
+        allAssignments.push({empId: emp.id, jfId: pmJfId, start: emp.pmStart, end: emp.pmEnd})
         decrementDemand(pmJfId, emp.pmStart, emp.pmEnd)
+        useEmpTime(emp.id, emp.pmStart, emp.pmEnd)
       }
-      break // Only one required assignment record per employee
+      break // only one required assignment record per employee
     }
   }
 
-  // STEP 2: Assign remaining employees by demand — hour-by-hour greedy coverage.
-  // Each iteration picks the most-constrained unassigned employee (fewest functions
-  // with remaining demand they can cover), then assigns them to whichever function
-  // fills the most unmet hours in their shift block.
-  const assignHalf = (half: 'am' | 'pm') => {
-    const skipped = new Set<string>() // employees with no fillable demand
-
-    while (true) {
-      const unassigned = empInfos.filter(emp => {
-        if (skipped.has(emp.id)) return false
-        if (half === 'am') return emp.amAssigned == null
-        return emp.pmAssigned == null && emp.pmStart != null
-      })
-
-      // All employees are either assigned or skipped — done
-      if (unassigned.length === 0) break
-
-      // Score each employee: count functions with remaining demand they can cover
-      const scored = unassigned.map(emp => {
-        const start = half === 'am' ? emp.amStart : emp.pmStart!
-        const end   = half === 'am' ? emp.amEnd   : emp.pmEnd!
-        const hours = getHoursCovered(start, end)
-        const options = Object.keys(demand).filter(jfId =>
-          isTrainedFor(emp.id, jfId, jobFunctions, trainingData) &&
-          hours.some(h => (demand[jfId]?.[h] ?? 0) > 0)
-        )
-        return { emp, start, end, hours, options }
-      })
-
-      // Most constrained first (fewest demand-relevant options)
-      scored.sort((a, b) => a.options.length - b.options.length)
-
-      const { emp, start, end, hours, options } = scored[0]
-
-      // This employee has no demand to fill right now — park them and move on
-      if (options.length === 0) {
-        skipped.add(emp.id)
-        continue
-      }
-
-      // Pick the function where this employee fills the most remaining demand hours.
-      // Preferred assignments get a large bonus to ensure they're respected.
-      let bestJfId: string | null = null
-      let bestScore = 0
-
-      for (const jfId of options) {
-        let score = 0
-        for (const h of hours) {
-          score += Math.max(0, demand[jfId]?.[h] ?? 0)
-        }
-
-        // Preferred assignment bonus
-        if (preferredAssignmentsMap[emp.id]?.[jfId]) score += 10000
-
-        // Meter parent preference bonus
-        const jf = jobFunctions.find((j: any) => j.id === jfId)
-        if (jf && /^Meter [0-9]+$/.test(jf.name || '')) {
-          const parent = jobFunctions.find(
-            (j: any) => j.name === 'Meter' && (jf.team_id == null || j.team_id === jf.team_id)
-          )
-          if (parent && preferredAssignmentsMap[emp.id]?.[parent.id]) score += 10000
-        }
-
-        if (score > bestScore) {
-          bestScore = score
-          bestJfId = jfId
-        }
-      }
-
-      if (!bestJfId) {
-        skipped.add(emp.id)
-        continue
-      }
-
-      if (half === 'am') emp.amAssigned = bestJfId
-      else emp.pmAssigned = bestJfId
-
-      decrementDemand(bestJfId, start, end)
-    }
+  // STEP 2: Multi-block demand assignment.
+  // Each iteration picks the most-constrained employee (fewest demand-fillable function
+  // options across all their remaining time windows), assigns them for exactly the first
+  // contiguous demand block within their best window, then re-evaluates. This allows an
+  // employee to receive multiple assignments per day — e.g. startup 6–8 AM, then pick
+  // 8 AM–12 PM — so per-hour grid targets are strictly honored.
+  interface CandidateOption {
+    jfId: string
+    demandWindow: {start: number, end: number}
+    score: number
   }
 
-  assignHalf('am')
-  assignHalf('pm')
+  while (true) {
+    const candidates: {empId: string, options: CandidateOption[]}[] = []
+
+    for (const [empId, windows] of empAvailable) {
+      const empOptions: CandidateOption[] = []
+
+      for (const window of windows) {
+        if (window.end - window.start < 30) continue
+
+        for (const jfId of Object.keys(demand)) {
+          if (!isTrainedFor(empId, jfId, jobFunctions, trainingData)) continue
+          const dw = findDemandWindow(jfId, window.start, window.end)
+          if (!dw || dw.end <= dw.start) continue
+
+          let score = 0
+          for (const h of getHoursCovered(dw.start, dw.end)) {
+            score += demand[jfId]?.[h] ?? 0
+          }
+          if (score <= 0) continue
+
+          // Preferred assignment bonus
+          if (preferredAssignmentsMap[empId]?.[jfId]) score += 10000
+          // Meter parent preferred bonus
+          const jf = jobFunctions.find((j: any) => j.id === jfId)
+          if (jf && /^Meter [0-9]+$/.test(jf.name || '')) {
+            const parent = jobFunctions.find(
+              (j: any) => j.name === 'Meter' && (jf.team_id == null || j.team_id === jf.team_id)
+            )
+            if (parent && preferredAssignmentsMap[empId]?.[parent.id]) score += 10000
+          }
+
+          empOptions.push({jfId, demandWindow: dw, score})
+        }
+      }
+
+      if (empOptions.length > 0) {
+        candidates.push({empId, options: empOptions})
+      }
+    }
+
+    if (candidates.length === 0) break
+
+    // Most constrained first (fewest distinct function options)
+    candidates.sort((a, b) => a.options.length - b.options.length)
+    const top = candidates[0]
+    if (!top) break
+    const {empId, options} = top
+
+    // Best option: highest demand score
+    options.sort((a: CandidateOption, b: CandidateOption) => b.score - a.score)
+    const best = options[0]
+    if (!best) break
+
+    allAssignments.push({empId, jfId: best.jfId, start: best.demandWindow.start, end: best.demandWindow.end})
+    decrementDemand(best.jfId, best.demandWindow.start, best.demandWindow.end)
+    useEmpTime(empId, best.demandWindow.start, best.demandWindow.end)
+  }
 
   // STEP 3: Detect gaps
   for (const [jfId, hours] of Object.entries(demand)) {
@@ -472,35 +495,22 @@ const buildSchedule = (
     }
   }
 
-  // STEP 4: Convert to schedule assignments
+  // STEP 4: Convert allAssignments to schedule output
   const jfNameById = new Map<string, string>()
   for (const jf of jobFunctions) {
     jfNameById.set(jf.id, jf.name)
   }
 
   const schedule: ScheduleAssignment[] = []
-  for (const emp of empInfos) {
-    if (emp.amAssigned && emp.amEnd > emp.amStart) {
-      const name = jfNameById.get(emp.amAssigned)
-      if (name) {
-        schedule.push({
-          employee_id: emp.id,
-          job_function: name,
-          start_time: minutesToTime(emp.amStart),
-          end_time: minutesToTime(emp.amEnd),
-        })
-      }
-    }
-    if (emp.pmAssigned && emp.pmStart != null && emp.pmEnd != null) {
-      const name = jfNameById.get(emp.pmAssigned)
-      if (name) {
-        schedule.push({
-          employee_id: emp.id,
-          job_function: name,
-          start_time: minutesToTime(emp.pmStart),
-          end_time: minutesToTime(emp.pmEnd),
-        })
-      }
+  for (const {empId, jfId, start, end} of allAssignments) {
+    const name = jfNameById.get(jfId)
+    if (name && end > start) {
+      schedule.push({
+        employee_id: empId,
+        job_function: name,
+        start_time: minutesToTime(start),
+        end_time: minutesToTime(end),
+      })
     }
   }
 
