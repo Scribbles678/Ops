@@ -374,7 +374,9 @@ const setGridValue = (jfId: string, hour: string, rawValue: string) => {
 const loadGridFromTargets = () => {
   const data: Record<string, number> = {}
   for (const t of targets.value) {
-    data[gridKey(t.job_function_id, t.hour_start)] = t.headcount
+    // DB returns TIME as "HH:MM:SS"; normalize to "HH:MM" to match gridHours keys
+    const hour = typeof t.hour_start === 'string' ? t.hour_start.substring(0, 5) : t.hour_start
+    data[gridKey(t.job_function_id, hour)] = t.headcount
   }
   gridData.value = { ...data }
   originalGridData.value = { ...data }
