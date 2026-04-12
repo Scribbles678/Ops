@@ -207,6 +207,177 @@
               {{ savingRules ? 'Saving...' : 'Save Rules' }}
             </button>
           </div>
+
+          <!-- Blocked Dates -->
+          <div class="pt-5 mt-3 border-t border-gray-200">
+            <h3 class="text-base font-semibold text-gray-900">Blocked Dates</h3>
+            <p class="text-sm text-gray-500 mt-0.5 mb-3">
+              PTO, partial-day PTO, and leave-early requests on these dates are auto-rejected.
+            </p>
+
+            <div class="flex flex-wrap gap-2 mb-3">
+              <button
+                type="button"
+                @click="openAddDateModal"
+                class="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+              >+ Add Date</button>
+              <button
+                type="button"
+                @click="openQuarterEndModal"
+                class="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+              >+ Add Quarter-End Block</button>
+              <button
+                type="button"
+                @click="openMonthEndModal"
+                class="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+              >+ Add Month-End Block</button>
+            </div>
+
+            <div v-if="blockedDates.length === 0" class="text-sm text-gray-500 italic">
+              No blocked dates configured.
+            </div>
+            <div v-else class="overflow-x-auto border border-gray-200 rounded-md">
+              <table class="min-w-full divide-y divide-gray-100 text-sm">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-3 py-2 text-left font-medium text-gray-600">Date</th>
+                    <th class="px-3 py-2 text-left font-medium text-gray-600">Reason</th>
+                    <th class="px-3 py-2 text-right font-medium text-gray-600"></th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 bg-white">
+                  <tr v-for="bd in blockedDates" :key="bd.id">
+                    <td class="px-3 py-2 text-gray-800">{{ formatBlockedDate(bd.blocked_date) }}</td>
+                    <td class="px-3 py-2 text-gray-600">{{ bd.reason || '—' }}</td>
+                    <td class="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        @click="handleRemoveBlockedDate(bd.id)"
+                        class="text-red-600 hover:text-red-800 text-xs"
+                      >Remove</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <p v-if="blockedDatesError" class="mt-2 text-sm text-red-600">{{ blockedDatesError }}</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Add Single Date Modal -->
+      <div v-if="showAddDateModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showAddDateModal = false">
+        <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
+          <h3 class="text-lg font-semibold mb-3">Add Blocked Date</h3>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+              <input v-model="singleDateForm.date" type="date" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Reason (optional)</label>
+              <input v-model="singleDateForm.reason" type="text" placeholder="e.g. Year-end close" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+            </div>
+          </div>
+          <div class="flex justify-end gap-2 mt-4">
+            <button type="button" @click="showAddDateModal = false" class="px-3 py-1.5 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm">Cancel</button>
+            <button type="button" @click="submitSingleDate" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">Add</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quarter-End Modal -->
+      <div v-if="showQuarterEndModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showQuarterEndModal = false">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <h3 class="text-lg font-semibold mb-1">Add Quarter-End Block</h3>
+          <p class="text-sm text-gray-500 mb-3">Block the last N business days (Mon–Fri) of each selected quarter.</p>
+          <div class="space-y-3">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Year</label>
+                <input v-model.number="periodForm.year" type="number" min="2000" max="2100" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Business days</label>
+                <input v-model.number="periodForm.days" type="number" min="1" max="20" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">Quarters</label>
+              <div class="flex flex-wrap gap-2">
+                <label v-for="q in [1, 2, 3, 4]" :key="q" class="flex items-center gap-1.5 text-sm">
+                  <input type="checkbox" :value="q" v-model="periodForm.quarters" class="h-4 w-4" />
+                  Q{{ q }}
+                </label>
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Reason (optional)</label>
+              <input v-model="periodForm.reason" type="text" placeholder="e.g. Quarter-end close" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+            </div>
+            <div v-if="periodPreview.length > 0" class="bg-gray-50 border border-gray-200 rounded-md p-2 max-h-40 overflow-y-auto">
+              <p class="text-xs font-medium text-gray-600 mb-1">Preview ({{ periodPreview.length }} date{{ periodPreview.length === 1 ? '' : 's' }}):</p>
+              <ul class="text-xs text-gray-700 space-y-0.5">
+                <li v-for="d in periodPreview" :key="d">{{ formatBlockedDate(d) }}</li>
+              </ul>
+            </div>
+          </div>
+          <div class="flex justify-end gap-2 mt-4">
+            <button type="button" @click="showQuarterEndModal = false" class="px-3 py-1.5 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm">Cancel</button>
+            <button type="button" @click="submitQuarterEnd" :disabled="periodPreview.length === 0" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm disabled:opacity-50">
+              Add {{ periodPreview.length }} date{{ periodPreview.length === 1 ? '' : 's' }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Month-End Modal -->
+      <div v-if="showMonthEndModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" @click.self="showMonthEndModal = false">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <h3 class="text-lg font-semibold mb-1">Add Month-End Block</h3>
+          <p class="text-sm text-gray-500 mb-3">Block the last N business days (Mon–Fri) of each selected month.</p>
+          <div class="space-y-3">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Year</label>
+                <input v-model.number="periodForm.year" type="number" min="2000" max="2100" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Business days</label>
+                <input v-model.number="periodForm.days" type="number" min="1" max="20" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">Months</label>
+              <div class="grid grid-cols-4 gap-1.5">
+                <label v-for="m in 12" :key="m" class="flex items-center gap-1 text-sm">
+                  <input type="checkbox" :value="m" v-model="periodForm.months" class="h-4 w-4" />
+                  {{ monthShort(m) }}
+                </label>
+              </div>
+              <div class="flex gap-2 mt-2 text-xs">
+                <button type="button" @click="periodForm.months = [1,2,3,4,5,6,7,8,9,10,11,12]" class="text-blue-600 hover:text-blue-800">All</button>
+                <button type="button" @click="periodForm.months = []" class="text-gray-500 hover:text-gray-700">None</button>
+              </div>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Reason (optional)</label>
+              <input v-model="periodForm.reason" type="text" placeholder="e.g. Month-end close" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+            </div>
+            <div v-if="periodPreview.length > 0" class="bg-gray-50 border border-gray-200 rounded-md p-2 max-h-40 overflow-y-auto">
+              <p class="text-xs font-medium text-gray-600 mb-1">Preview ({{ periodPreview.length }} date{{ periodPreview.length === 1 ? '' : 's' }}):</p>
+              <ul class="text-xs text-gray-700 space-y-0.5">
+                <li v-for="d in periodPreview" :key="d">{{ formatBlockedDate(d) }}</li>
+              </ul>
+            </div>
+          </div>
+          <div class="flex justify-end gap-2 mt-4">
+            <button type="button" @click="showMonthEndModal = false" class="px-3 py-1.5 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm">Cancel</button>
+            <button type="button" @click="submitMonthEnd" :disabled="periodPreview.length === 0" class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm disabled:opacity-50">
+              Add {{ periodPreview.length }} date{{ periodPreview.length === 1 ? '' : 's' }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -698,6 +869,113 @@ const ruleFields = ref({
 const savingRules = ref(false)
 const teamSettingsSuccess = ref('')
 
+// Blocked dates state
+const {
+  blockedDates,
+  error: blockedDatesError,
+  fetchBlockedDates,
+  addBlockedDates,
+  removeBlockedDate,
+  buildQuarterEndDates,
+  buildMonthEndDates,
+} = useTeamBlockedDates()
+
+const showAddDateModal = ref(false)
+const showQuarterEndModal = ref(false)
+const showMonthEndModal = ref(false)
+
+const singleDateForm = ref({ date: '', reason: '' })
+const periodForm = ref({
+  year: new Date().getFullYear(),
+  quarters: [1, 2, 3, 4] as number[],
+  months: [] as number[],
+  days: 5,
+  reason: ''
+})
+
+const monthShort = (m: number): string => {
+  return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1] || ''
+}
+
+const formatBlockedDate = (dateStr: string | null | undefined): string => {
+  if (!dateStr) return ''
+  const datePart = String(dateStr).split('T')[0]
+  const [y, m, d] = datePart.split('-').map(Number)
+  if (!y || !m || !d) return String(dateStr)
+  const date = new Date(y, m - 1, d)
+  return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+const periodPreview = computed<string[]>(() => {
+  if (showQuarterEndModal.value) {
+    if (!periodForm.value.year || !periodForm.value.days || periodForm.value.quarters.length === 0) return []
+    return buildQuarterEndDates(periodForm.value.year, periodForm.value.quarters, periodForm.value.days)
+  }
+  if (showMonthEndModal.value) {
+    if (!periodForm.value.year || !periodForm.value.days || periodForm.value.months.length === 0) return []
+    return buildMonthEndDates(periodForm.value.year, periodForm.value.months, periodForm.value.days)
+  }
+  return []
+})
+
+const openAddDateModal = () => {
+  singleDateForm.value = { date: '', reason: '' }
+  showAddDateModal.value = true
+}
+
+const openQuarterEndModal = () => {
+  periodForm.value = {
+    year: new Date().getFullYear(),
+    quarters: [1, 2, 3, 4],
+    months: [],
+    days: 5,
+    reason: 'Quarter-end close',
+  }
+  showQuarterEndModal.value = true
+}
+
+const openMonthEndModal = () => {
+  periodForm.value = {
+    year: new Date().getFullYear(),
+    quarters: [],
+    months: [],
+    days: 3,
+    reason: 'Month-end close',
+  }
+  showMonthEndModal.value = true
+}
+
+const submitSingleDate = async () => {
+  if (!singleDateForm.value.date) return
+  try {
+    await addBlockedDates([singleDateForm.value.date], singleDateForm.value.reason || null)
+    showAddDateModal.value = false
+  } catch { /* error shown by composable */ }
+}
+
+const submitQuarterEnd = async () => {
+  const dates = periodPreview.value
+  if (dates.length === 0) return
+  try {
+    await addBlockedDates(dates, periodForm.value.reason || null)
+    showQuarterEndModal.value = false
+  } catch { /* error shown by composable */ }
+}
+
+const submitMonthEnd = async () => {
+  const dates = periodPreview.value
+  if (dates.length === 0) return
+  try {
+    await addBlockedDates(dates, periodForm.value.reason || null)
+    showMonthEndModal.value = false
+  } catch { /* error shown by composable */ }
+}
+
+const handleRemoveBlockedDate = async (id: string) => {
+  if (!confirm('Remove this blocked date?')) return
+  await removeBlockedDate(id)
+}
+
 // Password change state
 const currentPassword = ref('')
 const newPassword = ref('')
@@ -1082,6 +1360,7 @@ onMounted(async () => {
       ownTeamData.value.team_id = userProfile.value?.team_id || ''
       if (user.value?.is_admin || user.value?.is_super_admin) {
         await loadRequestRules()
+        await fetchBlockedDates()
       }
       if (isSuperAdmin.value) {
         await Promise.all([fetchUsers(), fetchTeams()])

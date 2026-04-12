@@ -154,6 +154,22 @@ export default defineEventHandler(async (event) => {
       ruleResults['max_shift_swaps_per_day'] = (countResult.rows[0] as any).cnt < maxSwapsPerDay
     }
 
+    // Rule 6: Date is not blocked (PTO / leave-early only)
+    let blockedReason: string | null = null
+    if (['pto_full_day', 'pto_partial', 'leave_early'].includes(request_type)) {
+      const blockedResult = await client.query(
+        `SELECT reason FROM team_blocked_dates
+         WHERE team_id = $1 AND blocked_date = $2
+         LIMIT 1`,
+        [teamId, request_date]
+      )
+      const isBlocked = blockedResult.rows.length > 0
+      ruleResults['date_not_blocked'] = !isBlocked
+      if (isBlocked) {
+        blockedReason = (blockedResult.rows[0] as any).reason || null
+      }
+    }
+
     // Determine status
     const allPassed = Object.values(ruleResults).every(v => v === true)
     const status = allPassed ? 'approved' : 'rejected'
@@ -168,6 +184,9 @@ export default defineEventHandler(async (event) => {
         'max_shift_swap_per_day': 'Max shift change requests for the day reached',
         'max_pto_hours_per_day': 'Team PTO hours limit for the day exceeded',
         'max_shift_swaps_per_day': 'Max shift swaps for the day exceeded',
+        'date_not_blocked': blockedReason
+          ? `Requests not allowed on this date: ${blockedReason}`
+          : 'Requests not allowed on this date',
       }
       rejectionReason = failed.map(k => labels[k] || k).join('; ')
     }
