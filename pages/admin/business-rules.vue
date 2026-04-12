@@ -326,10 +326,15 @@ const gridHours = computed(() => {
   return hours
 })
 
-// Job functions for the grid (active, exclude individual Meter N — use parent Meter)
+// Job functions for the grid (active, exclude individual Meter N — use parent Meter,
+// and exclude any functions marked as exclude_from_targets)
 const gridJobFunctions = computed(() => {
   return [...(jobFunctions.value || [])]
-    .filter(jf => jf.is_active !== false && !/^Meter [0-9]+$/.test(jf.name || ''))
+    .filter(jf =>
+      jf.is_active !== false &&
+      !jf.exclude_from_targets &&
+      !/^Meter [0-9]+$/.test(jf.name || '')
+    )
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
 })
 

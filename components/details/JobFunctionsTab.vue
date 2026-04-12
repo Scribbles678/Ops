@@ -35,6 +35,9 @@
               <p class="text-[11px] md:text-xs text-gray-600">
                 Rate: {{ jobFunction.productivity_rate || 'N/A' }} cartons/hour
               </p>
+              <span v-if="jobFunction.exclude_from_targets" class="inline-block mt-0.5 text-[10px] md:text-[11px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                Excluded from targets grid
+              </span>
             </div>
           </div>
           <div class="flex space-x-2">
@@ -104,6 +107,19 @@
             />
           </div>
 
+          <div class="flex items-center space-x-2.5">
+            <input
+              id="exclude_from_targets"
+              v-model="formData.exclude_from_targets"
+              type="checkbox"
+              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label for="exclude_from_targets" class="font-medium text-gray-700">
+              Exclude from staffing targets grid
+              <span class="block text-[11px] font-normal text-gray-500">Use for roles handled by Required Assignments (e.g. Coordinator, TL)</span>
+            </label>
+          </div>
+
           <div class="flex justify-end space-x-2.5 pt-3">
             <button
               type="button"
@@ -134,7 +150,8 @@ const formData = ref({
   name: '',
   color_code: '#3B82F6',
   productivity_rate: null,
-  sort_order: 0
+  sort_order: 0,
+  exclude_from_targets: false
 })
 
 onMounted(() => {
@@ -149,7 +166,8 @@ const openAddModal = () => {
     name: '',
     color_code: '#3B82F6',
     productivity_rate: null,
-    sort_order: jobFunctionsList.value.length
+    sort_order: jobFunctionsList.value.length,
+    exclude_from_targets: false
   }
   showModal.value = true
 }
@@ -160,7 +178,8 @@ const openEditModal = (jobFunction: any) => {
     name: jobFunction.name,
     color_code: jobFunction.color_code,
     productivity_rate: jobFunction.productivity_rate,
-    sort_order: jobFunction.sort_order
+    sort_order: jobFunction.sort_order,
+    exclude_from_targets: jobFunction.exclude_from_targets ?? false
   }
   showModal.value = true
 }
