@@ -381,18 +381,16 @@ const buildSchedule = (
   // with remaining demand they can cover), then assigns them to whichever function
   // fills the most unmet hours in their shift block.
   const assignHalf = (half: 'am' | 'pm') => {
-    const skipped = new Set<string>() // employees with no fillable demand this pass
-    let madeAssignment = true
+    const skipped = new Set<string>() // employees with no fillable demand
 
-    while (madeAssignment) {
-      madeAssignment = false
-
+    while (true) {
       const unassigned = empInfos.filter(emp => {
         if (skipped.has(emp.id)) return false
         if (half === 'am') return emp.amAssigned == null
         return emp.pmAssigned == null && emp.pmStart != null
       })
 
+      // All employees are either assigned or skipped — done
       if (unassigned.length === 0) break
 
       // Score each employee: count functions with remaining demand they can cover
@@ -412,6 +410,7 @@ const buildSchedule = (
 
       const { emp, start, end, hours, options } = scored[0]
 
+      // This employee has no demand to fill right now — park them and move on
       if (options.length === 0) {
         skipped.add(emp.id)
         continue
@@ -455,7 +454,6 @@ const buildSchedule = (
       else emp.pmAssigned = bestJfId
 
       decrementDemand(bestJfId, start, end)
-      madeAssignment = true
     }
   }
 
