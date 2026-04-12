@@ -73,7 +73,7 @@
         </div>
 
         <!-- AI Generated Schedule -->
-        <div class="card hover:shadow-lg transition-all cursor-pointer" @click="generateAISchedule" :class="{ 'opacity-50 cursor-not-allowed': generating }">
+        <div class="card hover:shadow-lg transition-all cursor-pointer" @click="openBuildReview" :class="{ 'opacity-50 cursor-not-allowed': generating }">
           <div class="text-center py-8">
             <div class="bg-purple-100 rounded-full p-6 mb-4 mx-auto w-20 h-20 flex items-center justify-center">
               <svg v-if="!generating" class="w-10 h-10 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -109,18 +109,150 @@
         </div>
       </div>
 
-      <!-- Manage Business Rules Button -->
-      <div class="text-center mt-6">
+      <!-- Business Rules shortcut -->
+      <div class="flex justify-center gap-4 mt-6">
         <NuxtLink
           to="/admin/business-rules"
-          class="inline-flex items-center px-6 py-3 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition"
+          class="inline-flex items-center px-5 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition"
         >
-          <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          Manage Staffing Targets
+          Business Rules &amp; Targets
         </NuxtLink>
+        <NuxtLink
+          to="/pto-calendar"
+          class="inline-flex items-center px-5 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition"
+        >
+          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          PTO Calendar
+        </NuxtLink>
+      </div>
+
+      <!-- Build Review Modal -->
+      <div v-if="showBuildReview" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl">
+          <!-- Header -->
+          <div class="flex items-center justify-between mb-1">
+            <h3 class="text-xl font-bold text-gray-800">Build Schedule</h3>
+            <button @click="showBuildReview = false" class="text-gray-400 hover:text-gray-600">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          <p class="text-sm text-gray-500 mb-5">{{ formatDate(selectedDate || '') }}</p>
+
+          <!-- Loading -->
+          <div v-if="buildReviewLoading" class="py-10 text-center text-gray-500">
+            <div class="flex justify-center mb-3">
+              <svg class="animate-spin h-8 w-8 text-purple-500" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
+            <p class="text-sm">Checking schedule inputs…</p>
+          </div>
+
+          <!-- Preflight checklist -->
+          <div v-else class="space-y-2.5 mb-5">
+
+            <!-- Staffing Targets -->
+            <div class="flex items-center justify-between p-3.5 rounded-lg"
+              :class="reviewData.staffingFunctionsCount === 0 ? 'bg-red-50' : 'bg-green-50'">
+              <div class="flex items-center space-x-3">
+                <span class="text-xl leading-none">{{ reviewData.staffingFunctionsCount === 0 ? '🔴' : '✅' }}</span>
+                <div>
+                  <p class="text-sm font-semibold text-gray-800">Staffing Targets</p>
+                  <p class="text-xs text-gray-500 mt-0.5">
+                    {{ reviewData.staffingFunctionsCount === 0
+                      ? 'No targets configured — schedule cannot be built'
+                      : `${reviewData.staffingFunctionsCount} job function${reviewData.staffingFunctionsCount === 1 ? '' : 's'} with headcount targets` }}
+                  </p>
+                </div>
+              </div>
+              <NuxtLink to="/admin/business-rules" @click="showBuildReview = false"
+                class="text-xs text-blue-600 hover:underline font-medium shrink-0 ml-3">Edit →</NuxtLink>
+            </div>
+
+            <!-- Required Assignments -->
+            <div class="flex items-center justify-between p-3.5 rounded-lg"
+              :class="reviewData.requiredCount === 0 ? 'bg-yellow-50' : 'bg-green-50'">
+              <div class="flex items-center space-x-3">
+                <span class="text-xl leading-none">{{ reviewData.requiredCount === 0 ? '⚠️' : '✅' }}</span>
+                <div>
+                  <p class="text-sm font-semibold text-gray-800">Required Assignments</p>
+                  <p class="text-xs text-gray-500 mt-0.5">
+                    {{ reviewData.requiredCount === 0
+                      ? 'None pinned — all roles filled by demand only'
+                      : `${reviewData.requiredCount} pinned assignment${reviewData.requiredCount === 1 ? '' : 's'} (e.g. Coordinator, TL)` }}
+                  </p>
+                </div>
+              </div>
+              <NuxtLink to="/admin/business-rules" @click="showBuildReview = false"
+                class="text-xs text-blue-600 hover:underline font-medium shrink-0 ml-3">Edit →</NuxtLink>
+            </div>
+
+            <!-- PTO -->
+            <div class="flex items-center justify-between p-3.5 rounded-lg"
+              :class="reviewData.ptoCount === 0 ? 'bg-gray-50' : 'bg-blue-50'">
+              <div class="flex items-center space-x-3">
+                <span class="text-xl leading-none">{{ reviewData.ptoCount === 0 ? '✅' : 'ℹ️' }}</span>
+                <div>
+                  <p class="text-sm font-semibold text-gray-800">PTO</p>
+                  <p class="text-xs text-gray-500 mt-0.5">
+                    {{ reviewData.ptoCount === 0
+                      ? 'No employees on PTO this day'
+                      : `${reviewData.ptoCount} employee${reviewData.ptoCount === 1 ? '' : 's'} on PTO — excluded or adjusted automatically` }}
+                  </p>
+                </div>
+              </div>
+              <NuxtLink to="/pto-calendar" @click="showBuildReview = false"
+                class="text-xs text-blue-600 hover:underline font-medium shrink-0 ml-3">View →</NuxtLink>
+            </div>
+
+            <!-- Active Employees -->
+            <div class="flex items-center justify-between p-3.5 rounded-lg"
+              :class="reviewData.activeEmployeesCount === 0 ? 'bg-red-50' : 'bg-green-50'">
+              <div class="flex items-center space-x-3">
+                <span class="text-xl leading-none">{{ reviewData.activeEmployeesCount === 0 ? '🔴' : '✅' }}</span>
+                <div>
+                  <p class="text-sm font-semibold text-gray-800">Active Employees</p>
+                  <p class="text-xs text-gray-500 mt-0.5">
+                    {{ reviewData.activeEmployeesCount === 0
+                      ? 'No active employees found — schedule cannot be built'
+                      : `${reviewData.activeEmployeesCount} active employee${reviewData.activeEmployeesCount === 1 ? '' : 's'} will be considered` }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Blocker message -->
+          <div v-if="!buildReviewLoading && buildReviewHasBlockers"
+            class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+            <p class="text-sm text-red-700">Resolve the issues above before building.</p>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex justify-end space-x-3 pt-1">
+            <button @click="showBuildReview = false"
+              class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
+              Cancel
+            </button>
+            <button
+              @click="confirmAndBuild"
+              :disabled="buildReviewLoading || buildReviewHasBlockers"
+              class="px-5 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
+              Build Schedule →
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Loading Modal -->
@@ -271,6 +403,10 @@ const { copySchedule } = useSchedule()
 const { logout } = useAuth()
 const { fetchJobFunctions } = useJobFunctions()
 const { generateAISchedule: generateAIScheduleFromBuilder, applyAISchedule } = useAIScheduleBuilder()
+const { fetchTargets } = useStaffingTargets()
+const { fetchPreferredAssignments } = usePreferredAssignments()
+const { fetchPTOForDate } = usePTO()
+const { fetchEmployees } = useEmployees()
 
 // Tomorrow's date
 const tomorrowDate = computed(() => {
@@ -310,6 +446,19 @@ const showWarningsModal = ref(false)
 const scheduleWarnings = ref<string[]>([])
 const scheduleGaps = ref<{ job_function_name: string; hour: string; shortfall: number }[]>([])
 
+// Build Review state
+const showBuildReview = ref(false)
+const buildReviewLoading = ref(false)
+const reviewData = ref({
+  staffingFunctionsCount: 0,
+  requiredCount: 0,
+  ptoCount: 0,
+  activeEmployeesCount: 0,
+})
+const buildReviewHasBlockers = computed(
+  () => reviewData.value.staffingFunctionsCount === 0 || reviewData.value.activeEmployeesCount === 0
+)
+
 // Notification modal state
 const showNotificationModal = ref(false)
 const notificationMessage = ref('')
@@ -345,6 +494,43 @@ const formatDate = (dateString: string) => {
     month: 'long', 
     day: 'numeric' 
   })
+}
+
+const openBuildReview = async () => {
+  showBuildReview.value = true
+  buildReviewLoading.value = true
+  reviewData.value = { staffingFunctionsCount: 0, requiredCount: 0, ptoCount: 0, activeEmployeesCount: 0 }
+
+  try {
+    const [targets, assignments, ptoDays, employees] = await Promise.all([
+      fetchTargets(),
+      fetchPreferredAssignments(),
+      fetchPTOForDate(selectedDate.value || ''),
+      fetchEmployees(true),
+    ])
+
+    const targetsList = Array.isArray(targets) ? targets : []
+    const functionsWithTargets = new Set(
+      targetsList.filter((t: any) => (t.headcount ?? 0) > 0).map((t: any) => t.job_function_id)
+    )
+    reviewData.value.staffingFunctionsCount = functionsWithTargets.size
+
+    const assignmentsList = Array.isArray(assignments) ? assignments : []
+    reviewData.value.requiredCount = assignmentsList.filter((a: any) => a.is_required).length
+
+    reviewData.value.ptoCount = Array.isArray(ptoDays) ? ptoDays.length : 0
+
+    reviewData.value.activeEmployeesCount = Array.isArray(employees) ? employees.length : 0
+  } catch (e) {
+    console.error('Error loading build review data:', e)
+  } finally {
+    buildReviewLoading.value = false
+  }
+}
+
+const confirmAndBuild = () => {
+  showBuildReview.value = false
+  generateAISchedule()
 }
 
 const copyTodaySchedule = async () => {
