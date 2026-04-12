@@ -38,6 +38,7 @@
       <div class="flex items-center gap-4 mb-4 text-xs">
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-green-500 inline-block"></span> Approved</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-yellow-400 inline-block"></span> Pending</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-red-200 border border-red-400 inline-block"></span> Blocked (no requests allowed)</span>
       </div>
 
       <!-- Loading -->
@@ -60,9 +61,19 @@
           <div
             v-for="day in weekDays"
             :key="day.date"
-            class="p-1.5 border-r last:border-r-0 space-y-1"
-            :class="day.isToday ? 'bg-blue-50/30' : ''"
+            class="p-1.5 border-r last:border-r-0 space-y-1 relative"
+            :class="[
+              day.isToday ? 'bg-blue-50/30' : '',
+              getBlockForDate(day.date) ? 'bg-red-50' : ''
+            ]"
           >
+            <div
+              v-if="getBlockForDate(day.date)"
+              class="text-[10px] font-semibold text-red-700 bg-red-100 border border-red-200 rounded px-1.5 py-0.5 mb-1"
+              :title="getBlockForDate(day.date)?.reason || 'No requests allowed'"
+            >
+              🚫 Blocked<span v-if="getBlockForDate(day.date)?.reason">: {{ getBlockForDate(day.date)?.reason }}</span>
+            </div>
             <div
               v-for="entry in getEntriesForDate(day.date)"
               :key="entry.id"
@@ -93,13 +104,18 @@
             class="min-h-[80px] p-1 border-r border-b last:border-r-0"
             :class="[
               day.isCurrentMonth ? '' : 'bg-gray-50/50',
-              day.isToday ? 'bg-blue-50/40' : ''
+              day.isToday ? 'bg-blue-50/40' : '',
+              getBlockForDate(day.date) ? 'bg-red-50' : ''
             ]"
+            :title="getBlockForDate(day.date) ? `Blocked: ${getBlockForDate(day.date)?.reason || 'No requests allowed'}` : ''"
           >
-            <div class="text-xs mb-0.5" :class="[
-              day.isToday ? 'font-bold text-blue-600' : day.isCurrentMonth ? 'text-gray-700' : 'text-gray-400'
-            ]">
-              {{ day.dayNum }}
+            <div class="flex items-center justify-between mb-0.5">
+              <span class="text-xs" :class="[
+                day.isToday ? 'font-bold text-blue-600' : day.isCurrentMonth ? 'text-gray-700' : 'text-gray-400'
+              ]">
+                {{ day.dayNum }}
+              </span>
+              <span v-if="getBlockForDate(day.date)" class="text-[9px] text-red-600 font-semibold">🚫</span>
             </div>
             <div class="space-y-0.5">
               <div
@@ -238,6 +254,7 @@
 <script setup lang="ts">
 const { user } = useAuth()
 const { fetchRequests, requests, overrideRequest, cancelRequest, loading } = useScheduleRequests()
+const { blockedDates, fetchBlockedDates } = useTeamBlockedDates()
 
 const viewMode = ref<'week' | 'month'>('week')
 const referenceDate = ref(new Date())
@@ -381,6 +398,19 @@ const getEntriesForDate = (date: string): CalendarEntry[] => {
   return entriesByDate.value[date] || []
 }
 
+const blockedByDate = computed(() => {
+  const map: Record<string, { reason: string | null }> = {}
+  for (const b of blockedDates.value) {
+    const d = typeof b.blocked_date === 'string' ? b.blocked_date.split('T')[0] : b.blocked_date
+    if (d) map[d] = { reason: b.reason }
+  }
+  return map
+})
+
+const getBlockForDate = (date: string): { reason: string | null } | null => {
+  return blockedByDate.value[date] || null
+}
+
 // Requests lists
 const allRequests = computed(() => requests.value)
 const pendingRequests = computed(() => requests.value.filter(r => r.status === 'pending'))
@@ -424,6 +454,7 @@ const loadCalendar = async () => {
       params: { date_from: dateFrom.value, date_to: dateTo.value },
     }),
     fetchRequests({ date_from: dateFrom.value, date_to: dateTo.value }),
+    fetchBlockedDates(),
   ])
   calendarData.value = calData
 }

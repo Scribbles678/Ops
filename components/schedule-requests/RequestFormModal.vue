@@ -78,18 +78,31 @@
               <div
                 v-for="day in weekAvailability"
                 :key="day.date"
-                class="text-center rounded-md py-1.5 px-1 cursor-pointer transition-colors border"
+                class="text-center rounded-md py-1.5 px-1 transition-colors border"
                 :class="[
-                  form.request_date === day.date
-                    ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-300'
-                    : 'border-transparent hover:bg-gray-100',
+                  day.isBlocked
+                    ? 'bg-gray-100 border-gray-300 cursor-not-allowed opacity-70'
+                    : form.request_date === day.date
+                      ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-300 cursor-pointer'
+                      : 'border-transparent hover:bg-gray-100 cursor-pointer',
                   day.isToday ? 'font-bold' : ''
                 ]"
-                @click="form.request_date = day.date"
+                :title="day.isBlocked ? `Blocked: ${day.blockReason || 'No requests allowed'}` : ''"
+                @click="day.isBlocked ? null : (form.request_date = day.date)"
               >
                 <div class="text-[10px] text-gray-500">{{ day.dayName }}</div>
-                <div class="text-sm font-semibold" :class="day.isToday ? 'text-blue-600' : 'text-gray-800'">{{ day.dayNum }}</div>
+                <div class="text-sm font-semibold" :class="[
+                  day.isBlocked ? 'text-gray-400 line-through' :
+                  day.isToday ? 'text-blue-600' : 'text-gray-800'
+                ]">{{ day.dayNum }}</div>
                 <div
+                  v-if="day.isBlocked"
+                  class="text-[10px] font-semibold mt-0.5 rounded px-1 text-red-700 bg-red-100"
+                >
+                  Blocked
+                </div>
+                <div
+                  v-else
                   class="text-[10px] font-medium mt-0.5 rounded px-1"
                   :class="day.hoursRemaining > 8
                     ? 'text-green-700 bg-green-100'
@@ -143,6 +156,10 @@
               required
               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
             />
+            <div v-if="selectedDateBlock" class="mt-2 bg-red-50 border border-red-200 rounded-md p-2 text-xs text-red-700">
+              <strong>Date is blocked.</strong> Requests for this date will be auto-rejected.
+              <span v-if="selectedDateBlock.reason">Reason: {{ selectedDateBlock.reason }}</span>
+            </div>
           </div>
 
           <!-- Leave early: new end time -->
@@ -269,6 +286,7 @@ const loggingIn = ref(false)
 const maxPtoHoursPerDay = ref(8)
 const weekRequests = ref<any[]>([])
 const weekPtoDays = ref<any[]>([])
+const weekBlockedDates = ref<any[]>([])
 const weekOffset = ref(0)
 
 // Default date = tomorrow
@@ -315,6 +333,15 @@ const weekLabel = computed(() => {
 })
 
 const todayStr = formatDateStr(new Date())
+
+// Banner shown when selected date is in the blocked list (drives auto-rejection)
+const selectedDateBlock = computed(() => {
+  if (!form.value.request_date) return null
+  return weekBlockedDates.value.find((b) => {
+    const bd = b.blocked_date?.split('T')[0] ?? b.blocked_date
+    return bd === form.value.request_date
+  }) || null
+})
 
 const weekAvailability = computed(() => {
   const mon = selectedWeekMonday.value
@@ -364,12 +391,19 @@ const weekAvailability = computed(() => {
       }
     }
 
+    const blocked = weekBlockedDates.value.find((b) => {
+      const bd = b.blocked_date?.split('T')[0] ?? b.blocked_date
+      return bd === dateStr
+    })
+
     days.push({
       date: dateStr,
       dayName: dayNames[i],
       dayNum: d.getDate(),
       isToday: dateStr === todayStr,
       hoursRemaining: Math.max(0, maxPtoHoursPerDay.value - dayPtoUsed),
+      isBlocked: !!blocked,
+      blockReason: blocked?.reason || null,
     })
   }
   return days
@@ -439,7 +473,7 @@ const loadWeekAvailability = async () => {
     const dateFrom = formatDateStr(mon)
     const dateTo = formatDateStr(sun)
 
-    const [requests, calendar, settings] = await Promise.all([
+    const [requests, calendar, settings, blocked] = await Promise.all([
       $fetch<any[]>('/api/schedule-requests', {
         params: { date_from: dateFrom, date_to: dateTo },
       }),
@@ -447,10 +481,12 @@ const loadWeekAvailability = async () => {
         params: { date_from: dateFrom, date_to: dateTo },
       }),
       $fetch<any[]>('/api/team-settings'),
+      $fetch<any[]>('/api/team-blocked-dates'),
     ])
 
     weekRequests.value = requests
     weekPtoDays.value = calendar?.pto_days || []
+    weekBlockedDates.value = blocked || []
 
     for (const s of settings) {
       if (s.setting_key === 'max_pto_hours_per_day') {

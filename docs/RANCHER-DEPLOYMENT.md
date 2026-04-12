@@ -1,264 +1,183 @@
 # Rancher Deployment Guide
 
-Step-by-step instructions for deploying the Operations Scheduling app to a Rancher-managed Kubernetes cluster on your work network.
+Deploy the Operations Scheduling app to a Rancher-managed Kubernetes cluster.
 
 ---
 
-## What You're Deploying
+## TL;DR
 
-The app has two pieces that need to run:
+**Two containers, four steps, no manual SQL, no seed scripts.**
 
-1. **App container** - The Nuxt web server (serves the UI and API)
-2. **PostgreSQL database** - Stores all your data (employees, schedules, etc.)
+1. Build & push the app image
+2. Deploy Postgres workload (empty DB — the app will set itself up)
+3. Deploy the app workload with 4 env vars
+4. Point an Ingress at the app service
 
-Plus a one-time **seed script** that creates your first admin login.
+Open the URL → log in as **`admin@example.com` / `admin123`** → change the password.
 
----
-
-## Prerequisites
-
-Before you start, make sure you have:
-
-- [ ] Access to your Rancher dashboard (the web UI where you manage containers)
-- [ ] A container registry your Rancher cluster can pull from (ask IT — could be Harbor, Docker Hub, AWS ECR, etc.)
-- [ ] Docker installed on your local machine (for building the image)
-- [ ] The registry URL and any login credentials for pushing images
+Total deploy time: ~10 minutes. No scripts to run, no SQL to paste.
 
 ---
 
-## Step 1: Build the Docker Image
+## Part 1 — Deployment Steps
 
-Open a terminal in the project folder (`scheduling-app-v2/`) and run:
+### Prerequisites
 
-```powershell
-# Build the image (this compiles the app for production)
+- [ ] Rancher access and a namespace to deploy into
+- [ ] A container registry the cluster can pull from (Harbor, Docker Hub, etc.)
+- [ ] Docker on your local machine to build the image
+
+### Step 1: Build & push the image
+
+From the `scheduling-app-v2/` folder:
+
+```bash
 docker build -t your-registry.example.com/scheduling-app:latest .
-```
-
-Replace `your-registry.example.com` with the actual registry URL from your IT team.
-
-This takes 1-3 minutes. When it finishes you'll see "Successfully built".
-
----
-
-## Step 2: Push the Image to Your Registry
-
-```powershell
-# Log in to your registry (if required)
-docker login your-registry.example.com
-
-# Push the image so Rancher can pull it
 docker push your-registry.example.com/scheduling-app:latest
 ```
 
-If your registry uses a different auth method (like a token), IT can help with the login step.
+### Step 2: Deploy Postgres
 
----
-
-## Step 3: Set Up PostgreSQL in Rancher
-
-You need a PostgreSQL 16 database. Two options:
-
-### Option A: Deploy Postgres as a Workload (simplest)
-
-In Rancher, create a new **Workload** (Deployment):
+In Rancher, create a **Workload** called `scheduling-db`:
 
 | Setting | Value |
 |---------|-------|
-| Name | `scheduling-db` |
 | Image | `postgres:16-alpine` |
 | Port | `5432` (TCP) |
+| Volume mount | PVC ≥ 5 GB mounted at `/var/lib/postgresql/data` |
 
-Add these **environment variables**:
+Environment variables:
 
 | Variable | Value |
 |----------|-------|
 | `POSTGRES_USER` | `postgres` |
-| `POSTGRES_PASSWORD` | (pick a strong password) |
+| `POSTGRES_PASSWORD` | *(strong password)* |
 | `POSTGRES_DB` | `scheduling` |
 
-Add a **persistent volume** mounted at `/var/lib/postgresql/data` so your data survives restarts. In Rancher this is under "Volumes" when editing the workload — create a Persistent Volume Claim (PVC) with at least 5GB.
+> You do **not** need to run any SQL manually — the app will create everything on first boot.
 
-### Option B: Use an Existing Database
+### Step 3: Deploy the app
 
-If your org already has a managed Postgres instance, just get the connection string from your DBA and skip to Step 4.
-
----
-
-## Step 4: Create the Database Schema
-
-You need to run the schema SQL **once** against your new database. This creates all the tables.
-
-**From Rancher:** Open the shell for your `scheduling-db` pod (click the pod → Execute Shell), then run:
-
-```bash
-psql -U postgres -d scheduling
-```
-
-This opens the Postgres prompt. Now copy-paste the **entire contents** of `sql-schema/setup.sql` into the terminal and press Enter. You should see a series of `CREATE TABLE`, `CREATE INDEX`, etc. messages.
-
-Then also run the staffing targets table (this is new and not yet in setup.sql):
-
-```sql
-CREATE TABLE IF NOT EXISTS public.staffing_targets (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  job_function_id uuid NOT NULL,
-  hour_start time WITHOUT TIME ZONE NOT NULL,
-  headcount integer NOT NULL DEFAULT 0,
-  is_active boolean DEFAULT true,
-  team_id uuid NULL,
-  created_at timestamp with time zone NULL DEFAULT now(),
-  updated_at timestamp with time zone NULL DEFAULT now(),
-  CONSTRAINT staffing_targets_pkey PRIMARY KEY (id),
-  CONSTRAINT staffing_targets_unique UNIQUE (job_function_id, hour_start, team_id),
-  CONSTRAINT staffing_targets_job_function_fkey FOREIGN KEY (job_function_id) REFERENCES job_functions(id) ON DELETE CASCADE,
-  CONSTRAINT staffing_targets_team_id_fkey FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
-  CONSTRAINT check_headcount_positive CHECK (headcount >= 0)
-);
-
-CREATE INDEX IF NOT EXISTS idx_staffing_targets_team ON public.staffing_targets USING btree (team_id);
-```
-
-Then apply the incremental migrations from `sql-schema/migrations/` (safe to re-run — all use `IF NOT EXISTS`):
-
-```sql
--- add-coverage-requirements.sql
--- Adds lunch/break coverage flags to job_functions. Used by the Automated
--- Schedule Builder to decide which functions need another trained employee
--- scheduled to cover the primary's lunch/break window.
-ALTER TABLE job_functions
-  ADD COLUMN IF NOT EXISTS lunch_coverage_required boolean NOT NULL DEFAULT false,
-  ADD COLUMN IF NOT EXISTS break_coverage_required boolean NOT NULL DEFAULT false;
-```
-
-Check the `sql-schema/migrations/` folder for any newer migrations added since this guide was last updated and apply each one the same way.
-
-Type `\q` to exit psql when done.
-
----
-
-## Step 5: Run the Seed Script (First-Time Only)
-
-The seed script creates your first admin user so you can log in. You only need to do this **once**.
-
-**From Rancher**, create a one-time **Job** (not a Deployment):
+Create a **Workload** called `scheduling-app`:
 
 | Setting | Value |
 |---------|-------|
-| Name | `scheduling-seed` |
-| Image | `your-registry.example.com/scheduling-app:latest` |
-| Command | `node` |
-| Args | `scripts/seed-first-user.js` |
-| Restart Policy | `Never` |
-
-> **Note:** The seed container uses the same image as the app — it has the seed script built in. Override the command to run the script instead of starting the web server.
-
-Add these **environment variables**:
-
-| Variable | Value | Notes |
-|----------|-------|-------|
-| `DATABASE_URL` | `postgresql://postgres:YOUR_PASSWORD@scheduling-db:5432/scheduling` | Replace `YOUR_PASSWORD` and `scheduling-db` with your actual DB service name |
-| `DATABASE_SSL` | `false` | Use `true` if connecting to an external/managed DB with SSL |
-| `ADMIN_EMAIL` | Your email (e.g. `mike@company.com`) | This is your login |
-| `ADMIN_PASSWORD` | Pick a strong password | You can change this later in the app |
-| `ADMIN_NAME` | Your name (e.g. `Mike Johnson`) | Display name in the app |
-
-The job will run, create the admin user, and exit. Check the logs to confirm it says "Admin user created" (or "already exists" if you run it again — it's safe to re-run).
-
----
-
-## Step 6: Deploy the App
-
-In Rancher, create a new **Workload** (Deployment):
-
-| Setting | Value |
-|---------|-------|
-| Name | `scheduling-app` |
 | Image | `your-registry.example.com/scheduling-app:latest` |
 | Port | `3000` (TCP) |
-| Replicas | `1` (can increase later) |
+| Replicas | `1` |
+| Health check | HTTP GET `/api/health` on port 3000 |
 
-Add these **environment variables**:
+Environment variables (all go on the **app** workload):
 
-| Variable | Value | Notes |
-|----------|-------|-------|
-| `DATABASE_URL` | `postgresql://postgres:YOUR_PASSWORD@scheduling-db:5432/scheduling` | Same as the seed script |
-| `DATABASE_SSL` | `false` | `true` for external/managed DBs |
-| `JWT_SECRET` | A random string, 32+ characters | Used to sign login tokens. Generate one: `openssl rand -base64 32` |
-| `NODE_ENV` | `production` | |
+| Variable | Required | Value |
+|----------|----------|-------|
+| `DATABASE_URL` | **yes** | `postgresql://postgres:YOUR_DB_PASSWORD@scheduling-db:5432/scheduling` |
+| `DATABASE_SSL` | **yes** | `false` |
+| `JWT_SECRET` | **yes** | Generate: `openssl rand -base64 32` |
+| `NODE_ENV` | **yes** | `production` |
+| `ADMIN_EMAIL` | optional | Override the default admin login email |
+| `ADMIN_PASSWORD` | optional | Override the default admin initial password |
+| `ADMIN_NAME` | optional | Display name in the UI (default: `Admin User`) |
 
-The container has a built-in health check at `/api/health` — Rancher will use this to know when the app is ready.
+On first startup the app will:
+1. Create the database schema.
+2. Apply all migrations.
+3. Create a super-admin user.
+
+### Default initial login
+
+If you **don't** set `ADMIN_EMAIL` / `ADMIN_PASSWORD`, the bootstrap creates a default admin:
+
+- **Email:** `admin@example.com`
+- **Password:** `admin123`
+
+This guarantees the app has a working login on first deploy. The pod logs print a warning reminding you to change it immediately via **Settings → Change Password** after the first login.
+
+If you prefer to set your own initial credentials, set the `ADMIN_*` env vars before first boot — the bootstrap uses them instead of the defaults. The env vars are only read when `user_profiles` is empty; after any user exists they're ignored.
+
+Watch the pod logs — you should see lines like:
+```
+[bootstrap] no schema detected — applying setup.sql
+[bootstrap]   ✓ base schema created
+[bootstrap] applying 7 migration(s)
+[bootstrap]   ✓ 001-add-staffing-targets.sql
+...
+[bootstrap]   ✓ first super admin created: admin@yourcompany.com
+[bootstrap] done
+```
+
+### Step 4: Set up the ingress
+
+In Rancher → **Service Discovery** → **Ingresses**:
+
+| Setting | Value |
+|---------|-------|
+| Host | e.g. `scheduling.yourcompany.local` (ask IT for the right hostname) |
+| Path | `/` |
+| Target service | `scheduling-app` |
+| Port | `3000` |
+
+Open the hostname in a browser and log in with the `ADMIN_EMAIL` / `ADMIN_PASSWORD` values.
+
+**You're done.**
 
 ---
 
-## Step 7: Set Up Ingress (Make It Accessible)
+## Updating the App
 
-To access the app from your browser, you need an **Ingress** rule in Rancher:
-
-1. Go to **Service Discovery** > **Ingresses** in your namespace
-2. Create a new Ingress:
-   - **Name**: `scheduling-app`
-   - **Host**: The hostname you want (e.g. `scheduling.yourcompany.local`)
-   - **Path**: `/`
-   - **Target Service**: `scheduling-app`
-   - **Port**: `3000`
-
-Ask IT what hostname/domain to use — they may need to add a DNS record pointing to the Rancher cluster's load balancer IP.
-
-Once the ingress is active, open `http://scheduling.yourcompany.local` in your browser and log in with the admin credentials you set in Step 5.
-
----
-
-## Updating the App (Future Deployments)
-
-When you have a new version to deploy:
-
-```powershell
-# Rebuild with your changes
+```bash
 docker build -t your-registry.example.com/scheduling-app:latest .
-
-# Push to registry
 docker push your-registry.example.com/scheduling-app:latest
 ```
 
-Then in Rancher, go to the `scheduling-app` workload and click **Redeploy**. It will pull the new image and restart.
+Then in Rancher → `scheduling-app` workload → **Redeploy**.
 
-No need to re-run the seed script or base schema.
-
-**Check for new migrations.** Look in `sql-schema/migrations/` for any files added since your last deploy. If there are new ones, open the `scheduling-db` pod shell and apply them:
-
-```bash
-psql -U postgres -d scheduling
-```
-
-Then paste the contents of each new migration file. Migrations are safe to re-run (all use `IF NOT EXISTS` / `COALESCE` patterns), but skipping a required one will cause API errors like *"column X does not exist"* after the app container updates.
+Any new migrations ship with the image and are applied automatically on startup. No manual SQL, no re-seeding.
 
 ---
 
 ## Troubleshooting
 
 ### App won't start / keeps restarting
-- Check the pod logs in Rancher (click the pod → View Logs)
-- Most common cause: `DATABASE_URL` is wrong or the DB isn't reachable
-- Verify the DB service name matches what's in your `DATABASE_URL`
+- **Check the pod logs in Rancher** — the bootstrap plugin logs exactly what it did or which step failed
+- Most common cause: `DATABASE_URL` is wrong or the DB pod isn't reachable
+- If logs say `[bootstrap] FAILED: ...`, the SQL error message will be right there
 
 ### "Connection refused" to database
-- Make sure the Postgres workload is running and healthy
-- The DB service name in `DATABASE_URL` must match the Rancher service name exactly (e.g. `scheduling-db`)
+- Verify the DB pod is running (Rancher → Workloads → `scheduling-db`)
+- The hostname in `DATABASE_URL` must match the DB's service name exactly (`scheduling-db`)
 - Both workloads must be in the **same namespace**
 
 ### Can't log in
-- Verify the seed script ran successfully (check its job logs)
-- Make sure you're using the email/password you set in the seed environment variables
-- Default credentials if you didn't customize: `admin@example.com` / `admin123`
+- Check the app pod logs for `[bootstrap]` lines — did it say it created the admin?
+- If it says `no users exist, but ADMIN_EMAIL / ADMIN_PASSWORD env vars not set`, set them and restart the pod
+- If a user exists but with wrong credentials, log in as super admin and reset their password in **Settings → User Management** (or connect to the DB and run an `UPDATE user_profiles SET password_hash = ... WHERE email = ...`)
 
-### Schema errors or missing tables
-- Re-run `setup.sql` against the database (see Step 4)
-- Check that the `staffing_targets` table was also created
+### Bootstrap skipped migrations
+- Migration files must be in `sql-schema/migrations/` inside the image
+- Confirm the build included them: `docker run --rm your-registry.example.com/scheduling-app:latest ls sql-schema/migrations` (in a debug shell)
 
 ### App is slow or unresponsive
-- Check pod resource limits in Rancher — the app needs at least 256MB RAM
-- Check Postgres performance — add more memory to the DB pod if needed
+- Check pod resource limits — app needs at least 256 MB RAM
+- Check DB performance under load
+
+---
+
+## Environment Variable Reference
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `DATABASE_URL` | **yes** | Postgres connection string |
+| `DATABASE_SSL` | no | `false` for in-cluster DB, `true` for managed DB with TLS |
+| `JWT_SECRET` | **yes** | 32+ random chars for signing login tokens |
+| `NODE_ENV` | recommended | `production` in prod |
+| `ADMIN_EMAIL` | optional | Override default admin email (`admin@example.com`). First-deploy only. |
+| `ADMIN_PASSWORD` | optional | Override default admin password (`admin123`). First-deploy only. |
+| `ADMIN_NAME` | optional | Display name for the admin (default: `Admin User`) |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | optional | For password-reset emails |
+| `APP_URL` | optional | Used in password-reset email links |
+
+`ADMIN_*` vars only matter the first time the app starts with an empty `user_profiles` table. After the admin is created they're ignored and can be removed.
 
 ---
 
@@ -266,11 +185,12 @@ Then paste the contents of each new migration file. Migrations are safe to re-ru
 
 Before going live with real data:
 
-- [ ] Change `JWT_SECRET` to a unique random string (not the dev default)
-- [ ] Change the admin password from the default after first login
-- [ ] Use a strong `POSTGRES_PASSWORD`
-- [ ] Restrict network access to the database (only the app should connect)
-- [ ] Set up regular database backups (Rancher can schedule volume snapshots, or use `pg_dump` via a CronJob)
+- [ ] `JWT_SECRET` is a unique random string (not a dev default)
+- [ ] `POSTGRES_PASSWORD` is strong
+- [ ] `ADMIN_PASSWORD` was changed after first login (Settings → Change Password)
+- [ ] DB is not exposed outside the cluster (only the app pod should reach it)
+- [ ] Ingress uses HTTPS (cert-manager or your corp cert)
+- [ ] PVC snapshots or a `pg_dump` CronJob for regular backups
 
 ---
 
@@ -278,9 +198,93 @@ Before going live with real data:
 
 | What | Where |
 |------|-------|
-| App URL | `http://your-hostname:3000` (or via ingress) |
+| App URL | `http://your-hostname` (via ingress) |
 | Health check | `GET /api/health` |
-| App image | Built from `Dockerfile` in project root |
-| Schema file | `sql-schema/setup.sql` |
-| Seed script | `scripts/seed-first-user.js` |
-| Default login | `admin@example.com` / `admin123` (change these!) |
+| Default login | `admin@example.com` / `admin123` (change immediately after first login) |
+| Schema source | `sql-schema/setup.sql` + `sql-schema/migrations/*.sql` (bundled in image) |
+| Bootstrap logic | `server/plugins/bootstrap.ts` |
+| Auth flow | JWT in HttpOnly cookie, validated by `server/middleware/auth.ts` |
+| All data lives in | the `scheduling-db` Postgres pod's PVC |
+
+---
+
+## Part 2 — Architecture Reference (for IT Q&A)
+
+Use this section to answer infrastructure questions from whoever manages the cluster.
+
+### What is this app?
+
+A self-hosted web application for scheduling distribution-center employees. It is a single-page Vue 3 / Nuxt 4 UI plus a Nitro (Node.js) API server, backed by a single PostgreSQL 16 database. All data stays inside your infrastructure — no third-party services, no external API calls.
+
+### Container images
+
+The deployment uses **two container images total**:
+
+| Image | Source | Purpose |
+|-------|--------|---------|
+| `scheduling-app` | Built in-house from this repo's `Dockerfile` | The full application: web UI + API server. One image, one container. |
+| `postgres:16-alpine` | Official Docker Hub image | The database. |
+
+There is no separate frontend image, no reverse proxy image, no worker image, no cache image. Just the app and a database.
+
+### How the app interacts with the database
+
+- The app connects to Postgres via a connection string (`DATABASE_URL`) over TCP port 5432.
+- Uses the `pg` Node.js library directly — **no ORM**, no migrations framework. Queries are plain parameterized SQL in the API route handlers.
+- A connection pool (max 10 connections) is held inside each app pod.
+- **On container startup**, the app runs a self-bootstrap routine (`server/plugins/bootstrap.ts`) that:
+  1. Creates the schema if the database is empty (from `sql-schema/setup.sql`).
+  2. Applies any pending migrations (files in `sql-schema/migrations/*.sql`, in filename order). All are idempotent.
+  3. Creates the first super-admin user if there are zero users, using the `ADMIN_EMAIL` / `ADMIN_PASSWORD` env vars (falls back to `admin@example.com` / `admin123`).
+  Safe to re-run — uses Postgres advisory locks to prevent races and `IF NOT EXISTS` / `ON CONFLICT DO NOTHING` guards.
+
+### Request flow
+
+```
+Browser ──HTTPS──▶ Rancher Ingress ──▶ scheduling-app pod (port 3000)
+                                                   │
+                                                   │ pg wire protocol (5432)
+                                                   ▼
+                                         scheduling-db pod (Postgres 16)
+                                                   │
+                                                   ▼
+                                         Persistent Volume (PVC)
+```
+
+- Web UI assets are served by the same container that serves the API — they're bundled together by Nuxt at build time.
+- Auth is custom JWT (not OAuth / not SSO). Tokens live in HttpOnly cookies with 8-hour expiry.
+- **No outbound network calls** except the database. (Optional SMTP for password-reset emails if you configure it.)
+
+### Resource footprint
+
+| Component | CPU | RAM | Disk |
+|-----------|-----|-----|------|
+| App pod | ~0.1 core idle, bursts to 0.5 during schedule generation | 256-512 MB | ephemeral |
+| DB pod | ~0.05 core idle | 256-512 MB | 5-10 GB PVC typical |
+
+Scales fine to ~100 concurrent users on a single app pod. Horizontal scaling works (stateless pods), though the DB stays single-instance.
+
+### Persistence
+
+- **All data** lives in Postgres. No files on disk.
+- Back up the Postgres PVC (volume snapshot, `pg_dump` CronJob, etc.) — that's the full backup.
+- App pods are stateless and can be killed/restarted without data loss.
+
+### Network requirements
+
+- Ingress traffic on port 80/443 to the app's port 3000
+- Internal cluster traffic on port 5432 (app pod → db pod), same namespace
+- **No outbound internet access required** (unless you enable SMTP for password resets)
+
+### Security posture
+
+- JWT secret is a runtime env var (`JWT_SECRET`, 32+ chars — generate with `openssl rand -base64 32`)
+- Passwords are bcrypt-hashed in the DB
+- All API routes go through `server/middleware/auth.ts` which validates the JWT cookie
+- Multi-tenant isolation enforced in the API layer via `team_id` pulled from the signed JWT payload
+- Non-root container user (uid 1001, defined in Dockerfile)
+- Rate-limited at the API layer (default 200 req/min, stricter for auth endpoints)
+
+### Updates
+
+Build a new image → push to registry → Redeploy the `scheduling-app` workload. The bootstrap on startup picks up any new migrations automatically. **No manual SQL needed on updates.**

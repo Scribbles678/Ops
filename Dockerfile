@@ -23,6 +23,10 @@ RUN addgroup --system --gid 1001 nodejs \
 # Copy only the built output (Nitro server bundle)
 COPY --from=builder --chown=nuxt:nodejs /app/.output ./
 
+# Schema files used by server/plugins/bootstrap.ts to self-initialize the database
+# on first run and apply migrations on every subsequent boot.
+COPY --from=builder --chown=nuxt:nodejs /app/sql-schema ./sql-schema
+
 USER nuxt
 
 EXPOSE 3000

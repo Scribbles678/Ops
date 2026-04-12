@@ -154,12 +154,16 @@ export default defineEventHandler(async (event) => {
       ruleResults['max_shift_swaps_per_day'] = (countResult.rows[0] as any).cnt < maxSwapsPerDay
     }
 
-    // Rule 6: Date is not blocked (PTO / leave-early only)
+    // Rule 6: Date is not blocked (PTO / leave-early only).
+    // If the employee has a team, check that team's blocked dates.
+    // If the employee has no team (orphaned super-admin-created records), match ANY
+    // team's blocked dates — safer default than silently letting the request through.
     let blockedReason: string | null = null
     if (['pto_full_day', 'pto_partial', 'leave_early'].includes(request_type)) {
       const blockedResult = await client.query(
         `SELECT reason FROM team_blocked_dates
-         WHERE team_id = $1 AND blocked_date = $2
+         WHERE blocked_date = $2
+           AND ($1::uuid IS NULL OR team_id = $1::uuid)
          LIMIT 1`,
         [teamId, request_date]
       )

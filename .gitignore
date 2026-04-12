@@ -32,3 +32,5 @@ logs
 *.njsproj
 *.sln
 *.sw?
+
+scheduling-backup-*.sql
