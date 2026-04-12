@@ -268,7 +268,15 @@ const buildSchedule = (
   }
 
   // Expand fan-out targets
-  const expandedTargets = expandFanOutTargets(staffingTargets, jobFunctions, warnings)
+  // Normalize hour_start: DB returns "HH:MM:SS", algorithm uses "HH:MM"
+  const normalizedTargets = staffingTargets.map(t => ({
+    ...t,
+    hour_start: typeof t.hour_start === 'string' && t.hour_start.length > 5
+      ? t.hour_start.substring(0, 5)
+      : t.hour_start,
+  }))
+
+  const expandedTargets = expandFanOutTargets(normalizedTargets, jobFunctions, warnings)
 
   // Build demand matrix: { jf_id: { hour: headcount } }
   const demand: Record<string, Record<string, number>> = {}
