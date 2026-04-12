@@ -238,7 +238,27 @@ const buildSchedule = (
   // Helper: count training options for an employee (fewer = more constrained)
   const trainingCount = (emp: EmployeeScheduleInfo): number => emp.trainedFunctionIds.length
 
+  // Helper: resolve a job function ID — if it's a Meter parent, pick the child
+  // with the highest remaining demand for the given time block.
+  const resolveMeterChild = (jfId: string, blockStart: number, blockEnd: number): string => {
+    const jf = jobFunctions.find((j: any) => j.id === jfId)
+    if (!jf || jf.name !== 'Meter') return jfId
+    const children = jobFunctions.filter(
+      (j: any) => j.id !== jfId && j.is_active !== false && /^Meter [0-9]+$/.test(j.name || '') &&
+        (jf.team_id == null || j.team_id === jf.team_id)
+    )
+    let bestChild = children[0]
+    let bestDemand = -1
+    for (const child of children) {
+      const d = computeDemandFilled(child.id, blockStart, blockEnd)
+      if (d > bestDemand) { bestDemand = d; bestChild = child }
+    }
+    return bestChild ? bestChild.id : jfId
+  }
+
   // STEP 1: Assign required employees
+  // Supports separate AM and PM functions via am_job_function_id / pm_job_function_id.
+  // Falls back to job_function_id for both halves when specific halves aren't set.
   for (const emp of empInfos) {
     const preferred = preferredAssignmentsMap[emp.id]
     if (!preferred) continue
@@ -246,137 +266,114 @@ const buildSchedule = (
     for (const pa of Object.values(preferred)) {
       if (!pa?.is_required) continue
 
-      const jfId = pa.job_function_id
-      // Check if trained (including Meter parent lookup)
-      if (!isTrainedFor(emp.id, jfId, jobFunctions, trainingData)) continue
+      // Determine the intended function for each half
+      const amJfIdRaw: string = pa.am_job_function_id ?? pa.job_function_id
+      const pmJfIdRaw: string = pa.pm_job_function_id ?? pa.job_function_id
 
-      // For Meter parent requirement, find actual child function to assign
-      const jf = jobFunctions.find((j: any) => j.id === jfId)
-      let assignJfId = jfId
-      if (jf && jf.name === 'Meter') {
-        // Find a Meter N child that has demand
-        const children = jobFunctions.filter(
-          (j: any) => j.id !== jfId && j.is_active !== false && /^Meter [0-9]+$/.test(j.name || '') &&
-            (jf.team_id == null || j.team_id === jf.team_id)
-        )
-        // Pick the child with highest remaining demand
-        let bestChild = children[0]
-        let bestDemand = -1
-        for (const child of children) {
-          const d = computeDemandFilled(child.id, emp.amStart, emp.amEnd)
-          if (d > bestDemand) { bestDemand = d; bestChild = child }
-        }
-        if (bestChild) assignJfId = bestChild.id
-      }
+      // Validate training for AM (using Meter parent lookup)
+      if (!isTrainedFor(emp.id, amJfIdRaw, jobFunctions, trainingData)) continue
 
-      emp.amAssigned = assignJfId
-      decrementDemand(assignJfId, emp.amStart, emp.amEnd)
+      // Resolve Meter parent → best child for each half
+      const amJfId = resolveMeterChild(amJfIdRaw, emp.amStart, emp.amEnd)
+      emp.amAssigned = amJfId
+      decrementDemand(amJfId, emp.amStart, emp.amEnd)
 
       if (emp.pmStart != null && emp.pmEnd != null) {
-        emp.pmAssigned = assignJfId
-        decrementDemand(assignJfId, emp.pmStart, emp.pmEnd)
+        const pmJfId = resolveMeterChild(pmJfIdRaw, emp.pmStart, emp.pmEnd)
+        emp.pmAssigned = pmJfId
+        decrementDemand(pmJfId, emp.pmStart, emp.pmEnd)
       }
-      break // Only one required assignment per employee
+      break // Only one required assignment record per employee
     }
   }
 
-  // STEP 2: Assign remaining employees by demand (AM pass, then PM pass)
+  // STEP 2: Assign remaining employees by demand — hour-by-hour greedy coverage.
+  // Each iteration picks the most-constrained unassigned employee (fewest functions
+  // with remaining demand they can cover), then assigns them to whichever function
+  // fills the most unmet hours in their shift block.
   const assignHalf = (half: 'am' | 'pm') => {
-    // Get all functions with remaining demand for this half
-    const functionDemands: { jfId: string; totalDemand: number }[] = []
-    for (const [jfId, hours] of Object.entries(demand)) {
-      let total = 0
-      for (const [, count] of Object.entries(hours)) {
-        if (count > 0) total += count
-      }
-      if (total > 0) functionDemands.push({ jfId, totalDemand: total })
-    }
-    // Sort by highest demand first
-    functionDemands.sort((a, b) => b.totalDemand - a.totalDemand)
+    const skipped = new Set<string>() // employees with no fillable demand this pass
+    let madeAssignment = true
 
-    for (const { jfId } of functionDemands) {
-      // Find unassigned employees for this half who are trained
-      const candidates = empInfos.filter((emp) => {
-        if (half === 'am' && emp.amAssigned != null) return false
-        if (half === 'pm' && (emp.pmAssigned != null || emp.pmStart == null)) return false
-        return isTrainedFor(emp.id, jfId, jobFunctions, trainingData)
+    while (madeAssignment) {
+      madeAssignment = false
+
+      const unassigned = empInfos.filter(emp => {
+        if (skipped.has(emp.id)) return false
+        if (half === 'am') return emp.amAssigned == null
+        return emp.pmAssigned == null && emp.pmStart != null
       })
 
-      if (candidates.length === 0) continue
+      if (unassigned.length === 0) break
 
-      // Sort: preferred first, then most-constrained (fewest training options)
-      candidates.sort((a, b) => {
-        const aPref = preferredAssignmentsMap[a.id]?.[jfId]
-        const bPref = preferredAssignmentsMap[b.id]?.[jfId]
-        // Check Meter parent preferred too
+      // Score each employee: count functions with remaining demand they can cover
+      const scored = unassigned.map(emp => {
+        const start = half === 'am' ? emp.amStart : emp.pmStart!
+        const end   = half === 'am' ? emp.amEnd   : emp.pmEnd!
+        const hours = getHoursCovered(start, end)
+        const options = Object.keys(demand).filter(jfId =>
+          isTrainedFor(emp.id, jfId, jobFunctions, trainingData) &&
+          hours.some(h => (demand[jfId]?.[h] ?? 0) > 0)
+        )
+        return { emp, start, end, hours, options }
+      })
+
+      // Most constrained first (fewest demand-relevant options)
+      scored.sort((a, b) => a.options.length - b.options.length)
+
+      const { emp, start, end, hours, options } = scored[0]
+
+      if (options.length === 0) {
+        skipped.add(emp.id)
+        continue
+      }
+
+      // Pick the function where this employee fills the most remaining demand hours.
+      // Preferred assignments get a large bonus to ensure they're respected.
+      let bestJfId: string | null = null
+      let bestScore = 0
+
+      for (const jfId of options) {
+        let score = 0
+        for (const h of hours) {
+          score += Math.max(0, demand[jfId]?.[h] ?? 0)
+        }
+
+        // Preferred assignment bonus
+        if (preferredAssignmentsMap[emp.id]?.[jfId]) score += 10000
+
+        // Meter parent preference bonus
         const jf = jobFunctions.find((j: any) => j.id === jfId)
-        let aHasPref = !!aPref
-        let bHasPref = !!bPref
         if (jf && /^Meter [0-9]+$/.test(jf.name || '')) {
           const parent = jobFunctions.find(
             (j: any) => j.name === 'Meter' && (jf.team_id == null || j.team_id === jf.team_id)
           )
-          if (parent) {
-            if (!aHasPref && preferredAssignmentsMap[a.id]?.[parent.id]) aHasPref = true
-            if (!bHasPref && preferredAssignmentsMap[b.id]?.[parent.id]) bHasPref = true
-          }
+          if (parent && preferredAssignmentsMap[emp.id]?.[parent.id]) score += 10000
         }
-        if (aHasPref && !bHasPref) return -1
-        if (!aHasPref && bHasPref) return 1
-        // Most constrained first
-        return trainingCount(a) - trainingCount(b)
-      })
 
-      // Determine how many we need for this function in this half
-      const jfDemand = demand[jfId] || {}
-      let needed = 0
-      for (const [, count] of Object.entries(jfDemand)) {
-        if (count > needed) needed = count  // peak demand
-      }
-
-      // Count already assigned for this function in this half
-      let alreadyAssigned = 0
-      for (const emp of empInfos) {
-        if (half === 'am' && emp.amAssigned === jfId) alreadyAssigned++
-        if (half === 'pm' && emp.pmAssigned === jfId) alreadyAssigned++
-      }
-
-      const toFill = needed - alreadyAssigned
-      if (toFill <= 0) continue
-
-      let filled = 0
-      for (const emp of candidates) {
-        if (filled >= toFill) break
-
-        const start = half === 'am' ? emp.amStart : emp.pmStart!
-        const end = half === 'am' ? emp.amEnd : emp.pmEnd!
-
-        if (half === 'am') {
-          emp.amAssigned = jfId
-        } else {
-          emp.pmAssigned = jfId
+        if (score > bestScore) {
+          bestScore = score
+          bestJfId = jfId
         }
-        decrementDemand(jfId, start, end)
-        filled++
       }
+
+      if (!bestJfId) {
+        skipped.add(emp.id)
+        continue
+      }
+
+      if (half === 'am') emp.amAssigned = bestJfId
+      else emp.pmAssigned = bestJfId
+
+      decrementDemand(bestJfId, start, end)
+      madeAssignment = true
     }
   }
 
   assignHalf('am')
   assignHalf('pm')
 
-  // STEP 3: Fill unassigned halves with Flex
-  const flexJf = jobFunctions.find((jf: any) => jf.name === 'Flex' && jf.is_active !== false)
-  const flexJfId = flexJf?.id || 'flex'
-
-  for (const emp of empInfos) {
-    if (emp.amAssigned == null) emp.amAssigned = flexJfId
-    if (emp.pmStart != null && emp.pmEnd != null && emp.pmAssigned == null) {
-      emp.pmAssigned = flexJfId
-    }
-  }
-
-  // STEP 4: Detect gaps
+  // STEP 3: Detect gaps
   for (const [jfId, hours] of Object.entries(demand)) {
     const jf = jobFunctions.find((j: any) => j.id === jfId)
     const jfName = jf?.name || jfId
@@ -388,7 +385,7 @@ const buildSchedule = (
     }
   }
 
-  // STEP 5: Convert to schedule assignments
+  // STEP 4: Convert to schedule assignments
   const jfNameById = new Map<string, string>()
   for (const jf of jobFunctions) {
     jfNameById.set(jf.id, jf.name)
@@ -397,22 +394,26 @@ const buildSchedule = (
   const schedule: ScheduleAssignment[] = []
   for (const emp of empInfos) {
     if (emp.amAssigned) {
-      const name = jfNameById.get(emp.amAssigned) || 'Flex'
-      schedule.push({
-        employee_id: emp.id,
-        job_function: name,
-        start_time: minutesToTime(emp.amStart),
-        end_time: minutesToTime(emp.amEnd),
-      })
+      const name = jfNameById.get(emp.amAssigned)
+      if (name) {
+        schedule.push({
+          employee_id: emp.id,
+          job_function: name,
+          start_time: minutesToTime(emp.amStart),
+          end_time: minutesToTime(emp.amEnd),
+        })
+      }
     }
     if (emp.pmAssigned && emp.pmStart != null && emp.pmEnd != null) {
-      const name = jfNameById.get(emp.pmAssigned) || 'Flex'
-      schedule.push({
-        employee_id: emp.id,
-        job_function: name,
-        start_time: minutesToTime(emp.pmStart),
-        end_time: minutesToTime(emp.pmEnd),
-      })
+      const name = jfNameById.get(emp.pmAssigned)
+      if (name) {
+        schedule.push({
+          employee_id: emp.id,
+          job_function: name,
+          start_time: minutesToTime(emp.pmStart),
+          end_time: minutesToTime(emp.pmEnd),
+        })
+      }
     }
   }
 
@@ -532,16 +533,23 @@ export function useAIScheduleBuilder() {
 
     const jfList = jobFunctions.value || []
 
-    // Convert schedule items to assignment records
+    // Convert schedule items to assignment records — surface any mapping failures
+    const dropped: string[] = []
     const assignments = schedule
       .map((a) => {
         const jf = jfList.find((jf: any) => jf.name === a.job_function) as any
-        if (!jf) return null
+        if (!jf) {
+          dropped.push(`Unknown job function "${a.job_function}"`)
+          return null
+        }
         const shiftId = employeeShiftMap.get(a.employee_id)
         const shift = shiftId
           ? (shiftsData || []).find((s: any) => s.id === shiftId)
           : null
-        if (!shift) return null
+        if (!shift) {
+          dropped.push(`Employee ${a.employee_id} has no valid shift assigned`)
+          return null
+        }
         return {
           employee_id: a.employee_id,
           job_function_id: jf.id,
@@ -552,6 +560,12 @@ export function useAIScheduleBuilder() {
         }
       })
       .filter(Boolean) as any[]
+
+    if (dropped.length > 0) {
+      const preview = dropped.slice(0, 5).join('\n')
+      const extra = dropped.length > 5 ? `\n...and ${dropped.length - 5} more` : ''
+      throw new Error(`${dropped.length} assignment(s) could not be applied:\n${preview}${extra}`)
+    }
 
     // Use atomic replace (delete existing + insert new in one transaction)
     const result = await replaceScheduleForDate(scheduleDate, assignments)

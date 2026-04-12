@@ -148,9 +148,17 @@
                       <h4 class="text-lg font-semibold text-gray-800">
                         {{ pref.employee?.first_name }} {{ pref.employee?.last_name }}
                       </h4>
-                      <p class="text-sm text-gray-600">
-                        Job Function: <span class="font-medium">{{ pref.job_function?.name }}</span>
+                      <p v-if="!pref.am_job_function_id && !pref.pm_job_function_id" class="text-sm text-gray-600">
+                        AM &amp; PM: <span class="font-medium">{{ pref.job_function?.name }}</span>
                       </p>
+                      <template v-else>
+                        <p class="text-sm text-gray-600">
+                          AM: <span class="font-medium">{{ getJfName(pref.am_job_function_id) ?? pref.job_function?.name }}</span>
+                        </p>
+                        <p class="text-sm text-gray-600">
+                          PM: <span class="font-medium">{{ getJfName(pref.pm_job_function_id) ?? pref.job_function?.name }}</span>
+                        </p>
+                      </template>
                     </div>
                   </div>
                 </div>
@@ -214,13 +222,32 @@
                   </select>
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1">Job Function</label>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">AM Job Function</label>
                   <select
-                    v-model="preferredAssignmentFormData.job_function_id"
+                    v-model="preferredAssignmentFormData.am_job_function_id"
                     required
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Select job function...</option>
+                    <option
+                      v-for="jf in sortedJobFunctions"
+                      :key="jf.id"
+                      :value="jf.id"
+                    >
+                      {{ jf.name }}
+                    </option>
+                  </select>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">
+                    PM Job Function
+                    <span class="text-gray-400 font-normal">(leave blank to use same as AM)</span>
+                  </label>
+                  <select
+                    v-model="preferredAssignmentFormData.pm_job_function_id"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Same as AM</option>
                     <option
                       v-for="jf in sortedJobFunctions"
                       :key="jf.id"
@@ -280,7 +307,7 @@ let successTimeout: ReturnType<typeof setTimeout> | null = null
 const showPreferredAssignmentsModal = ref(false)
 const showPreferredAssignmentFormModal = ref(false)
 const editingPreferredAssignment = ref<any>(null)
-const preferredAssignmentFormData = ref({ employee_id: '', job_function_id: '' })
+const preferredAssignmentFormData = ref({ employee_id: '', am_job_function_id: '', pm_job_function_id: '' })
 const showSavedIcon = ref(false)
 
 // Grid data: { "jfId|hour": headcount }
@@ -322,6 +349,12 @@ const hasChanges = computed(() => {
   return JSON.stringify(gridData.value) !== JSON.stringify(originalGridData.value)
 })
 
+// Look up a job function name by ID (used for AM/PM display in the list)
+const getJfName = (id: string | null | undefined): string | null => {
+  if (!id) return null
+  return jobFunctions.value?.find((jf: any) => jf.id === id)?.name ?? null
+}
+
 const gridKey = (jfId: string, hour: string) => `${jfId}|${hour}`
 
 const getGridValue = (jfId: string, hour: string): number => {
@@ -345,14 +378,21 @@ const loadGridFromTargets = () => {
 const saveAllTargets = async () => {
   saving.value = true
   try {
+    // Only send cells that actually changed — never zero-out untouched hours
     const items: { job_function_id: string; hour_start: string; headcount: number }[] = []
     for (const jf of gridJobFunctions.value) {
       for (const hour of gridHours.value) {
-        const headcount = getGridValue(jf.id, hour.value)
-        items.push({ job_function_id: jf.id, hour_start: hour.value, headcount })
+        const key = gridKey(jf.id, hour.value)
+        const current = gridData.value[key] ?? 0
+        const original = originalGridData.value[key] ?? 0
+        if (current !== original) {
+          items.push({ job_function_id: jf.id, hour_start: hour.value, headcount: current })
+        }
       }
     }
-    await saveTargets(items)
+    if (items.length > 0) {
+      await saveTargets(items)
+    }
     loadGridFromTargets()
     showSuccessIndicator('Staffing targets saved')
   } catch (e: any) {
@@ -390,7 +430,7 @@ const closePreferredAssignmentsModal = () => {
 
 const openAddPreferredAssignmentModal = () => {
   editingPreferredAssignment.value = null
-  preferredAssignmentFormData.value = { employee_id: '', job_function_id: '' }
+  preferredAssignmentFormData.value = { employee_id: '', am_job_function_id: '', pm_job_function_id: '' }
   showPreferredAssignmentFormModal.value = true
 }
 
@@ -398,7 +438,8 @@ const openEditPreferredAssignmentModal = (pref: any) => {
   editingPreferredAssignment.value = pref
   preferredAssignmentFormData.value = {
     employee_id: pref.employee_id,
-    job_function_id: pref.job_function_id
+    am_job_function_id: pref.am_job_function_id ?? pref.job_function_id ?? '',
+    pm_job_function_id: pref.pm_job_function_id ?? ''
   }
   showPreferredAssignmentFormModal.value = true
 }
@@ -410,8 +451,13 @@ const closePreferredAssignmentFormModal = () => {
 
 const handlePreferredAssignmentSubmit = async () => {
   try {
+    const { employee_id, am_job_function_id, pm_job_function_id } = preferredAssignmentFormData.value
     const payload = {
-      ...preferredAssignmentFormData.value,
+      employee_id,
+      // job_function_id is the AM function (required for the unique constraint)
+      job_function_id: am_job_function_id,
+      am_job_function_id,
+      pm_job_function_id: pm_job_function_id || null,
       is_required: true,
       priority: 0,
       notes: ''
