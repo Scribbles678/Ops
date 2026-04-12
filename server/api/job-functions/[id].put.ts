@@ -6,22 +6,46 @@ export default defineEventHandler(async (event) => {
   const teamId = getTeamFilter(user)
   const id = getRouterParam(event, 'id')
   const body = await readBody(event)
-  const { name, color_code, productivity_rate, sort_order, unit_of_measure, custom_unit, is_active, exclude_from_targets } = body
+  const {
+    name,
+    color_code,
+    productivity_rate,
+    sort_order,
+    unit_of_measure,
+    custom_unit,
+    is_active,
+    exclude_from_targets,
+    lunch_coverage_required,
+    break_coverage_required
+  } = body
 
-  const params: unknown[] = [name ?? null, color_code ?? null, productivity_rate ?? null, sort_order ?? null,
-     unit_of_measure ?? null, custom_unit ?? null, is_active ?? null, exclude_from_targets ?? null, id]
+  const params: unknown[] = [
+    name ?? null,
+    color_code ?? null,
+    productivity_rate ?? null,
+    sort_order ?? null,
+    unit_of_measure ?? null,
+    custom_unit ?? null,
+    is_active ?? null,
+    exclude_from_targets ?? null,
+    lunch_coverage_required ?? null,
+    break_coverage_required ?? null,
+    id
+  ]
 
   let sql = `UPDATE job_functions
-     SET name                  = COALESCE($1, name),
-         color_code            = COALESCE($2, color_code),
-         productivity_rate     = $3,
-         sort_order            = COALESCE($4, sort_order),
-         unit_of_measure       = $5,
-         custom_unit           = $6,
-         is_active             = COALESCE($7, is_active),
-         exclude_from_targets  = COALESCE($8, exclude_from_targets),
-         updated_at            = NOW()
-     WHERE id = $9`
+     SET name                      = COALESCE($1, name),
+         color_code                = COALESCE($2, color_code),
+         productivity_rate         = $3,
+         sort_order                = COALESCE($4, sort_order),
+         unit_of_measure           = $5,
+         custom_unit               = $6,
+         is_active                 = COALESCE($7, is_active),
+         exclude_from_targets      = COALESCE($8, exclude_from_targets),
+         lunch_coverage_required   = COALESCE($9, lunch_coverage_required),
+         break_coverage_required   = COALESCE($10, break_coverage_required),
+         updated_at                = NOW()
+     WHERE id = $11`
 
   if (teamId) {
     sql += ` AND team_id = $${params.length + 1}`

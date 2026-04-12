@@ -84,11 +84,12 @@ Display User (Read-Only)
 
 **Permissions:**
 - ✅ **All User permissions** for their own team
-- ✅ View users in their own team (via RLS policies)
+- ✅ View users in their own team
 - ✅ View and manage all data for their own team
+- ✅ Approve/reject PTO and schedule requests for their team
 - ✅ Change their own team assignment (via Settings page)
 
-**Note**: Admin role can **view** team users through database access, but **cannot create new users or reset passwords** - these operations require Super Admin privileges and use server-side API routes that only allow Super Admin access.
+**Note**: Admin role can **view** team users, but **cannot create new users or reset passwords** — these operations require Super Admin privileges and are enforced by `requireSuperAdmin()` in server API routes (`server/utils/authorize.ts`).
 
 **Restrictions:**
 - ❌ Cannot see data from other teams
@@ -156,7 +157,7 @@ Display User (Read-Only)
 - Restricted to `/display` route only
 - Cannot access any other pages
 - Can be assigned to specific team (optional)
-- Auto-refreshes every 30 seconds
+- Auto-refreshes every 2 minutes
 
 **Database Flag**: `is_display_user = true` in `user_profiles`
 
@@ -210,9 +211,12 @@ Display User (Read-Only)
 
 ### How Team Isolation Works
 
-1. **Data Filtering**: All queries automatically filter by `team_id`
-2. **Database-Level Security**: Row Level Security (RLS) policies enforce team isolation
-3. **Automatic Assignment**: New records automatically get the user's `team_id`
+1. **Data Filtering**: All API queries apply `WHERE team_id = $user.team_id` via `getTeamFilter()` in `server/utils/authorize.ts`
+2. **Server-side enforcement**: JWT middleware (`server/middleware/auth.ts`) populates `event.context.user`; API routes read `user.team_id` when filtering/writing data
+3. **Automatic Assignment**: New records receive the user's `team_id` on insert
+4. **Super Admin bypass**: `getTeamFilter()` returns `null` for super admins, which skips the team filter
+
+> Note: The repo contains legacy `rls-policies.sql` from an earlier Supabase-based prototype. The current production enforcement is **API-level**, not database-level RLS.
 
 ### Team Isolation by Role
 
@@ -355,7 +359,7 @@ WHERE id = 'user-uuid-here';
 - TV shows today's schedule
 - No login required for viewers
 - Can't be edited from TV
-- Auto-updates every 30 seconds
+- Auto-updates every 2 minutes
 
 ---
 
@@ -386,8 +390,8 @@ WHERE id = 'user-uuid-here';
 
 ### Team Isolation Security
 
-- **Database-level enforcement**: RLS policies prevent cross-team access
-- **Client-side filtering**: Additional layer of security in application code
+- **API-level enforcement**: Every server route applies `team_id` filter via `getTeamFilter(user)` in `server/utils/authorize.ts`
+- **JWT-backed**: `team_id` comes from the signed JWT payload, not the client — cannot be spoofed
 - **Super Admin override**: Can see all teams (by design)
 
 ### Display User Security
@@ -451,12 +455,13 @@ WHERE id = 'user-uuid-here';
 **Possible Causes:**
 - User not assigned to a team (`team_id = NULL`)
 - User's team doesn't have any data
-- RLS policy issue
+- JWT cookie stale (team_id changed after login — user needs to re-login)
 
 **Solution:**
 - Assign user to team in Settings
 - Verify team has data
-- Check user's `team_id` in database
+- Check user's `team_id` in `user_profiles` table
+- Have user log out and back in to refresh JWT
 
 ### User Can See All Teams' Data
 
@@ -493,11 +498,10 @@ WHERE id = 'user-uuid-here';
 
 ## Next Steps
 
-- See [AUTHENTICATION.md](./AUTHENTICATION.md) for authentication setup
-- Review [MULTI-TENANT.md](./MULTI-TENANT.md) for team isolation details
-- Check [SECURITY.md](./SECURITY.md) for security best practices
+- See [CONTEXT.md](./CONTEXT.md) for full technical architecture including auth, multi-tenancy, and the schedule builder algorithm
+- See [RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md) for production deployment
 
 ---
 
-**Last Updated**: January 2025
+**Last Updated**: April 2026
 

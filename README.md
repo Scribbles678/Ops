@@ -5,15 +5,17 @@ A web-based scheduling application for distribution center operations. Built wit
 ## Features
 
 - **Daily Schedule Management** - Visual grid editor for employee assignments with 15-minute granularity
-- **Automated Schedule Builder** - Generates optimized schedules from staffing targets, employee training, and required assignments using a two-halves algorithm (AM/PM blocks per employee)
-- **Staffing Targets** - Set target headcount per job function per hour in a simple grid UI
+- **Daily Schedule Management** - Visual grid editor for employee assignments with 15-minute granularity
+- **Automated Schedule Builder** - Generates schedules from staffing targets, training, and required assignments using a two-halves algorithm (AM/PM blocks per employee) with PTO integration
+- **Staffing Targets** - Set target headcount per job function per hour in a grid UI
 - **Employee Training Matrix** - Track which employees are trained for which job functions, with auto-save
 - **Required Assignments** - Lock specific employees to specific functions daily
-- **PTO Management** - Mark employees as off for specific dates, with hours tracking
+- **PTO Calendar** - Week/month calendar combining approved PTO and pending requests; admin approval workflow
+- **Schedule Requests** - Unified request pipeline for PTO (full/partial), leave-early, and shift swaps
 - **Shift Swap Tracking** - Record and manage shift swaps between employees
 - **Copy Schedule** - Duplicate a previous day's schedule to a new date
-- **Display Mode** - Full-screen TV view with auto-refresh for floor visibility
-- **Multi-Tenant Teams** - Data isolation by team with role-based access
+- **Display Mode** - Full-screen TV view with auto-refresh (every 2 min)
+- **Multi-Tenant Teams** - Data isolation by team enforced at the API layer via JWT `team_id`
 - **Authentication** - JWT-based auth with HttpOnly cookies, role hierarchy (Super Admin, Admin, User, Display)
 
 ## Tech Stack
@@ -82,10 +84,11 @@ npm run dev
 | `/schedule/[date]` | View/edit schedule for a specific date |
 | `/training` | Employee training matrix (auto-saves) |
 | `/details` | Manage job functions, shifts, and employees |
-| `/display` | TV display mode (read-only, auto-refresh) |
-| `/settings` | User settings and password management |
-| `/admin/business-rules` | Staffing targets grid + required assignments |
-| `/admin/users` | User account management |
+| `/pto-calendar` | PTO calendar (week/month) + request approval workflow |
+| `/display` | TV display mode (read-only, auto-refresh every 2 min) |
+| `/settings` | User settings, password, and team settings |
+| `/admin/business-rules` | Staffing targets grid (headcount per function per hour) |
+| `/admin/users` | User account management (super admin only) |
 | `/admin/cleanup` | Database cleanup utilities |
 
 ## Project Structure
@@ -97,7 +100,7 @@ scheduling-app-v2/
 │   ├── schedule/             # Schedule grid, shift groups, assignment cards
 │   └── training/             # Training matrix components
 ├── composables/              # Shared reactive logic
-│   ├── useAIScheduleBuilder.ts   # Automated schedule generation algorithm
+│   ├── useAIScheduleBuilder.ts   # Automated schedule generation (two-halves algorithm)
 │   ├── useAuth.ts                # JWT authentication
 │   ├── useEmployees.ts           # Employee CRUD + training
 │   ├── useJobFunctions.ts        # Job function CRUD
@@ -106,9 +109,11 @@ scheduling-app-v2/
 │   ├── useBusinessRules.ts       # Legacy business rules
 │   ├── usePreferredAssignments.ts # Required/preferred assignments
 │   ├── usePTO.ts                 # PTO management
+│   ├── useScheduleRequests.ts    # Unified PTO/leave-early/shift-swap requests
 │   ├── useShiftSwaps.ts          # Shift swap tracking
 │   ├── useLaborCalculations.ts   # Hours/staffing calculations
-│   └── useTeam.ts                # Team management
+│   ├── useTeam.ts                # Team management
+│   └── useTeamSettings.ts        # Per-team settings
 ├── pages/                    # File-based routing
 │   ├── admin/                # Admin pages
 │   ├── schedule/             # Schedule pages
@@ -120,6 +125,9 @@ scheduling-app-v2/
 │   │   ├── schedule/
 │   │   ├── staffing-targets/
 │   │   ├── shifts/
+│   │   ├── pto/
+│   │   ├── pto-calendar/
+│   │   ├── schedule-requests/
 │   │   └── ...
 │   └── utils/
 │       ├── db.ts             # PostgreSQL connection pool
@@ -149,30 +157,35 @@ Core tables:
 |-------|---------|
 | `teams` | Multi-tenant team isolation |
 | `user_profiles` | User accounts with roles and password hashes |
+| `team_settings` | Per-team configuration |
 | `employees` | Employee records (name, shift, active status) |
 | `job_functions` | Job roles with colors and settings |
-| `training_assignments` | Which employees are trained for which functions |
+| `employee_training` | Which employees are trained for which functions (junction table) |
 | `shifts` | Shift definitions with break/lunch times |
 | `schedule_assignments` | Daily employee-to-function assignments |
-| `staffing_targets` | Target headcount per function per hour |
+| `staffing_targets` | Target headcount per function per hour (drives Automated Builder) |
 | `preferred_assignments` | Required/preferred employee-function pairings |
 | `pto_days` | PTO records by employee and date |
+| `schedule_requests` | Unified PTO / leave-early / shift-swap request workflow |
 | `shift_swaps` | Shift swap records |
 | `daily_targets` | Daily production targets |
+| `target_hours` | Default target hours per job function |
 | `business_rules` | Legacy staffing rules (replaced by staffing_targets) |
 
 ## Automated Schedule Builder
 
-The builder uses a **two-halves algorithm**:
+The builder uses a **two-halves algorithm** (see [composables/useAIScheduleBuilder.ts](composables/useAIScheduleBuilder.ts)):
 
-1. Each employee's day is split into AM (shift start to lunch) and PM (lunch to shift end) based on their shift's lunch times
-2. Required employees are assigned their locked function for both halves
-3. Remaining employees are assigned by demand — functions with highest unmet staffing targets get filled first
-4. Most-constrained employees (fewest training options) are assigned first to avoid dead ends
-5. Any unassigned halves get Flex
-6. Gaps (unfilled targets) are reported as warnings, never errors
+1. Each employee's day is split into AM (shift start → lunch start) and PM (lunch end → shift end). An employee gets at most two assignments per day.
+2. **PTO is applied first** — full-day PTO removes the employee; partial-day PTO clips AM/PM blocks and invalidates any block < 30 min.
+3. **Meter fan-out** — parent functions like "Meter" distribute headcount across numbered children ("Meter 1", "Meter 2", ...).
+4. **Required assignments** — employees with `is_required=true` get their locked function for both halves.
+5. **Most-constrained-first greedy** — remaining employees filled by demand. Each iteration picks the employee with fewest feasible options, then the highest-scoring (function, window) pair. Preferred assignments get a scoring bonus.
+6. **Gaps** — any remaining unfilled demand is reported as a warning (non-fatal).
 
-Input: staffing targets (headcount per function per hour) + employee training + required assignments + shift lunch times
+Inputs: `staffing_targets` + `employee_training` + `preferred_assignments` + `shifts` (with lunch times) + `pto_days` for the target date.
+
+Outputs: `{ schedule, warnings, errors, gaps }` — user reviews in a modal before approving, then `replaceScheduleForDate()` writes via a transactional delete+insert.
 
 ## Deployment
 

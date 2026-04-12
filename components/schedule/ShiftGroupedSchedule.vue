@@ -54,8 +54,10 @@
             <span class="whitespace-nowrap truncate flex-1" :title="`${employee.last_name}, ${employee.first_name}`">{{ employee.last_name }}, {{ employee.first_name }}</span>
             <div class="flex items-center gap-1 flex-shrink-0">
               <span v-if="hasPTO(employee.id)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-700 border border-red-200">PTO</span>
+              <span v-if="hasCallIn(employee.id)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-orange-100 text-orange-700 border border-orange-200">CI</span>
               <button @click="emit('addPTO', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors duration-150 shadow-sm">PTO</button>
               <button @click="emit('addShiftSwap', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-blue-300 text-blue-700 hover:bg-blue-100 transition-colors duration-150 shadow-sm">SS</button>
+              <button @click="emit('addCallIn', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-orange-300 text-orange-700 hover:bg-orange-100 transition-colors duration-150 shadow-sm">CI</button>
             </div>
           </div>
 
@@ -335,6 +337,7 @@ const emit = defineEmits<{
   scheduleDataUpdated: [scheduleData: Record<string, any>]
   addPTO: [employee: any]
   addShiftSwap: [employee: any]
+  addCallIn: [employee: any]
 }>()
 
 // Use the passed scheduleAssignmentsData directly instead of local state
@@ -690,7 +693,15 @@ const getEmployeeAssignmentRanges = (employeeId: string, shift: any) => {
 
 // PTO helpers
 const hasPTO = (employeeId: string) => {
-  return !!props.ptoByEmployeeId && Array.isArray(props.ptoByEmployeeId[employeeId]) && props.ptoByEmployeeId[employeeId].length > 0
+  const recs = props.ptoByEmployeeId?.[employeeId]
+  if (!Array.isArray(recs) || recs.length === 0) return false
+  return recs.some((r: any) => r.pto_type !== 'call_in')
+}
+
+const hasCallIn = (employeeId: string) => {
+  const recs = props.ptoByEmployeeId?.[employeeId]
+  if (!Array.isArray(recs) || recs.length === 0) return false
+  return recs.some((r: any) => r.pto_type === 'call_in')
 }
 
 const isOverlappingPTO = (employeeId: string, startMinutes: number, endMinutes: number) => {

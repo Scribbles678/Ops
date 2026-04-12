@@ -34,8 +34,7 @@ interface StaffingTarget {
 
 const expandFanOutTargets = (
   targets: StaffingTarget[],
-  jobFunctions: any[],
-  warnings: string[]
+  jobFunctions: any[]
 ): StaffingTarget[] => {
   const expanded: StaffingTarget[] = []
 
@@ -66,8 +65,18 @@ const expandFanOutTargets = (
       continue
     }
 
-    // Distribute headcount evenly across children
-    childFunctions.sort((a: any, b: any) => a.name.localeCompare(b.name))
+    // Distribute headcount evenly across children.
+    // Sort numerically by the trailing digits so Meter 2 comes before Meter 10.
+    // An alphabetical sort would put Meter 10 before Meter 2, misdirecting the
+    // remainder when headcount doesn't divide evenly.
+    const trailingNum = (name: string): number => {
+      const m = /(\d+)$/.exec(name || '')
+      return m && m[1] ? parseInt(m[1], 10) : 0
+    }
+    childFunctions.sort((a: any, b: any) => {
+      const diff = trailingNum(a.name) - trailingNum(b.name)
+      return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '')
+    })
     for (const t of fnTargets) {
       const total = t.headcount
       const base = Math.floor(total / childFunctions.length)
@@ -192,6 +201,7 @@ const buildSchedule = (
 
     for (let i = empInfos.length - 1; i >= 0; i--) {
       const emp = empInfos[i]
+      if (!emp) continue
       const pto = ptoByEmployee[emp.id]
       if (!pto) continue
 
@@ -272,13 +282,13 @@ const buildSchedule = (
       : t.hour_start,
   }))
 
-  const expandedTargets = expandFanOutTargets(normalizedTargets, jobFunctions, warnings)
+  const expandedTargets = expandFanOutTargets(normalizedTargets, jobFunctions)
 
   // Build demand matrix: { jf_id: { hour: headcount } }
   const demand: Record<string, Record<string, number>> = {}
   for (const t of expandedTargets) {
-    if (!demand[t.job_function_id]) demand[t.job_function_id] = {}
-    demand[t.job_function_id][t.hour_start] = t.headcount
+    const slot = demand[t.job_function_id] ?? (demand[t.job_function_id] = {})
+    slot[t.hour_start] = t.headcount
   }
 
   // Helper: get hours an employee covers in a given half
@@ -301,7 +311,8 @@ const buildSchedule = (
     const hours = getHoursCovered(start, end)
     let total = 0
     for (const h of hours) {
-      if ((jfDemand[h] || 0) > 0) total += jfDemand[h]
+      const v = jfDemand[h] ?? 0
+      if (v > 0) total += v
     }
     return total
   }
@@ -340,11 +351,52 @@ const buildSchedule = (
   const empAvailable = new Map<string, {start: number, end: number}[]>()
   const allAssignments: {empId: string, jfId: string, start: number, end: number}[] = []
 
-  // Initialize empAvailable from each employee's shift blocks
+  // Helper: pull non-null break windows (minutes) from a shift record.
+  const getShiftBreaks = (shift: any): {start: number, end: number}[] => {
+    if (!shift) return []
+    const out: {start: number, end: number}[] = []
+    if (shift.break_1_start && shift.break_1_end) {
+      out.push({ start: timeToMinutes(shift.break_1_start), end: timeToMinutes(shift.break_1_end) })
+    }
+    if (shift.break_2_start && shift.break_2_end) {
+      out.push({ start: timeToMinutes(shift.break_2_start), end: timeToMinutes(shift.break_2_end) })
+    }
+    return out
+  }
+
+  // Helper: split a [start, end] range around break windows, dropping segments < 30 min.
+  // Used to carve breaks out of AM/PM blocks so employees aren't scheduled through breaks.
+  const splitAroundBreaks = (
+    start: number,
+    end: number,
+    breaks: {start: number, end: number}[]
+  ): {start: number, end: number}[] => {
+    if (end <= start) return []
+    let segments: {start: number, end: number}[] = [{ start, end }]
+    for (const b of breaks) {
+      const next: {start: number, end: number}[] = []
+      for (const s of segments) {
+        if (b.end <= s.start || b.start >= s.end) {
+          next.push(s)
+        } else {
+          if (b.start > s.start) next.push({ start: s.start, end: b.start })
+          if (b.end < s.end) next.push({ start: b.end, end: s.end })
+        }
+      }
+      segments = next
+    }
+    return segments.filter(s => s.end - s.start >= 30)
+  }
+
+  // Initialize empAvailable from each employee's shift blocks, minus breaks.
   for (const emp of empInfos) {
+    const shift = shifts.find((s: any) => s.id === emp.shift_id)
+    const breaks = getShiftBreaks(shift)
     const windows: {start: number, end: number}[] = []
-    if (emp.amEnd > emp.amStart) windows.push({start: emp.amStart, end: emp.amEnd})
-    if (emp.pmStart != null && emp.pmEnd != null) windows.push({start: emp.pmStart, end: emp.pmEnd})
+    if (emp.amEnd > emp.amStart) windows.push(...splitAroundBreaks(emp.amStart, emp.amEnd, breaks))
+    if (emp.pmStart != null && emp.pmEnd != null) {
+      windows.push(...splitAroundBreaks(emp.pmStart, emp.pmEnd, breaks))
+    }
     if (windows.length > 0) empAvailable.set(emp.id, windows)
   }
 
@@ -383,7 +435,8 @@ const buildSchedule = (
     return {start: Math.max(wStart, blockStart), end: Math.min(wEnd, blockEnd)}
   }
 
-  // STEP 1: Assign required employees (full AM/PM blocks pinned to configured function)
+  // STEP 1: Assign required employees (AM/PM blocks pinned to configured function,
+  // split around breaks so the primary isn't "working" during their own break time).
   for (const emp of empInfos) {
     const preferred = preferredAssignmentsMap[emp.id]
     if (!preferred) continue
@@ -396,18 +449,25 @@ const buildSchedule = (
 
       if (!isTrainedFor(emp.id, amJfIdRaw, jobFunctions, trainingData)) continue
 
+      const shift = shifts.find((s: any) => s.id === emp.shift_id)
+      const breaks = getShiftBreaks(shift)
+
       if (emp.amEnd > emp.amStart) {
-        const amJfId = resolveMeterChild(amJfIdRaw, emp.amStart, emp.amEnd)
-        allAssignments.push({empId: emp.id, jfId: amJfId, start: emp.amStart, end: emp.amEnd})
-        decrementDemand(amJfId, emp.amStart, emp.amEnd)
-        useEmpTime(emp.id, emp.amStart, emp.amEnd)
+        for (const seg of splitAroundBreaks(emp.amStart, emp.amEnd, breaks)) {
+          const amJfId = resolveMeterChild(amJfIdRaw, seg.start, seg.end)
+          allAssignments.push({ empId: emp.id, jfId: amJfId, start: seg.start, end: seg.end })
+          decrementDemand(amJfId, seg.start, seg.end)
+          useEmpTime(emp.id, seg.start, seg.end)
+        }
       }
 
       if (emp.pmStart != null && emp.pmEnd != null) {
-        const pmJfId = resolveMeterChild(pmJfIdRaw, emp.pmStart, emp.pmEnd)
-        allAssignments.push({empId: emp.id, jfId: pmJfId, start: emp.pmStart, end: emp.pmEnd})
-        decrementDemand(pmJfId, emp.pmStart, emp.pmEnd)
-        useEmpTime(emp.id, emp.pmStart, emp.pmEnd)
+        for (const seg of splitAroundBreaks(emp.pmStart, emp.pmEnd, breaks)) {
+          const pmJfId = resolveMeterChild(pmJfIdRaw, seg.start, seg.end)
+          allAssignments.push({ empId: emp.id, jfId: pmJfId, start: seg.start, end: seg.end })
+          decrementDemand(pmJfId, seg.start, seg.end)
+          useEmpTime(emp.id, seg.start, seg.end)
+        }
       }
       break // only one required assignment record per employee
     }
@@ -481,6 +541,141 @@ const buildSchedule = (
     allAssignments.push({empId, jfId: best.jfId, start: best.demandWindow.start, end: best.demandWindow.end})
     decrementDemand(best.jfId, best.demandWindow.start, best.demandWindow.end)
     useEmpTime(empId, best.demandWindow.start, best.demandWindow.end)
+  }
+
+  // STEP 2.5: Lunch/break coverage pass.
+  // For job functions flagged as lunch_coverage_required or break_coverage_required,
+  // find another trained, available employee to cover the primary employee's lunch/break
+  // window. Coverage assignments don't decrement demand (demand is already counted by the
+  // primary assignment) — they just insert a short assignment so the function has continuous
+  // coverage through the primary's lunch/break.
+
+  interface CoverageGap {
+    jfId: string
+    primaryEmpId: string
+    start: number
+    end: number
+    label: string // 'lunch', 'break 1', 'break 2'
+  }
+
+  const hasBreakOverlap = (shift: any, start: number, end: number): boolean => {
+    if (!shift) return false
+    const ranges: [any, any][] = [
+      [shift.break_1_start, shift.break_1_end],
+      [shift.break_2_start, shift.break_2_end],
+    ]
+    for (const [bs, be] of ranges) {
+      if (!bs || !be) continue
+      const bsMin = timeToMinutes(bs)
+      const beMin = timeToMinutes(be)
+      if (bsMin < end && beMin > start) return true
+    }
+    return false
+  }
+
+  // Find the best coverer for a gap — greedy pick of the longest overlap from empAvailable
+  // that also doesn't fall on the coverer's own break time.
+  const findCoverer = (
+    jfId: string,
+    gapStart: number,
+    gapEnd: number,
+    excludeEmpId: string
+  ): { empId: string; coverStart: number; coverEnd: number } | null => {
+    let best: { empId: string; coverStart: number; coverEnd: number } | null = null
+    for (const [empId, windows] of empAvailable) {
+      if (empId === excludeEmpId) continue
+      if (!isTrainedFor(empId, jfId, jobFunctions, trainingData)) continue
+
+      const covEmp = employees.find((e: any) => e?.id === empId)
+      const covShift = covEmp ? shifts.find((s: any) => s.id === covEmp.shift_id) : null
+
+      for (const w of windows) {
+        const overlapS = Math.max(w.start, gapStart)
+        const overlapE = Math.min(w.end, gapEnd)
+        if (overlapE <= overlapS) continue
+        // Skip if the coverer is on their own break during this overlap
+        if (hasBreakOverlap(covShift, overlapS, overlapE)) continue
+        if (!best || (overlapE - overlapS) > (best.coverEnd - best.coverStart)) {
+          best = { empId, coverStart: overlapS, coverEnd: overlapE }
+        }
+      }
+    }
+    return best
+  }
+
+  // Build deduped set of gaps to cover
+  const gapsSeen = new Set<string>()
+  const gapsToFill: CoverageGap[] = []
+  const empNameById = new Map<string, string>()
+  for (const e of employees) {
+    if (e?.id) empNameById.set(e.id, `${e.last_name || ''}, ${e.first_name || ''}`.trim().replace(/^,\s*/, ''))
+  }
+
+  for (const a of allAssignments) {
+    const jf = jobFunctions.find((j: any) => j.id === a.jfId)
+    if (!jf) continue
+    if (!jf.lunch_coverage_required && !jf.break_coverage_required) continue
+
+    const primary = employees.find((e: any) => e?.id === a.empId)
+    const shift = primary ? shifts.find((s: any) => s.id === primary.shift_id) : null
+    if (!shift) continue
+
+    const candidateGaps: { start: number; end: number; label: string }[] = []
+    if (jf.lunch_coverage_required && shift.lunch_start && shift.lunch_end) {
+      candidateGaps.push({
+        start: timeToMinutes(shift.lunch_start),
+        end: timeToMinutes(shift.lunch_end),
+        label: 'lunch',
+      })
+    }
+    if (jf.break_coverage_required) {
+      if (shift.break_1_start && shift.break_1_end) {
+        candidateGaps.push({
+          start: timeToMinutes(shift.break_1_start),
+          end: timeToMinutes(shift.break_1_end),
+          label: 'break 1',
+        })
+      }
+      if (shift.break_2_start && shift.break_2_end) {
+        candidateGaps.push({
+          start: timeToMinutes(shift.break_2_start),
+          end: timeToMinutes(shift.break_2_end),
+          label: 'break 2',
+        })
+      }
+    }
+
+    for (const g of candidateGaps) {
+      const key = `${a.jfId}|${a.empId}|${g.start}|${g.end}`
+      if (gapsSeen.has(key)) continue
+      gapsSeen.add(key)
+      gapsToFill.push({ jfId: a.jfId, primaryEmpId: a.empId, start: g.start, end: g.end, label: g.label })
+    }
+  }
+
+  // Fill each gap greedily
+  for (const g of gapsToFill) {
+    let remaining = g.start
+    const jf = jobFunctions.find((j: any) => j.id === g.jfId)
+    const primaryName = empNameById.get(g.primaryEmpId) || 'employee'
+
+    while (remaining < g.end) {
+      const found = findCoverer(g.jfId, remaining, g.end, g.primaryEmpId)
+      if (!found) {
+        warnings.push(
+          `No coverage available for ${jf?.name || g.jfId} during ${primaryName}'s ${g.label} (${minutesToTime(remaining)}–${minutesToTime(g.end)})`
+        )
+        break
+      }
+      allAssignments.push({
+        empId: found.empId,
+        jfId: g.jfId,
+        start: found.coverStart,
+        end: found.coverEnd,
+      })
+      useEmpTime(found.empId, found.coverStart, found.coverEnd)
+      remaining = found.coverEnd
+    }
   }
 
   // STEP 3: Detect gaps

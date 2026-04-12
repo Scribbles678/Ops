@@ -136,7 +136,7 @@
             <div>
               <span class="font-medium text-gray-900">{{ req.employee_name }}</span>
               <span class="text-sm text-gray-500 ml-2">{{ formatRequestType(req.request_type) }}</span>
-              <span class="text-sm text-gray-500 ml-2">{{ req.request_date }}</span>
+              <span class="text-sm text-gray-500 ml-2">{{ formatDate(req.request_date) }}</span>
               <span v-if="req.notes" class="text-xs text-gray-400 ml-2">— {{ req.notes }}</span>
             </div>
             <div class="flex items-center gap-2">
@@ -159,7 +159,7 @@
 
       <!-- All Requests Table -->
       <div class="mt-6 bg-white shadow rounded-lg p-6">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">Recent Requests</h2>
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">Requests</h2>
         <div v-if="allRequests.length === 0" class="text-sm text-gray-500">No requests for this period.</div>
         <div v-else class="overflow-x-auto">
           <table class="min-w-full text-sm">
@@ -177,7 +177,7 @@
               <tr v-for="req in allRequests" :key="req.id">
                 <td class="px-3 py-2">{{ req.employee_name }}</td>
                 <td class="px-3 py-2">{{ formatRequestType(req.request_type) }}</td>
-                <td class="px-3 py-2">{{ req.request_date }}</td>
+                <td class="px-3 py-2">{{ formatDate(req.request_date) }}</td>
                 <td class="px-3 py-2">
                   <span
                     class="px-2 py-0.5 rounded-full text-xs font-medium"
@@ -210,7 +210,28 @@
           </table>
         </div>
       </div>
+
+      <!-- New Request card -->
+      <div class="mt-6 bg-white shadow rounded-lg p-6 flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-gray-900">Add or Edit a Request</h2>
+          <p class="text-sm text-gray-500 mt-1">Submit a new time-off or schedule-change request for an employee.</p>
+        </div>
+        <button
+          @click="showRequestModal = true"
+          class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
+        >
+          New Request
+        </button>
+      </div>
     </div>
+
+    <!-- Request Modal -->
+    <ScheduleRequestsRequestFormModal
+      v-if="showRequestModal"
+      @close="showRequestModal = false"
+      @submitted="onRequestSubmitted"
+    />
   </div>
 </template>
 
@@ -220,6 +241,11 @@ const { fetchRequests, requests, overrideRequest, cancelRequest, loading } = use
 
 const viewMode = ref<'week' | 'month'>('week')
 const referenceDate = ref(new Date())
+const showRequestModal = ref(false)
+
+const onRequestSubmitted = () => {
+  loadCalendar()
+}
 
 const isAdmin = computed(() => user.value?.is_admin || user.value?.is_super_admin)
 
@@ -358,6 +384,15 @@ const getEntriesForDate = (date: string): CalendarEntry[] => {
 // Requests lists
 const allRequests = computed(() => requests.value)
 const pendingRequests = computed(() => requests.value.filter(r => r.status === 'pending'))
+
+const formatDate = (dateStr: string | null | undefined) => {
+  if (!dateStr) return ''
+  const datePart = dateStr.split('T')[0]
+  const [y, m, d] = datePart.split('-').map(Number)
+  if (!y || !m || !d) return dateStr
+  const date = new Date(y, m - 1, d)
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
 
 const formatRequestType = (type: string) => {
   const labels: Record<string, string> = {

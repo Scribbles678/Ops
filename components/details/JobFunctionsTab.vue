@@ -120,6 +120,32 @@
             </label>
           </div>
 
+          <div class="flex items-center space-x-2.5">
+            <input
+              id="lunch_coverage_required"
+              v-model="formData.lunch_coverage_required"
+              type="checkbox"
+              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label for="lunch_coverage_required" class="font-medium text-gray-700">
+              Lunch coverage required
+              <span class="block text-[11px] font-normal text-gray-500">Builder will schedule another trained employee to cover the primary's lunch window</span>
+            </label>
+          </div>
+
+          <div class="flex items-center space-x-2.5">
+            <input
+              id="break_coverage_required"
+              v-model="formData.break_coverage_required"
+              type="checkbox"
+              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label for="break_coverage_required" class="font-medium text-gray-700">
+              Break coverage required
+              <span class="block text-[11px] font-normal text-gray-500">Builder will schedule another trained employee to cover the primary's break windows</span>
+            </label>
+          </div>
+
           <div class="flex justify-end space-x-2.5 pt-3">
             <button
               type="button"
@@ -151,7 +177,9 @@ const formData = ref({
   color_code: '#3B82F6',
   productivity_rate: null,
   sort_order: 0,
-  exclude_from_targets: false
+  exclude_from_targets: false,
+  lunch_coverage_required: false,
+  break_coverage_required: false
 })
 
 onMounted(() => {
@@ -167,7 +195,9 @@ const openAddModal = () => {
     color_code: '#3B82F6',
     productivity_rate: null,
     sort_order: jobFunctionsList.value.length,
-    exclude_from_targets: false
+    exclude_from_targets: false,
+    lunch_coverage_required: false,
+    break_coverage_required: false
   }
   showModal.value = true
 }
@@ -179,7 +209,9 @@ const openEditModal = (jobFunction: any) => {
     color_code: jobFunction.color_code,
     productivity_rate: jobFunction.productivity_rate,
     sort_order: jobFunction.sort_order,
-    exclude_from_targets: jobFunction.exclude_from_targets ?? false
+    exclude_from_targets: jobFunction.exclude_from_targets ?? false,
+    lunch_coverage_required: jobFunction.lunch_coverage_required ?? false,
+    break_coverage_required: jobFunction.break_coverage_required ?? false
   }
   showModal.value = true
 }

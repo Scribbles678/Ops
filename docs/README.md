@@ -1,92 +1,31 @@
 # Documentation Index
 
-Welcome to the Operations Scheduling Tool documentation. This directory contains comprehensive guides for setup, configuration, security, and maintenance.
+Documentation for the Operations Scheduling Tool (scheduling-app-v2).
 
-## 📚 Documentation Overview
+## Available Documents
 
-### Getting Started
-- **[SETUP.md](./SETUP.md)** - Complete setup and configuration guide
-  - Initial Supabase setup
-  - Environment configuration
-  - First run and testing
-  - Database cleanup configuration
-  - Password management
-  - Deployment instructions
+- **[CONTEXT.md](./CONTEXT.md)** — Full technical context: tech stack, directory structure, data model, auth, AI Schedule Builder algorithm, PTO Calendar
+- **[ROLES.md](./ROLES.md)** — User roles, permissions matrix, team isolation rules
+- **[RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md)** — Production deployment on Rancher / Kubernetes
 
-### Core Features
-- **[AUTHENTICATION.md](./AUTHENTICATION.md)** - Authentication system documentation
-  - Current implementation (Supabase Auth)
-  - Security features
-  - Alternative options
-  - Medical/regulated environment considerations
-  - Configuration and management
+## Related Resources
 
-- **[ROLES.md](./ROLES.md)** - User roles and permissions system
-  - Role hierarchy (Super Admin, Admin, User, Display)
-  - Permissions matrix
-  - Team isolation rules
-  - Role assignment and management
+- `../README.md` — Main project readme (features, quick start, env vars)
+- `../sql-schema/` — PostgreSQL table definitions + triggers
+- `../sql-schema/setup.sql` — Full schema bootstrap (run once)
+- `../sql-schema/migrations/` — Incremental schema migrations
 
-- **[MULTI-TENANT.md](./MULTI-TENANT.md)** - Multi-tenant and team isolation
-  - Architecture overview
-  - Team isolation implementation
-  - Setup and configuration
-  - Data isolation rules
-  - Management procedures
+## Quick Orientation
 
-### Security & Operations
-- **[SECURITY.md](./SECURITY.md)** - Security documentation
-  - Security assessment and posture
-  - Implemented security features
-  - Security best practices
-  - Compliance and standards
-  - Ongoing security maintenance
+**New to the project?** Start with [CONTEXT.md](./CONTEXT.md) — it covers architecture, data model, and the two focus areas (Automated Schedule Builder, PTO Calendar).
 
-- **[MAINTENANCE.md](./MAINTENANCE.md)** - Maintenance procedures
-  - Regular maintenance tasks
-  - Database maintenance
-  - Backup procedures
-  - Monitoring and alerts
-  - Troubleshooting common issues
+**Deploying?** See [RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md).
 
-### Business
-- **[BUSINESS.md](./BUSINESS.md)** - Business model and market analysis
-  - Business model overview
-  - Market analysis
-  - Competitive positioning
-  - Pricing strategy
-  - Growth opportunities
-
----
-
-## 🚀 Quick Start
-
-**New to the project?** Start here:
-
-1. Read **[SETUP.md](./SETUP.md)** for initial setup
-2. Review **[AUTHENTICATION.md](./AUTHENTICATION.md)** to understand the auth system
-3. Check **[ROLES.md](./ROLES.md)** to understand user permissions
-4. Review **[SECURITY.md](./SECURITY.md)** for security best practices
-
----
-
-## 📖 Additional Resources
-
-### Root Documentation
-- `../README.md` - Main project readme
-- `../PROJECT-SUMMARY.md` - Comprehensive feature overview
-- `../Operations-Scheduling-Tool-MVP.md` - Original specifications
-
-### SQL Schema
-- `../sql-schema/` - Individual table schema files (see `sql-schema/README.md` for complete list)
-- `../sql-schema/rls-policies.sql` - Row Level Security policies
-- `../sql-schema/migrations/` - Database migration files (if any)
-
----
+**Setting up roles or teams?** See [ROLES.md](./ROLES.md).
 
 ## Abbott Labs Brand Colors
 
-When customizing the UI or creating branded materials, use these Abbott brand colors:
+When customizing the UI or creating branded materials:
 
 | Color Name   | Hex       | RGB            | Usage                    |
 | ------------ | --------- | -------------- | ------------------------ |
@@ -98,18 +37,4 @@ When customizing the UI or creating branded materials, use these Abbott brand co
 
 ---
 
-## 🔍 Finding Information
-
-### I want to...
-- **Set up the application** → [SETUP.md](./SETUP.md)
-- **Understand authentication** → [AUTHENTICATION.md](./AUTHENTICATION.md)
-- **Configure user roles** → [ROLES.md](./ROLES.md)
-- **Set up multi-tenant/teams** → [MULTI-TENANT.md](./MULTI-TENANT.md)
-- **Review security** → [SECURITY.md](./SECURITY.md)
-- **Perform maintenance** → [MAINTENANCE.md](./MAINTENANCE.md)
-- **Understand business model** → [BUSINESS.md](./BUSINESS.md)
-
----
-
-**Last Updated**: January 2025
-
+**Last Updated**: April 2026

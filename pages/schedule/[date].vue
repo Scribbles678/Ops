@@ -246,7 +246,7 @@
                   <!-- Meter Dashboard -->
                   <template v-if="activeDashboard === 'meter'">
                     <div
-                      v-for="meterNumber in 16"
+                      v-for="meterNumber in ACTIVE_METER_NUMBERS"
                       :key="meterNumber"
                       class="flex border-b border-gray-100 hover:bg-gray-50/50 transition-colors"
                     >
@@ -382,6 +382,7 @@
             @schedule-data-updated="handleScheduleDataUpdated"
             @addPTO="openPTOModal"
             @addShiftSwap="openShiftSwapModal"
+            @addCallIn="openCallInModal"
           />
         </div>
       </div>
@@ -484,6 +485,43 @@
               </button>
               <button type="button" @click="savePTO" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                 Save PTO
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Call-In Modal -->
+      <div v-if="showCallInModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
+          <h3 class="text-xl font-bold mb-4">Mark as Call-In</h3>
+          <div class="space-y-3">
+            <div v-if="resolvedCallInRecord" class="p-3 bg-orange-50 border border-orange-200 rounded-md text-sm text-orange-800">
+              This employee is already marked as called in on {{ formatDate(scheduleDate) }}.
+              Update the note below or use Remove Call-In to clear.
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+              <input v-model="callInForm.pto_date" type="date" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+              <input v-model="callInForm.notes" type="text" placeholder="e.g. sick, family emergency" class="w-full px-3 py-2 border border-gray-300 rounded-md" />
+            </div>
+            <div class="flex flex-wrap items-center justify-end gap-2 pt-2">
+              <button
+                v-if="resolvedCallInRecord"
+                type="button"
+                @click="deleteCurrentCallIn"
+                class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 mr-auto"
+              >
+                Remove Call-In
+              </button>
+              <button type="button" @click="closeCallInModal" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                Close
+              </button>
+              <button type="button" @click="saveCallIn" class="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700">
+                Save Call-In
               </button>
             </div>
           </div>
@@ -1685,6 +1723,75 @@ const deleteCurrentPTO = async () => {
   }
 }
 
+// Call-In Modal state and actions (stored as pto_days with pto_type='call_in')
+const showCallInModal = ref(false)
+const callInForm = ref({
+  employee_id: '',
+  pto_date: '',
+  notes: ''
+})
+
+const resolvedCallInRecord = computed(() => {
+  if (!showCallInModal.value || !callInForm.value.employee_id) return null
+  const recs = ptoByEmployeeId.value?.[callInForm.value.employee_id] || []
+  const target = toYMD(callInForm.value.pto_date || scheduleDate.value)
+  return recs.find((r: any) => toYMD(r.pto_date) === target && r.pto_type === 'call_in') || null
+})
+
+const openCallInModal = (employee: any) => {
+  callInForm.value.employee_id = employee?.id || ''
+  callInForm.value.pto_date = scheduleDate.value
+  const recs = ptoByEmployeeId.value?.[employee?.id || ''] || []
+  const target = toYMD(scheduleDate.value)
+  const existing = recs.find((r: any) => toYMD(r.pto_date) === target && r.pto_type === 'call_in') || null
+  callInForm.value.notes = existing?.notes || ''
+  showCallInModal.value = true
+}
+
+const saveCallIn = async () => {
+  if (!callInForm.value.employee_id || !callInForm.value.pto_date) return
+  const prior = resolvedCallInRecord.value
+  if (prior?.id) {
+    const removed = await deletePTO(prior.id)
+    if (!removed) {
+      showNotification('Failed to update call-in. Please try again.', 'error')
+      return
+    }
+  }
+  const ok = await createPTO({
+    employee_id: callInForm.value.employee_id,
+    pto_date: callInForm.value.pto_date,
+    start_time: null,
+    end_time: null,
+    pto_type: 'call_in',
+    notes: callInForm.value.notes || null
+  })
+  if (ok) {
+    await fetchPTOForDate(scheduleDate.value)
+    showCallInModal.value = false
+    showNotification('Call-in saved.', 'success')
+  } else {
+    showNotification('Failed to save call-in. Please try again.', 'error')
+  }
+}
+
+const closeCallInModal = () => {
+  showCallInModal.value = false
+}
+
+const deleteCurrentCallIn = async () => {
+  const rec = resolvedCallInRecord.value
+  if (!rec?.id) return
+  const ok = await deletePTO(rec.id)
+  if (ok) {
+    await fetchPTOForDate(scheduleDate.value)
+    showCallInModal.value = false
+    showNotification('Call-in removed.', 'success')
+  } else {
+    showNotification('Failed to remove call-in. Please try again.', 'error')
+  }
+}
+
 // Shift Swap Modal state and actions
 const showShiftSwapModal = ref(false)
 const selectedSwapEmployee = ref<any>(null)
@@ -1796,6 +1903,11 @@ const isHourlyMarker = (time: string): boolean => {
   const [hours, minutes] = time.split(':').map(Number)
   return minutes === 0
 }
+
+// Active meter stations shown in the Meter dashboard.
+// Meter 7, 15, and 16 were retired — keeping the list explicit so the UI and
+// assignment-parsing bounds check stay in sync.
+const ACTIVE_METER_NUMBERS = [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]
 
 const isMeterBooked = (meterNumber: number, timeSlot: string): boolean => {
   const key = `meter-${meterNumber}-${timeSlot}`
@@ -2004,7 +2116,7 @@ const syncMeterBookings = () => {
         if (data && data.assignment && data.assignment.startsWith('Meter ')) {
           const meterNumber = parseInt(data.assignment.split(' ')[1])
           
-          if (meterNumber >= 1 && meterNumber <= 16) {
+          if (ACTIVE_METER_NUMBERS.includes(meterNumber)) {
             const startTime = timeSlot
             const endTime = data.until
             
