@@ -50,7 +50,7 @@ const expandFanOutTargets = (
     if (!jf) continue
 
     // Check if this function is a fan-out parent (e.g., "Meter" with children "Meter 1", "Meter 2")
-    const childFunctions = jobFunctions.filter(
+    const allCandidateChildren = jobFunctions.filter(
       (j: any) =>
         j.id !== jfId &&
         j.is_active !== false &&
@@ -58,6 +58,23 @@ const expandFanOutTargets = (
         j.name.startsWith(jf.name + ' ') &&
         /\d+$/.test(j.name)
     )
+
+    // Dedupe by name — if two job_function rows share the same name (e.g., an
+    // accidental duplicate "Meter 5"), treat them as the same logical station
+    // so we don't double-fill a single physical station. Prefer the oldest
+    // record (lowest created_at) as the canonical one.
+    const byName = new Map<string, any>()
+    for (const child of allCandidateChildren) {
+      const existing = byName.get(child.name)
+      if (!existing) {
+        byName.set(child.name, child)
+      } else {
+        const a = existing.created_at ? new Date(existing.created_at).getTime() : Infinity
+        const b = child.created_at ? new Date(child.created_at).getTime() : Infinity
+        if (b < a) byName.set(child.name, child)
+      }
+    }
+    const childFunctions = Array.from(byName.values())
 
     if (childFunctions.length === 0) {
       // Not a fan-out parent, keep as-is
