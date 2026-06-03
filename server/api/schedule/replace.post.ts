@@ -1,9 +1,11 @@
 import { transaction } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireAuth, getWriteTeamId } from '../../utils/authorize'
 
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
-  const teamId = getTeamFilter(user)
+  // Use the writer's own team for BOTH the delete-scope and the insert stamp so a
+  // super admin replacing their team's schedule can't wipe another team's day.
+  const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const { date, assignments } = body as {
     date: string

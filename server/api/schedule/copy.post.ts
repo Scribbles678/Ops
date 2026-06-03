@@ -1,9 +1,11 @@
 import { query } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireAuth, getWriteTeamId } from '../../utils/authorize'
 
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
-  const teamId = getTeamFilter(user)
+  // Scope the copy to the writer's own team (super admins copy their team's day,
+  // not every team's). Inserted rows keep each source row's team_id.
+  const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const { from_date, to_date } = body
 

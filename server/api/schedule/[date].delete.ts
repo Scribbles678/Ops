@@ -1,9 +1,11 @@
 import { query } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireAuth, getWriteTeamId } from '../../utils/authorize'
 
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
-  const teamId = getTeamFilter(user)
+  // Scope the delete to the writer's own team so a super admin clearing their
+  // team's day can't wipe another team's assignments for that date.
+  const teamId = getWriteTeamId(user)
   const date = getRouterParam(event, 'date')
 
   if (!date) {

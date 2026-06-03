@@ -5,13 +5,13 @@ A web-based scheduling application for distribution center operations. Built wit
 ## Features
 
 - **Daily Schedule Management** - Visual grid editor for employee assignments with 15-minute granularity
-- **Daily Schedule Management** - Visual grid editor for employee assignments with 15-minute granularity
-- **Automated Schedule Builder** - Generates schedules from staffing targets, training, and required assignments using a two-halves algorithm (AM/PM blocks per employee) with PTO integration
+- **Automated Schedule Builder** - Generates schedules from staffing targets, training, and required assignments using a two-halves algorithm (AM/PM blocks per employee) with PTO integration and a lunch/break coverage pass
 - **Staffing Targets** - Set target headcount per job function per hour in a grid UI
+- **Coverage Requirements** - Flag job functions that need lunch/break coverage so the builder keeps the station continuously staffed
 - **Employee Training Matrix** - Track which employees are trained for which job functions, with auto-save
-- **Required Assignments** - Lock specific employees to specific functions daily
+- **Required Assignments** - Lock specific employees to specific functions daily (AM/PM-specific supported)
 - **PTO Calendar** - Week/month calendar combining approved PTO and pending requests; admin approval workflow
-- **Schedule Requests** - Unified request pipeline for PTO (full/partial), leave-early, and shift swaps
+- **Schedule Requests** - Unified request pipeline for PTO (full/partial), leave-early, and shift swaps with an auto-approval rule engine (per-day limits, team PTO-hour caps, blocked dates)
 - **Shift Swap Tracking** - Record and manage shift swaps between employees
 - **Copy Schedule** - Duplicate a previous day's schedule to a new date
 - **Display Mode** - Full-screen TV view with auto-refresh (every 2 min)
@@ -98,7 +98,7 @@ scheduling-app-v2/
 ├── components/
 │   ├── details/              # Job function, shift, employee editors
 │   ├── schedule/             # Schedule grid, shift groups, assignment cards
-│   └── training/             # Training matrix components
+│   └── schedule-requests/    # Request form modal + auto-approval result banner
 ├── composables/              # Shared reactive logic
 │   ├── useAIScheduleBuilder.ts   # Automated schedule generation (two-halves algorithm)
 │   ├── useAuth.ts                # JWT authentication
@@ -113,7 +113,8 @@ scheduling-app-v2/
 │   ├── useShiftSwaps.ts          # Shift swap tracking
 │   ├── useLaborCalculations.ts   # Hours/staffing calculations
 │   ├── useTeam.ts                # Team management
-│   └── useTeamSettings.ts        # Per-team settings
+│   ├── useTeamSettings.ts        # Per-team settings (request-rule limits)
+│   └── useTeamBlockedDates.ts    # Per-team blocked dates for request auto-rejection
 ├── pages/                    # File-based routing
 │   ├── admin/                # Admin pages
 │   ├── schedule/             # Schedule pages
@@ -128,15 +129,19 @@ scheduling-app-v2/
 │   │   ├── pto/
 │   │   ├── pto-calendar/
 │   │   ├── schedule-requests/
+│   │   ├── team-settings/
+│   │   ├── team-blocked-dates/
 │   │   └── ...
+│   ├── plugins/
+│   │   └── bootstrap.ts      # On-boot self-setup: schema + migrations + first admin
 │   └── utils/
 │       ├── db.ts             # PostgreSQL connection pool
 │       ├── authorize.ts      # Auth middleware (JWT verification)
 │       ├── jwt.ts            # Token signing/verification
 │       └── email.ts          # Email utilities
 ├── sql-schema/
-│   ├── setup.sql             # Full database schema (run once)
-│   ├── staffing_targets.sql  # Staffing targets table
+│   ├── setup.sql             # Full database schema (applied once on empty DB)
+│   ├── migrations/           # 001–008 incremental migrations (applied on boot)
 │   └── ...                   # Individual table schemas for reference
 ├── scripts/
 │   ├── seed-first-user.js    # Create initial admin account
@@ -156,20 +161,25 @@ Core tables:
 | Table | Purpose |
 |-------|---------|
 | `teams` | Multi-tenant team isolation |
-| `user_profiles` | User accounts with roles and password hashes |
-| `team_settings` | Per-team configuration |
+| `user_profiles` | User accounts with roles, password hashes, optional employee link |
+| `password_reset_tokens` | Self-service password reset tokens |
+| `team_settings` | Per-team configuration (request-rule limits) |
+| `team_blocked_dates` | Dates that auto-reject PTO/leave-early requests |
 | `employees` | Employee records (name, shift, active status) |
-| `job_functions` | Job roles with colors and settings |
+| `job_functions` | Job roles with colors, coverage flags, exclude-from-targets |
 | `employee_training` | Which employees are trained for which functions (junction table) |
 | `shifts` | Shift definitions with break/lunch times |
 | `schedule_assignments` | Daily employee-to-function assignments |
+| `schedule_assignments_archive` | Assignments older than 30 days (retention) |
 | `staffing_targets` | Target headcount per function per hour (drives Automated Builder) |
-| `preferred_assignments` | Required/preferred employee-function pairings |
+| `preferred_assignments` | Required/preferred employee-function pairings (AM/PM-aware) |
 | `pto_days` | PTO records by employee and date |
-| `schedule_requests` | Unified PTO / leave-early / shift-swap request workflow |
+| `schedule_requests` | Unified PTO / leave-early / shift-swap workflow with auto-approval |
 | `shift_swaps` | Shift swap records |
 | `daily_targets` | Daily production targets |
+| `daily_targets_archive` | Daily targets older than 30 days (retention) |
 | `target_hours` | Default target hours per job function |
+| `cleanup_log` | Audit log of archival runs |
 | `business_rules` | Legacy staffing rules (replaced by staffing_targets) |
 
 ## Automated Schedule Builder
@@ -178,10 +188,12 @@ The builder uses a **two-halves algorithm** (see [composables/useAIScheduleBuild
 
 1. Each employee's day is split into AM (shift start → lunch start) and PM (lunch end → shift end). An employee gets at most two assignments per day.
 2. **PTO is applied first** — full-day PTO removes the employee; partial-day PTO clips AM/PM blocks and invalidates any block < 30 min.
-3. **Meter fan-out** — parent functions like "Meter" distribute headcount across numbered children ("Meter 1", "Meter 2", ...).
-4. **Required assignments** — employees with `is_required=true` get their locked function for both halves.
-5. **Most-constrained-first greedy** — remaining employees filled by demand. Each iteration picks the employee with fewest feasible options, then the highest-scoring (function, window) pair. Preferred assignments get a scoring bonus.
-6. **Gaps** — any remaining unfilled demand is reported as a warning (non-fatal).
+3. **Break carve-out** — AM/PM blocks are split around the shift's break windows so employees aren't scheduled through their own breaks.
+4. **Meter fan-out** — parent functions like "Meter" distribute headcount across numbered children ("Meter 1", "Meter 2", ...).
+5. **Required assignments** — employees with `is_required=true` get their locked function for both halves (AM/PM-specific functions supported).
+6. **Most-constrained-first greedy** — remaining employees filled by demand. Each iteration picks the employee with fewest feasible options, then the highest-scoring (function, window) pair. Preferred assignments get a scoring bonus.
+7. **Lunch/break coverage pass** — for functions flagged `lunch_coverage_required` / `break_coverage_required`, another trained, available employee is assigned to cover the primary's lunch/break so the station stays staffed.
+8. **Gaps** — any remaining unfilled demand is reported as a warning (non-fatal).
 
 Inputs: `staffing_targets` + `employee_training` + `preferred_assignments` + `shifts` (with lunch times) + `pto_days` for the target date.
 

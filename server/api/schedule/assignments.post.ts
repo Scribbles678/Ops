@@ -1,9 +1,9 @@
 import { query } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireAuth, getWriteTeamId } from '../../utils/authorize'
 
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
-  const teamId = getTeamFilter(user)
+  const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const { employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order = 1 } = body
 

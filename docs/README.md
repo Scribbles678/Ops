@@ -37,4 +37,4 @@ When customizing the UI or creating branded materials:
 
 ---
 
-**Last Updated**: April 2026
+**Last Updated**: June 2026

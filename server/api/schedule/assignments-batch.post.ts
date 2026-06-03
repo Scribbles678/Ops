@@ -1,9 +1,9 @@
 import { transaction } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireAuth, getWriteTeamId } from '../../utils/authorize'
 
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
-  const teamId = getTeamFilter(user)
+  const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const { assignments } = body as { assignments: Array<{
     employee_id: string

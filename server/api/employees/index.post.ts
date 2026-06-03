@@ -1,9 +1,9 @@
 import { query } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireAuth, getWriteTeamId } from '../../utils/authorize'
 
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
-  const teamId = getTeamFilter(user) ?? (await readBody(event)).team_id
+  const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const { first_name, last_name, shift_id, is_active = true } = body
 
