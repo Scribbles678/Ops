@@ -95,6 +95,8 @@
           <p class="text-xs text-gray-400 mt-2">
             Need an account? Contact your administrator. <NuxtLink to="/reset-password" class="text-white underline hover:text-blue-200">Forgot your password?</NuxtLink>
           </p>
+          <!-- Deploy canary: bump this on each release to confirm the pipeline shipped it -->
+          <p class="text-xs text-gray-300 mt-3">Build 2026.06.04-1</p>
         </div>
       </div>
     </div>
