@@ -8,7 +8,7 @@ Documentation for the Operations Scheduling Tool (scheduling-app-v2).
 - **[ROLES.md](./ROLES.md)** — User roles, permissions matrix, team isolation rules
 - **[RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md)** — Production deployment on Rancher / Kubernetes
 
-## Related Resources
+## Related Resources.
 
 - `../README.md` — Main project readme (features, quick start, env vars)
 - `../sql-schema/` — PostgreSQL table definitions + triggers
