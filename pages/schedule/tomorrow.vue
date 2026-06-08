@@ -362,6 +362,25 @@
             </div>
           </div>
 
+          <!-- Over-target (surplus) summary -->
+          <div v-if="overTargetByFunction.length > 0" class="mb-6">
+            <h4 class="text-lg font-semibold text-gray-700 mb-3">Staffed Above Target (surplus deployed):</h4>
+            <p class="text-xs text-gray-500 mb-2">
+              You have more available staff than your targets require, so extra workers were assigned to keep everyone working.
+              These functions are staffed above their hourly targets.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <span
+                v-for="(o, index) in overTargetByFunction"
+                :key="index"
+                class="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-50 text-blue-700 border border-blue-200"
+              >
+                {{ o.job_function_name }}
+                <span class="ml-1.5 font-semibold">+{{ o.surplus }} hr{{ o.surplus === 1 ? '' : 's' }}</span>
+              </span>
+            </div>
+          </div>
+
           <!-- Other warnings -->
           <div v-if="scheduleWarnings.length > 0" class="mb-6">
             <h4 class="text-lg font-semibold text-gray-700 mb-3">Details:</h4>
@@ -445,6 +464,17 @@ const generating = ref(false)
 const showWarningsModal = ref(false)
 const scheduleWarnings = ref<string[]>([])
 const scheduleGaps = ref<{ job_function_name: string; hour: string; shortfall: number }[]>([])
+const scheduleOverTarget = ref<{ job_function_name: string; hour: string; surplus: number }[]>([])
+
+// Surplus (over-target) staffing aggregated per function for a compact summary.
+const overTargetByFunction = computed(() => {
+  const map = new Map<string, number>()
+  for (const o of scheduleOverTarget.value) {
+    map.set(o.job_function_name, (map.get(o.job_function_name) || 0) + o.surplus)
+  }
+  return Array.from(map, ([job_function_name, surplus]) => ({ job_function_name, surplus }))
+    .sort((a, b) => b.surplus - a.surplus)
+})
 
 // Build Review state
 const showBuildReview = ref(false)
@@ -558,16 +588,18 @@ const generateAISchedule = async () => {
       generating.value = true
       scheduleWarnings.value = []
       scheduleGaps.value = []
+      scheduleOverTarget.value = []
 
-      const { schedule, warnings, errors, gaps } = await generateAIScheduleFromBuilder(selectedDate.value || '')
+      const { schedule, warnings, errors, gaps, overTarget } = await generateAIScheduleFromBuilder(selectedDate.value || '')
 
       if (schedule.length > 0) {
         await applyAISchedule(schedule, selectedDate.value || '')
 
         scheduleWarnings.value = warnings
         scheduleGaps.value = gaps || []
+        scheduleOverTarget.value = overTarget || []
 
-        if (warnings.length > 0 || scheduleGaps.value.length > 0) {
+        if (warnings.length > 0 || scheduleGaps.value.length > 0 || scheduleOverTarget.value.length > 0) {
           showWarningsModal.value = true
         } else {
           showNotification(`Schedule generated successfully! Created ${schedule.length} assignments for ${formatDate(selectedDate.value || '')}. Redirecting...`, 'success')

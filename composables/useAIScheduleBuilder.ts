@@ -168,6 +168,12 @@ interface Gap {
   shortfall: number
 }
 
+interface OverTarget {
+  job_function_name: string
+  hour: string
+  surplus: number
+}
+
 const buildSchedule = (
   employees: any[],
   jobFunctions: any[],
@@ -177,8 +183,9 @@ const buildSchedule = (
   preferredAssignmentsMap: Record<string, Record<string, any>>,
   warnings: string[],
   ptoByEmployee: Record<string, any> = {}
-): { schedule: ScheduleAssignment[]; gaps: Gap[] } => {
+): { schedule: ScheduleAssignment[]; gaps: Gap[]; overTarget: OverTarget[] } => {
   const gaps: Gap[] = []
+  const overTarget: OverTarget[] = []
 
   // STEP 0: Prepare employee info
   const activeEmployees = employees.filter((e: any) => e.is_active !== false && e.shift_id)
@@ -433,25 +440,6 @@ const buildSchedule = (
     else empAvailable.set(empId, updated)
   }
 
-  // Helper: find first contiguous demand block for jfId within [wStart, wEnd]
-  const findDemandWindow = (jfId: string, wStart: number, wEnd: number): {start: number, end: number} | null => {
-    const jfDemand = demand[jfId]
-    if (!jfDemand) return null
-    let blockStart: number | null = null
-    let blockEnd = 0
-    for (const h of getHoursCovered(wStart, wEnd)) {
-      const hMin = timeToMinutes(h)
-      if ((jfDemand[h] ?? 0) > 0) {
-        if (blockStart === null) blockStart = hMin
-        blockEnd = hMin + 60
-      } else if (blockStart !== null) {
-        break // stop at first gap in demand
-      }
-    }
-    if (blockStart === null) return null
-    return {start: Math.max(wStart, blockStart), end: Math.min(wEnd, blockEnd)}
-  }
-
   // STEP 1: Assign required employees (AM/PM blocks pinned to configured function,
   // split around breaks so the primary isn't "working" during their own break time).
   for (const emp of empInfos) {
@@ -490,74 +478,125 @@ const buildSchedule = (
     }
   }
 
-  // STEP 2: Multi-block demand assignment.
-  // Each iteration picks the most-constrained employee (fewest demand-fillable function
-  // options across all their remaining time windows), assigns them for exactly the first
-  // contiguous demand block within their best window, then re-evaluates. This allows an
-  // employee to receive multiple assignments per day — e.g. startup 6–8 AM, then pick
-  // 8 AM–12 PM — so per-hour grid targets are strictly honored.
-  interface CandidateOption {
-    jfId: string
-    demandWindow: {start: number, end: number}
-    score: number
+  // ---------------------------------------------------------------------------
+  // STEP 2 (redesigned): scarce-first target fill, then surplus fill, then merge.
+  //
+  // Demand is treated as a per-hour MINIMUM target, not a cap. PASS 1 meets those
+  // targets, filling the scarcest-to-staff functions first so they claim their few
+  // trained people before abundant roles consume them. PASS 2 (after the coverage
+  // pass) deploys any remaining availability so labor isn't left idle, preferring to
+  // continue a function the employee is already on. PASS 3 merges touching same-function
+  // blocks. Final coverage vs target yields gaps (under) and over-target (surplus).
+  // ---------------------------------------------------------------------------
+
+  // Static per-hour target + a running coverage counter (keyed "HH:MM").
+  // (job_function_id, hour) is unique per the data model, so overwrite (not sum) —
+  // matches the original demand build and avoids double-counting any stray duplicate
+  // target row for the same function+hour.
+  const target: Record<string, Record<string, number>> = {}
+  for (const t of expandedTargets) {
+    const slot = target[t.job_function_id] ?? (target[t.job_function_id] = {})
+    slot[t.hour_start] = t.headcount
+  }
+  const covered: Record<string, Record<string, number>> = {}
+  for (const jfId of Object.keys(target)) {
+    covered[jfId] = {}
+    for (const h of Object.keys(target[jfId]!)) covered[jfId]![h] = 0
   }
 
-  while (true) {
-    const candidates: {empId: string, options: CandidateOption[]}[] = []
+  const incrementCovered = (jfId: string, start: number, end: number) => {
+    const c = covered[jfId]
+    if (!c) return
+    for (const h of getHoursCovered(start, end)) if (c[h] != null) c[h]!++
+  }
+  // Count STEP 1 (required) assignments already made toward coverage.
+  for (const a of allAssignments) incrementCovered(a.jfId, a.start, a.end)
 
-    for (const [empId, windows] of empAvailable) {
-      const empOptions: CandidateOption[] = []
+  // Unified assignment helper: record, count coverage, carve availability.
+  const assign = (empId: string, jfId: string, start: number, end: number) => {
+    allAssignments.push({ empId, jfId, start, end })
+    incrementCovered(jfId, start, end)
+    useEmpTime(empId, start, end)
+  }
 
-      for (const window of windows) {
-        if (window.end - window.start < 30) continue
-
-        for (const jfId of Object.keys(demand)) {
-          if (!isTrainedFor(empId, jfId, jobFunctions, trainingData)) continue
-          const dw = findDemandWindow(jfId, window.start, window.end)
-          if (!dw || dw.end <= dw.start) continue
-
-          let score = 0
-          for (const h of getHoursCovered(dw.start, dw.end)) {
-            score += demand[jfId]?.[h] ?? 0
-          }
-          if (score <= 0) continue
-
-          // Preferred assignment bonus
-          if (preferredAssignmentsMap[empId]?.[jfId]) score += 10000
-          // Meter parent preferred bonus
-          const jf = jobFunctions.find((j: any) => j.id === jfId)
-          if (jf && /^Meter [0-9]+$/.test(jf.name || '')) {
-            const parent = jobFunctions.find(
-              (j: any) => j.name === 'Meter' && (jf.team_id == null || j.team_id === jf.team_id)
-            )
-            if (parent && preferredAssignmentsMap[empId]?.[parent.id]) score += 10000
-          }
-
-          empOptions.push({jfId, demandWindow: dw, score})
-        }
-      }
-
-      if (empOptions.length > 0) {
-        candidates.push({empId, options: empOptions})
+  // Per-function trained supply and total demand → scarcity ordering + surplus ratios.
+  const trainedSupply: Record<string, number> = {}
+  for (const empId of Object.keys(trainingData)) {
+    for (const jfId of Object.keys(target)) {
+      if (isTrainedFor(empId, jfId, jobFunctions, trainingData)) {
+        trainedSupply[jfId] = (trainedSupply[jfId] ?? 0) + 1
       }
     }
+  }
+  const totalDemand: Record<string, number> = {}
+  for (const jfId of Object.keys(target)) {
+    totalDemand[jfId] = Object.values(target[jfId]!).reduce((a, b) => a + b, 0)
+  }
 
-    if (candidates.length === 0) break
+  const PREFERRED_BONUS = 120
+  const STICKY_BONUS = 200
+  const CONSTRAINT_WEIGHT = 3
+  const MAX_FUNCTIONS = 4 // soft cap on distinct functions per employee per day
 
-    // Most constrained first (fewest distinct function options)
-    candidates.sort((a, b) => a.options.length - b.options.length)
-    const top = candidates[0]
-    if (!top) break
-    const {empId, options} = top
+  const isPreferredFor = (empId: string, jfId: string): boolean => {
+    if (preferredAssignmentsMap[empId]?.[jfId]) return true
+    const jf = jobFunctions.find((j: any) => j.id === jfId)
+    if (jf && /^Meter [0-9]+$/.test(jf.name || '')) {
+      const parent = jobFunctions.find(
+        (j: any) => j.name === 'Meter' && (jf.team_id == null || j.team_id === jf.team_id)
+      )
+      if (parent && preferredAssignmentsMap[empId]?.[parent.id]) return true
+    }
+    return false
+  }
 
-    // Best option: highest demand score
-    options.sort((a: CandidateOption, b: CandidateOption) => b.score - a.score)
-    const best = options[0]
-    if (!best) break
+  // Functions with real demand, ordered scarcest-first (supply ÷ demand ascending).
+  const demandFns = Object.keys(target).filter((jfId) => (totalDemand[jfId] ?? 0) > 0)
+  demandFns.sort(
+    (a, b) => (trainedSupply[a]! / totalDemand[a]!) - (trainedSupply[b]! / totalDemand[b]!)
+  )
 
-    allAssignments.push({empId, jfId: best.jfId, start: best.demandWindow.start, end: best.demandWindow.end})
-    decrementDemand(best.jfId, best.demandWindow.start, best.demandWindow.end)
-    useEmpTime(empId, best.demandWindow.start, best.demandWindow.end)
+  // First contiguous run of still-unmet hours for a function (across the whole day).
+  const firstUnmetRun = (jfId: string): { start: number; end: number } | null => {
+    const tgt = target[jfId]!
+    const cov = covered[jfId]!
+    let runStart: number | null = null
+    let runEnd = 0
+    for (const h of Object.keys(tgt).sort()) {
+      if ((cov[h] ?? 0) < tgt[h]!) {
+        const hMin = timeToMinutes(h)
+        if (runStart === null) runStart = hMin
+        runEnd = hMin + 60
+      } else if (runStart !== null) {
+        break
+      }
+    }
+    return runStart === null ? null : { start: runStart, end: runEnd }
+  }
+
+  // PASS 1: meet targets, scarcest function first, longest sticky blocks.
+  for (const jfId of demandFns) {
+    let guard = 0
+    while (guard++ < 1000) {
+      const run = firstUnmetRun(jfId)
+      if (!run) break
+      let best: { empId: string; start: number; end: number; score: number } | null = null
+      for (const [empId, windows] of empAvailable) {
+        if (!isTrainedFor(empId, jfId, jobFunctions, trainingData)) continue
+        for (const w of windows) {
+          const s = Math.max(w.start, run.start)
+          const e = Math.min(w.end, run.end)
+          if (e - s < 30) continue
+          const sticky = allAssignments.some((a) => a.empId === empId && a.jfId === jfId) ? STICKY_BONUS : 0
+          const preferred = isPreferredFor(empId, jfId) ? PREFERRED_BONUS : 0
+          const otherTrained = trainingData[empId]?.length ?? 0
+          const score = (e - s) + sticky + preferred - otherTrained * CONSTRAINT_WEIGHT
+          if (!best || score > best.score) best = { empId, start: s, end: e, score }
+        }
+      }
+      if (!best) break // genuine shortfall — no trained, available employee for this run
+      assign(best.empId, jfId, best.start, best.end)
+    }
   }
 
   // STEP 2.5: Lunch/break coverage pass.
@@ -695,26 +734,105 @@ const buildSchedule = (
     }
   }
 
-  // STEP 3: Detect gaps
-  for (const [jfId, hours] of Object.entries(demand)) {
+  // PASS 2: surplus fill — deploy remaining availability so labor isn't idle.
+  // Prefer continuing a function adjacent to the window (continuity), else the most
+  // under-served function the employee is trained for. Zero-demand functions
+  // (e.g. TL/coordinator, filled only via required pins) are never surplus targets.
+  const fnRatio = (jfId: string): number => {
+    const tgt = target[jfId]
+    if (!tgt) return Infinity
+    let t = 0
+    let c = 0
+    for (const h of Object.keys(tgt)) {
+      t += tgt[h]!
+      c += covered[jfId]?.[h] ?? 0
+    }
+    return t === 0 ? Infinity : c / t
+  }
+  let progressed = true
+  let passGuard = 0
+  while (progressed && passGuard++ < 2000) {
+    progressed = false
+    for (const [empId, windows] of empAvailable) {
+      if (!windows.length) continue
+      const w = windows[0]!
+      if (w.end - w.start < 30) continue // leave sub-30-min remnants idle
+      const distinct = new Set(allAssignments.filter((a) => a.empId === empId).map((a) => a.jfId))
+      let eligible = demandFns.filter((jfId) => isTrainedFor(empId, jfId, jobFunctions, trainingData))
+      if (distinct.size >= MAX_FUNCTIONS) eligible = eligible.filter((jfId) => distinct.has(jfId))
+      if (!eligible.length) eligible = Array.from(distinct) // at cap with no overlap → stay on existing
+      if (!eligible.length) {
+        empAvailable.set(empId, windows.slice(1))
+        continue
+      }
+      let pick: string | null = null
+      let pickScore = -Infinity
+      for (const jfId of eligible) {
+        const adjacent = allAssignments.some(
+          (a) => a.empId === empId && a.jfId === jfId && (a.end === w.start || a.start === w.end)
+        ) ? 100 : 0
+        const need = Math.max(0, 1 - fnRatio(jfId)) * 40
+        const existing = distinct.has(jfId) ? 20 : 0
+        const preferred = isPreferredFor(empId, jfId) ? 10 : 0
+        const score = adjacent + need + existing + preferred
+        if (score > pickScore) {
+          pickScore = score
+          pick = jfId
+        }
+      }
+      if (!pick) {
+        empAvailable.set(empId, windows.slice(1))
+        continue
+      }
+      assign(empId, pick, w.start, w.end)
+      progressed = true
+    }
+  }
+
+  // PASS 3: merge touching same-employee, same-function blocks into one segment
+  // (e.g. a block ending at a break and resuming after it on the same function).
+  const mergedAssignments: { empId: string; jfId: string; start: number; end: number }[] = []
+  const assignmentsByEmp = new Map<string, { empId: string; jfId: string; start: number; end: number }[]>()
+  for (const a of allAssignments) {
+    if (!assignmentsByEmp.has(a.empId)) assignmentsByEmp.set(a.empId, [])
+    assignmentsByEmp.get(a.empId)!.push(a)
+  }
+  for (const [, list] of assignmentsByEmp) {
+    list.sort((x, y) => x.start - y.start)
+    let cur: { empId: string; jfId: string; start: number; end: number } | null = null
+    for (const a of list) {
+      if (cur && cur.jfId === a.jfId && a.start <= cur.end) cur.end = Math.max(cur.end, a.end)
+      else {
+        if (cur) mergedAssignments.push(cur)
+        cur = { ...a }
+      }
+    }
+    if (cur) mergedAssignments.push(cur)
+  }
+
+  // STEP 3: Detect gaps (unmet) and over-target (surplus) from final coverage vs target.
+  for (const [jfId, hours] of Object.entries(target)) {
     const jf = jobFunctions.find((j: any) => j.id === jfId)
     const jfName = jf?.name || jfId
-    for (const [hour, count] of Object.entries(hours)) {
-      if (count > 0) {
-        gaps.push({ job_function_name: jfName, hour, shortfall: count })
-        warnings.push(`Need ${count} more for ${jfName} at ${hour}`)
+    for (const [hour, tgt] of Object.entries(hours)) {
+      const cov = covered[jfId]?.[hour] ?? 0
+      if (cov < tgt) {
+        gaps.push({ job_function_name: jfName, hour, shortfall: tgt - cov })
+        warnings.push(`Need ${tgt - cov} more for ${jfName} at ${hour}`)
+      } else if (cov > tgt) {
+        overTarget.push({ job_function_name: jfName, hour, surplus: cov - tgt })
       }
     }
   }
 
-  // STEP 4: Convert allAssignments to schedule output
+  // STEP 4: Convert merged assignments to schedule output
   const jfNameById = new Map<string, string>()
   for (const jf of jobFunctions) {
     jfNameById.set(jf.id, jf.name)
   }
 
   const schedule: ScheduleAssignment[] = []
-  for (const {empId, jfId, start, end} of allAssignments) {
+  for (const {empId, jfId, start, end} of mergedAssignments) {
     const name = jfNameById.get(jfId)
     if (name && end > start) {
       schedule.push({
@@ -726,7 +844,7 @@ const buildSchedule = (
     }
   }
 
-  return { schedule, gaps }
+  return { schedule, gaps, overTarget }
 }
 
 // ---------------------------------------------------------------------------
@@ -745,6 +863,7 @@ export function useAIScheduleBuilder() {
     warnings: string[]
     errors: string[]
     gaps: Gap[]
+    overTarget: OverTarget[]
   }> => {
     const warnings: string[] = []
     const errors: string[] = []
@@ -781,7 +900,7 @@ export function useAIScheduleBuilder() {
         trainingData = (await getAllEmployeeTraining(employeeIds)) || {}
       } catch (e: any) {
         errors.push(`Error loading employee training: ${e?.message || 'Unknown error'}`)
-        return { schedule: [], warnings: [], errors, gaps: [] }
+        return { schedule: [], warnings: [], errors, gaps: [], overTarget: [] }
       }
 
       const employeesWithTraining = Object.keys(trainingData).filter(
@@ -789,7 +908,7 @@ export function useAIScheduleBuilder() {
       )
       if (!employeesWithTraining.length) {
         errors.push('No employees have any job function training assigned.')
-        return { schedule: [], warnings: [], errors, gaps: [] }
+        return { schedule: [], warnings: [], errors, gaps: [], overTarget: [] }
       }
       if (employeesWithTraining.length < activeEmployees.length) {
         warnings.push(
@@ -800,7 +919,7 @@ export function useAIScheduleBuilder() {
       const employeesWithShifts = activeEmployees.filter((e: any) => e?.shift_id)
       if (!employeesWithShifts.length) {
         errors.push('No employees are assigned to shifts.')
-        return { schedule: [], warnings: [], errors, gaps: [] }
+        return { schedule: [], warnings: [], errors, gaps: [], overTarget: [] }
       }
       if (employeesWithShifts.length < activeEmployees.length) {
         warnings.push(
@@ -825,7 +944,7 @@ export function useAIScheduleBuilder() {
         }
       }
 
-      const { schedule, gaps } = buildSchedule(
+      const { schedule, gaps, overTarget } = buildSchedule(
         employees,
         jobFunctionsList,
         shifts,
@@ -840,10 +959,10 @@ export function useAIScheduleBuilder() {
         errors.push('No schedule assignments could be created.')
       }
 
-      return { schedule, warnings, errors, gaps }
+      return { schedule, warnings, errors, gaps, overTarget }
     } catch (e: any) {
       errors.push(`Error occurred: ${e?.message || 'Unknown error'}`)
-      return { schedule: [], warnings: [], errors, gaps: [] }
+      return { schedule: [], warnings: [], errors, gaps: [], overTarget: [] }
     }
   }
 
