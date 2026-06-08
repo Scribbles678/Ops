@@ -35,9 +35,17 @@
               <p class="text-[11px] md:text-xs text-gray-600">
                 Rate: {{ jobFunction.productivity_rate || 'N/A' }} cartons/hour
               </p>
-              <span v-if="jobFunction.exclude_from_targets" class="inline-block mt-0.5 text-[10px] md:text-[11px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
-                Excluded from targets grid
-              </span>
+              <div class="flex flex-wrap gap-1 mt-0.5">
+                <span v-if="jobFunction.exclude_from_targets" class="inline-block text-[10px] md:text-[11px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                  Excluded from targets grid
+                </span>
+                <span v-if="jobFunction.max_headcount != null" class="inline-block text-[10px] md:text-[11px] bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">
+                  Max {{ jobFunction.max_headcount }}/hr
+                </span>
+                <span v-if="jobFunction.surplus_overflow" class="inline-block text-[10px] md:text-[11px] bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                  Surplus overflow
+                </span>
+              </div>
             </div>
           </div>
           <div class="flex space-x-2">
@@ -120,6 +128,33 @@
             </label>
           </div>
 
+          <div>
+            <label class="block font-medium text-gray-700 mb-1">
+              Max people at once (per hour)
+            </label>
+            <input
+              v-model.number="formData.max_headcount"
+              type="number"
+              min="0"
+              placeholder="No limit"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <span class="block text-[11px] text-gray-500 mt-1">Builder never assigns more than this many people to this function in any hour. Leave blank for no limit.</span>
+          </div>
+
+          <div class="flex items-center space-x-2.5">
+            <input
+              id="surplus_overflow"
+              v-model="formData.surplus_overflow"
+              type="checkbox"
+              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label for="surplus_overflow" class="font-medium text-gray-700">
+              Surplus overflow function
+              <span class="block text-[11px] font-normal text-gray-500">After targets are met, extra workers flow into this function first (e.g. Pick, Projects)</span>
+            </label>
+          </div>
+
           <div class="flex items-center space-x-2.5">
             <input
               id="lunch_coverage_required"
@@ -172,14 +207,26 @@ const { jobFunctions, loading, error, fetchJobFunctions, createJobFunction, upda
 
 const showModal = ref(false)
 const editingJobFunction = ref<any | null>(null)
-const formData = ref({
+const formData = ref<{
+  name: string
+  color_code: string
+  productivity_rate: number | null
+  sort_order: number
+  exclude_from_targets: boolean
+  lunch_coverage_required: boolean
+  break_coverage_required: boolean
+  max_headcount: number | null
+  surplus_overflow: boolean
+}>({
   name: '',
   color_code: '#3B82F6',
   productivity_rate: null,
   sort_order: 0,
   exclude_from_targets: false,
   lunch_coverage_required: false,
-  break_coverage_required: false
+  break_coverage_required: false,
+  max_headcount: null,
+  surplus_overflow: false
 })
 
 onMounted(() => {
@@ -197,7 +244,9 @@ const openAddModal = () => {
     sort_order: jobFunctionsList.value.length,
     exclude_from_targets: false,
     lunch_coverage_required: false,
-    break_coverage_required: false
+    break_coverage_required: false,
+    max_headcount: null,
+    surplus_overflow: false
   }
   showModal.value = true
 }
@@ -211,7 +260,9 @@ const openEditModal = (jobFunction: any) => {
     sort_order: jobFunction.sort_order,
     exclude_from_targets: jobFunction.exclude_from_targets ?? false,
     lunch_coverage_required: jobFunction.lunch_coverage_required ?? false,
-    break_coverage_required: jobFunction.break_coverage_required ?? false
+    break_coverage_required: jobFunction.break_coverage_required ?? false,
+    max_headcount: jobFunction.max_headcount ?? null,
+    surplus_overflow: jobFunction.surplus_overflow ?? false
   }
   showModal.value = true
 }

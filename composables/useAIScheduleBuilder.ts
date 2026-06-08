@@ -512,6 +512,29 @@ const buildSchedule = (
   // Count STEP 1 (required) assignments already made toward coverage.
   for (const a of allAssignments) incrementCovered(a.jfId, a.start, a.end)
 
+  // Per-function surplus controls (migration 010): per-hour headcount ceiling and
+  // "overflow sink" flag. maxHeadcount[jfId] = null means unlimited.
+  const maxHeadcount: Record<string, number | null> = {}
+  const overflowFns = new Set<string>()
+  for (const jf of jobFunctions) {
+    maxHeadcount[jf.id] = jf.max_headcount == null ? null : Number(jf.max_headcount)
+    if (jf.surplus_overflow) overflowFns.add(jf.id)
+  }
+  // True if assigning [start,end] to jfId keeps every covered hour at/under its cap.
+  const capRoom = (jfId: string, start: number, end: number): boolean => {
+    const cap = maxHeadcount[jfId]
+    if (cap == null) return true
+    for (const h of getHoursCovered(start, end)) if ((covered[jfId]?.[h] ?? 0) >= cap) return false
+    return true
+  }
+  // True if jfId is still below target for any hour in [start,end] (an unmet target).
+  const underTargetAt = (jfId: string, start: number, end: number): boolean => {
+    const tgt = target[jfId]
+    if (!tgt) return false
+    for (const h of getHoursCovered(start, end)) if ((covered[jfId]?.[h] ?? 0) < (tgt[h] ?? 0)) return true
+    return false
+  }
+
   // Unified assignment helper: record, count coverage, carve availability.
   const assign = (empId: string, jfId: string, start: number, end: number) => {
     allAssignments.push({ empId, jfId, start, end })
@@ -556,14 +579,18 @@ const buildSchedule = (
     (a, b) => (trainedSupply[a]! / totalDemand[a]!) - (trainedSupply[b]! / totalDemand[b]!)
   )
 
-  // First contiguous run of still-unmet hours for a function (across the whole day).
+  // First contiguous run of still-unmet, still-fillable hours for a function.
+  // An hour is fillable only if coverage is below target AND below the per-hour cap;
+  // an hour that is below target but already at its cap is a forced gap, not fillable.
   const firstUnmetRun = (jfId: string): { start: number; end: number } | null => {
     const tgt = target[jfId]!
     const cov = covered[jfId]!
+    const cap = maxHeadcount[jfId]
     let runStart: number | null = null
     let runEnd = 0
     for (const h of Object.keys(tgt).sort()) {
-      if ((cov[h] ?? 0) < tgt[h]!) {
+      const c = cov[h] ?? 0
+      if (c < tgt[h]! && (cap == null || c < cap)) {
         const hMin = timeToMinutes(h)
         if (runStart === null) runStart = hMin
         runEnd = hMin + 60
@@ -587,6 +614,7 @@ const buildSchedule = (
           const s = Math.max(w.start, run.start)
           const e = Math.min(w.end, run.end)
           if (e - s < 30) continue
+          if (!capRoom(jfId, s, e)) continue
           const sticky = allAssignments.some((a) => a.empId === empId && a.jfId === jfId) ? STICKY_BONUS : 0
           const preferred = isPreferredFor(empId, jfId) ? PREFERRED_BONUS : 0
           const otherTrained = trainingData[empId]?.length ?? 0
@@ -735,9 +763,12 @@ const buildSchedule = (
   }
 
   // PASS 2: surplus fill — deploy remaining availability so labor isn't idle.
-  // Prefer continuing a function adjacent to the window (continuity), else the most
-  // under-served function the employee is trained for. Zero-demand functions
-  // (e.g. TL/coordinator, filled only via required pins) are never surplus targets.
+  // Designated overflow functions are the preferred sink: if the employee is trained
+  // for any overflow function with cap room for the window, surplus goes there first;
+  // otherwise it falls back to the most under-served function they're trained for.
+  // Per-hour max caps are always respected (a fully-capped employee stays idle).
+  // Zero-demand functions (e.g. TL/coordinator, filled only via required pins) are
+  // never surplus targets.
   const fnRatio = (jfId: string): number => {
     const tgt = target[jfId]
     if (!tgt) return Infinity
@@ -758,12 +789,28 @@ const buildSchedule = (
       const w = windows[0]!
       if (w.end - w.start < 30) continue // leave sub-30-min remnants idle
       const distinct = new Set(allAssignments.filter((a) => a.empId === empId).map((a) => a.jfId))
-      let eligible = demandFns.filter((jfId) => isTrainedFor(empId, jfId, jobFunctions, trainingData))
+      let eligible = demandFns.filter(
+        (jfId) => isTrainedFor(empId, jfId, jobFunctions, trainingData) && capRoom(jfId, w.start, w.end)
+      )
       if (distinct.size >= MAX_FUNCTIONS) eligible = eligible.filter((jfId) => distinct.has(jfId))
-      if (!eligible.length) eligible = Array.from(distinct) // at cap with no overlap → stay on existing
       if (!eligible.length) {
+        // at the function cap with no overlap → stay on an existing function that still has room
+        eligible = Array.from(distinct).filter((jfId) => capRoom(jfId, w.start, w.end))
+      }
+      if (!eligible.length) {
+        // every trained function is capped for this window → leave this window idle
         empAvailable.set(empId, windows.slice(1))
         continue
+      }
+      // Meeting targets beats the overflow sink: if any eligible function is still
+      // under target for this window, fill those first. Only once all eligible
+      // functions are at/over target (true surplus) does the overflow preference apply.
+      const underTargetEligible = eligible.filter((jfId) => underTargetAt(jfId, w.start, w.end))
+      if (underTargetEligible.length) {
+        eligible = underTargetEligible
+      } else {
+        const overflowEligible = eligible.filter((jfId) => overflowFns.has(jfId))
+        if (overflowEligible.length) eligible = overflowEligible
       }
       let pick: string | null = null
       let pickScore = -Infinity
@@ -819,7 +866,9 @@ const buildSchedule = (
       if (cov < tgt) {
         gaps.push({ job_function_name: jfName, hour, shortfall: tgt - cov })
         warnings.push(`Need ${tgt - cov} more for ${jfName} at ${hour}`)
-      } else if (cov > tgt) {
+      } else if (cov > tgt && !jf?.exclude_from_targets) {
+        // Surplus only — skip functions excluded from targets (e.g. TL/coordinator),
+        // whose required pins would otherwise read as "over" a zero target.
         overTarget.push({ job_function_name: jfName, hour, surplus: cov - tgt })
       }
     }

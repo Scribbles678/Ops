@@ -100,6 +100,27 @@ async function main() {
   const covered = {} // jfId -> {hour -> count}
   for (const jf in target) { covered[jf] = {}; for (const h in target[jf]) covered[jf][h] = 0 }
 
+  // --- per-function surplus controls (migration 010) + optional TEST overrides ---
+  // Set SIM_TEST_CAPS=1 to exercise caps/overflow without touching DB config.
+  const maxHeadcount = {}; const overflowFns = new Set()
+  for (const jf of jobFunctions) {
+    maxHeadcount[jf.id] = jf.max_headcount == null ? null : Number(jf.max_headcount)
+    if (jf.surplus_overflow) overflowFns.add(jf.id)
+  }
+  if (process.env.SIM_TEST_CAPS) {
+    const byName = (n) => jobFunctions.find((j) => j.name === n)?.id
+    const capName = (n, v) => { const id = byName(n); if (id) maxHeadcount[id] = v }
+    const ovName = (n) => { const id = byName(n); if (id) overflowFns.add(id) }
+    capName('RT-pick', 5); capName('speedcell', 4); capName('Conveyor', 6); capName('Runner', 4); capName('DG Pick', 3)
+    ovName('Pick'); ovName('Projects'); ovName('Locus')
+    console.log('[TEST] caps: RT-pick=5 speedcell=4 Conveyor=6 Runner=4 DG Pick=3 | overflow: Pick, Projects, Locus')
+  }
+  const capRoom = (jfId, start, end) => {
+    const cap = maxHeadcount[jfId]; if (cap == null) return true
+    for (const h of hoursCovered(start, end)) if ((covered[jfId]?.[h] ?? 0) >= cap) return false
+    return true
+  }
+
   const assignments = [] // {empId, jfId, start, end}
   const empById = new Map(emps.map((e) => [e.id, e]))
   const distinctFns = new Map() // empId -> Set(jfId)
@@ -138,11 +159,12 @@ async function main() {
 
   // unmet contiguous run for a function starting at/after some hour
   const firstUnmetRun = (jfId) => {
-    const tgt = target[jfId], cov = covered[jfId]
+    const tgt = target[jfId], cov = covered[jfId], cap = maxHeadcount[jfId]
     const hrs = Object.keys(tgt).sort()
     let runStart = null, runEnd = null
     for (const h of hrs) {
-      if (cov[h] < tgt[h]) { if (runStart == null) runStart = t2m(h); runEnd = t2m(h) + 60 }
+      const c = cov[h]
+      if (c < tgt[h] && (cap == null || c < cap)) { if (runStart == null) runStart = t2m(h); runEnd = t2m(h) + 60 }
       else if (runStart != null) break
     }
     return runStart == null ? null : { start: runStart, end: runEnd }
@@ -164,6 +186,7 @@ async function main() {
         for (const w of e.windows) {
           const s = Math.max(w.start, run.start), en = Math.min(w.end, run.end)
           if (en - s < MIN_BLOCK) continue
+          if (!capRoom(jfId, s, en)) continue
           const sticky = set && set.has(jfId) ? 1 : 0
           const preferred = prefBy[e.id]?.[jfId] ? 1 : 0
           const score = (en - s) * 1 + sticky * 200 + preferred * 120 - e.otherCount * 3
@@ -190,11 +213,16 @@ async function main() {
       const w = e.windows[0]
       if (w.end - w.start < MIN_BLOCK) { e.windows = e.windows.slice(1); continue }
       const set = distinctFns.get(e.id) || new Set()
-      // candidate functions the employee is trained for, respecting soft cap
-      let cand = e.trained.filter((jf) => target[jf]) // only demand-bearing functions
+      // candidate functions the employee is trained for, demand-bearing, with cap room
+      let cand = e.trained.filter((jf) => target[jf] && capRoom(jf, w.start, w.end))
       if (set.size >= MAX_FUNCTIONS) cand = cand.filter((jf) => set.has(jf))
-      if (!cand.length) cand = e.trained.filter((jf) => set.has(jf)) // fall back to existing
-      if (!cand.length) cand = e.trained // last resort
+      if (!cand.length) cand = e.trained.filter((jf) => set.has(jf) && capRoom(jf, w.start, w.end)) // existing w/ room
+      if (!cand.length) { e.windows = e.windows.slice(1); continue } // all capped → idle this window
+      // meeting targets beats overflow sink: fill still-under-target functions first
+      const underTargetAt = (jf) => { const tg = target[jf]; if (!tg) return false; for (const h of hoursCovered(w.start, w.end)) if ((covered[jf]?.[h] ?? 0) < (tg[h] ?? 0)) return true; return false }
+      const under = cand.filter(underTargetAt)
+      if (under.length) cand = under
+      else { const ov = cand.filter((jf) => overflowFns.has(jf)); if (ov.length) cand = ov }
       // prefer: function adjacent to this window already assigned (continuity), else under-served, else existing
       let pick = null, pickScore = -Infinity
       for (const jf of cand) {
@@ -241,13 +269,13 @@ async function main() {
     }
     // gaps + over
     let under = 0, over = 0, overCells = 0
-    const cov2 = {}; const underByFn = {}
+    const cov2 = {}; const underByFn = {}; const overByFn = {}
     for (const jf in target) { cov2[jf] = {}; for (const h in target[jf]) cov2[jf][h] = 0 }
     for (const a of asg) for (const h of hoursCovered(a.start, a.end)) if (cov2[a.jfId]?.[h] != null) cov2[a.jfId][h]++
     for (const jf in target) for (const h in target[jf]) {
       const d = target[jf][h] - cov2[jf][h]
       if (d > 0) { under += d; underByFn[jfById.get(jf)?.name] = (underByFn[jfById.get(jf)?.name] || 0) + d }
-      else if (d < 0) { over += -d; overCells++ }
+      else if (d < 0) { over += -d; overCells++; overByFn[jfById.get(jf)?.name] = (overByFn[jfById.get(jf)?.name] || 0) + (-d) }
     }
     console.log(`\n===== ${label} =====`)
     console.log('assignments:', asg.length, '| total segments:', totalSegs, '| idle hrs:', (idle / 60).toFixed(1))
@@ -255,6 +283,7 @@ async function main() {
     console.log('segments/person:', JSON.stringify(segDist))
     console.log('UNMET headcount-hours (gaps):', under, '| OVER-target headcount-hours:', over, `(${overCells} cells)`)
     console.log('  unmet by function:', JSON.stringify(underByFn))
+    console.log('  over-target by function:', JSON.stringify(overByFn))
   }
   const origSpan = new Map()
   for (const e of employees) {

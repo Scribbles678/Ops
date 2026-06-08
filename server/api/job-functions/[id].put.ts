@@ -16,7 +16,9 @@ export default defineEventHandler(async (event) => {
     is_active,
     exclude_from_targets,
     lunch_coverage_required,
-    break_coverage_required
+    break_coverage_required,
+    max_headcount,
+    surplus_overflow
   } = body
 
   const params: unknown[] = [
@@ -30,6 +32,8 @@ export default defineEventHandler(async (event) => {
     exclude_from_targets ?? null,
     lunch_coverage_required ?? null,
     break_coverage_required ?? null,
+    max_headcount ?? null,
+    surplus_overflow ?? null,
     id
   ]
 
@@ -44,8 +48,10 @@ export default defineEventHandler(async (event) => {
          exclude_from_targets      = COALESCE($8, exclude_from_targets),
          lunch_coverage_required   = COALESCE($9, lunch_coverage_required),
          break_coverage_required   = COALESCE($10, break_coverage_required),
+         max_headcount             = $11,
+         surplus_overflow          = COALESCE($12, surplus_overflow),
          updated_at                = NOW()
-     WHERE id = $11`
+     WHERE id = $13`
 
   if (teamId) {
     sql += ` AND team_id = $${params.length + 1}`

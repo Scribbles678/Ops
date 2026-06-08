@@ -12,8 +12,11 @@ export default defineEventHandler(async (event) => {
     sort_order = 0,
     unit_of_measure,
     custom_unit,
+    exclude_from_targets = false,
     lunch_coverage_required = false,
-    break_coverage_required = false
+    break_coverage_required = false,
+    max_headcount,
+    surplus_overflow = false
   } = body
 
   if (!name?.trim()) {
@@ -21,10 +24,10 @@ export default defineEventHandler(async (event) => {
   }
 
   const result = await query(
-    `INSERT INTO job_functions (name, color_code, productivity_rate, sort_order, unit_of_measure, custom_unit, lunch_coverage_required, break_coverage_required, team_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO job_functions (name, color_code, productivity_rate, sort_order, unit_of_measure, custom_unit, exclude_from_targets, lunch_coverage_required, break_coverage_required, max_headcount, surplus_overflow, team_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      RETURNING *`,
-    [name.trim(), color_code, productivity_rate ?? null, sort_order, unit_of_measure ?? null, custom_unit ?? null, !!lunch_coverage_required, !!break_coverage_required, teamId ?? null]
+    [name.trim(), color_code, productivity_rate ?? null, sort_order, unit_of_measure ?? null, custom_unit ?? null, !!exclude_from_targets, !!lunch_coverage_required, !!break_coverage_required, max_headcount ?? null, !!surplus_overflow, teamId ?? null]
   )
   return result.rows[0]
 })
