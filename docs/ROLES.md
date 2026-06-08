@@ -273,12 +273,14 @@ Display User (Read-Only)
    - **Password** (minimum 6 characters)
    - **Full Name** (optional)
    - **Team** (select from dropdown)
-5. Select **Role** from the dropdown:
-   - **Standard User** (`is_super_admin=false, is_display_user=false`)
-   - **Super Admin** (`is_super_admin=true`)
-   - **Display Only (kiosk)** (`is_display_user=true`)
-   - (The **Admin** role — `is_admin=true` — is supported by the backend but is **not** currently exposed in the dropdown; set it via SQL if needed. Editing a user via the dropdown leaves an existing `is_admin` flag untouched.)
+5. Check the role(s):
+   - **Admin (Team Manager)** → `is_admin=true`
+   - **Super Admin (System Administrator)** → `is_super_admin=true`
+   - **Display Only (kiosk)** → `is_display_user=true` (leave Admin/Super Admin unchecked)
+   - (none checked = regular User)
 6. Save
+
+> **Where the live UI is:** user management is rendered inline in **`pages/settings.vue`** (the "Super Admin Management" section), not `pages/admin/users.vue`. The `/admin/users` page exists but is **unused/legacy** (nothing links to it) — edit `settings.vue`. (Same gotcha as the `components/details/*Tab.vue` files.)
 
 **Note**: The username is automatically derived from the email address (part before '@').
 

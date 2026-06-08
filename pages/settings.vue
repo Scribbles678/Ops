@@ -433,6 +433,9 @@
                     <span v-else-if="u.is_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
                       Admin
                     </span>
+                    <span v-else-if="u.is_display_user" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-amber-100 text-amber-800">
+                      Display Only
+                    </span>
                     <span v-else class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
                       User
                     </span>
@@ -593,6 +596,18 @@
           <p class="text-xs text-gray-500 ml-6">
             Super Admin includes all Admin permissions plus system-wide access.
           </p>
+          <div class="flex items-center pt-1">
+            <input
+              id="is_display_user"
+              v-model="newUser.is_display_user"
+              type="checkbox"
+              class="h-4 w-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500"
+            />
+            <label for="is_display_user" class="ml-2 block text-sm text-gray-900">Display Only (kiosk)</label>
+          </div>
+          <p class="text-xs text-gray-500 ml-6">
+            Locked to the wall-display schedule; can only view it and submit time-off requests. For the shared iPad. Leave Admin/Super Admin unchecked.
+          </p>
         </div>
         
         <div v-if="error" class="bg-red-50 border border-red-200 rounded-md p-3">
@@ -670,8 +685,18 @@
               <span class="text-sm text-gray-700">Super Admin (System Administrator)</span>
             </label>
           </div>
+          <div>
+            <label class="flex items-center">
+              <input
+                v-model="editUserData.is_display_user"
+                type="checkbox"
+                class="mr-2"
+              />
+              <span class="text-sm text-gray-700">Display Only (kiosk)</span>
+            </label>
+          </div>
           <p class="text-xs text-gray-500 ml-6">
-            Only Super Admins can change roles. Super Admin includes all Admin permissions.
+            Only Super Admins can change roles. Super Admin includes all Admin permissions. Display Only locks the account to the wall-display schedule.
           </p>
         </div>
         
@@ -1007,6 +1032,7 @@ const editUserData = ref({
   team_id: '',
   is_admin: false,
   is_super_admin: false,
+  is_display_user: false,
   is_active: true
 })
 const newUser = ref({
@@ -1015,7 +1041,8 @@ const newUser = ref({
   full_name: '',
   team_id: '',
   is_admin: false,
-  is_super_admin: false
+  is_super_admin: false,
+  is_display_user: false
 })
 const newTeam = ref({
   name: ''
@@ -1133,17 +1160,19 @@ const createUser = async () => {
         full_name: newUser.value.full_name || null,
         team_id: newUser.value.team_id || null,
         is_admin: newUser.value.is_admin || false,
-        is_super_admin: newUser.value.is_super_admin || false
+        is_super_admin: newUser.value.is_super_admin || false,
+        is_display_user: newUser.value.is_display_user || false
       }
     })
-    
+
     newUser.value = {
       email: '',
       password: '',
       full_name: '',
       team_id: '',
       is_admin: false,
-      is_super_admin: false
+      is_super_admin: false,
+      is_display_user: false
     }
     showCreateModal.value = false
     await fetchUsers()
@@ -1204,6 +1233,7 @@ const editUser = (u: any) => {
     team_id: u.team_id || '',
     is_admin: u.is_admin || false,
     is_super_admin: u.is_super_admin || false,
+    is_display_user: u.is_display_user || false,
     is_active: u.is_active !== false
   }
   showEditModal.value = true
@@ -1221,6 +1251,7 @@ const saveUserEdit = async () => {
         team_id: editUserData.value.team_id || null,
         is_admin: editUserData.value.is_admin,
         is_super_admin: editUserData.value.is_super_admin,
+        is_display_user: editUserData.value.is_display_user,
         is_active: editUserData.value.is_active
       }
     })
