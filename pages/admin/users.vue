@@ -64,6 +64,9 @@
                   <span v-if="user.is_super_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
                     Super Admin
                   </span>
+                  <span v-else-if="user.is_display_user" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-amber-100 text-amber-800">
+                    Display Only
+                  </span>
                   <span v-else class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
                     User
                   </span>
@@ -206,20 +209,24 @@
             </div>
             
             <div>
-              <label class="flex items-center">
-                <input
-                  v-model="newUser.is_super_admin"
-                  type="checkbox"
-                  class="mr-2"
-                />
-                <span class="text-sm text-gray-700">Super Admin</span>
-              </label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+              <select
+                v-model="newUser.role"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md"
+              >
+                <option value="user">Standard User</option>
+                <option value="super_admin">Super Admin</option>
+                <option value="display">Display Only (kiosk)</option>
+              </select>
+              <p class="text-xs text-gray-500 mt-1">
+                Display Only accounts can <strong>only</strong> view the wall-display schedule and submit time-off requests — used for the shared iPad kiosk.
+              </p>
             </div>
-            
+
             <div v-if="error" class="bg-red-50 border border-red-200 rounded-md p-3">
               <p class="text-sm text-red-600">{{ error }}</p>
             </div>
-            
+
             <div class="flex justify-end space-x-3">
               <button
                 type="button"
@@ -270,16 +277,17 @@
             </div>
             
             <div>
-              <label class="flex items-center">
-                <input
-                  v-model="editUserData.is_super_admin"
-                  type="checkbox"
-                  class="mr-2"
-                />
-                <span class="text-sm text-gray-700">Super Admin</span>
-              </label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Role</label>
+              <select
+                v-model="editUserData.role"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md"
+              >
+                <option value="user">Standard User</option>
+                <option value="super_admin">Super Admin</option>
+                <option value="display">Display Only (kiosk)</option>
+              </select>
             </div>
-            
+
             <div>
               <label class="flex items-center">
                 <input
@@ -499,7 +507,7 @@ const confirmNewPassword = ref('')
 const editUserData = ref({
   full_name: '',
   team_id: '',
-  is_super_admin: false,
+  role: 'user' as 'user' | 'super_admin' | 'display',
   is_active: true
 })
 
@@ -508,7 +516,13 @@ const newUser = ref({
   password: '',
   full_name: '',
   team_id: '',
-  is_super_admin: false
+  role: 'user' as 'user' | 'super_admin' | 'display'
+})
+
+// Map the role dropdown to the underlying boolean flags.
+const roleToFlags = (role: string) => ({
+  is_super_admin: role === 'super_admin',
+  is_display_user: role === 'display',
 })
 
 const newTeam = ref({
@@ -549,17 +563,17 @@ const createUser = async () => {
         password: newUser.value.password,
         full_name: newUser.value.full_name || null,
         team_id: newUser.value.team_id || null,
-        is_super_admin: newUser.value.is_super_admin || false
+        ...roleToFlags(newUser.value.role)
       }
     })
-    
+
     // Reset form and close modal
     newUser.value = {
       email: '',
       password: '',
       full_name: '',
       team_id: '',
-      is_super_admin: false
+      role: 'user'
     }
     showCreateModal.value = false
     await fetchUsers()
@@ -641,7 +655,7 @@ const editUser = (user: any) => {
   editUserData.value = {
     full_name: user.full_name || '',
     team_id: user.team_id || '',
-    is_super_admin: user.is_super_admin || false,
+    role: user.is_super_admin ? 'super_admin' : user.is_display_user ? 'display' : 'user',
     is_active: user.is_active !== false
   }
   showEditModal.value = true
@@ -656,7 +670,7 @@ const saveUserEdit = async () => {
       body: {
         full_name: editUserData.value.full_name || null,
         team_id: editUserData.value.team_id || null,
-        is_super_admin: editUserData.value.is_super_admin,
+        ...roleToFlags(editUserData.value.role),
         is_active: editUserData.value.is_active
       }
     })

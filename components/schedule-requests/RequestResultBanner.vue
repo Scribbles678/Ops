@@ -45,6 +45,7 @@ const ruleLabels: Record<string, string> = {
   'max_shift_swap_per_day': 'Shift change limit per day',
   'max_pto_hours_per_day': 'Team PTO hours limit per day',
   'max_shift_swaps_per_day': 'Shift swaps limit per day',
+  'date_not_blocked': 'Date is not blocked for requests',
 }
 
 const ruleLabel = (key: string) => ruleLabels[key] || key

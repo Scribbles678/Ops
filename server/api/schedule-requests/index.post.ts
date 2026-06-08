@@ -30,7 +30,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'employee_id, request_type, and request_date are required' })
   }
 
-  const validTypes = ['leave_early', 'pto_full_day', 'pto_partial', 'shift_swap']
+  const validTypes = ['leave_early', 'pto_full_day', 'pto_partial', 'shift_swap', 'leave_on_time', 'arrive_late']
   if (!validTypes.includes(request_type)) {
     throw createError({ statusCode: 400, message: `request_type must be one of: ${validTypes.join(', ')}` })
   }
@@ -45,6 +45,10 @@ export default defineEventHandler(async (event) => {
 
   if (request_type === 'leave_early' && !start_time) {
     throw createError({ statusCode: 400, message: 'Leave early requires start_time (the new end time)' })
+  }
+
+  if (request_type === 'arrive_late' && !start_time) {
+    throw createError({ statusCode: 400, message: 'Arrive late requires start_time (the new arrival time)' })
   }
 
   // Resolve team_id from the employee
@@ -107,8 +111,9 @@ export default defineEventHandler(async (event) => {
       ruleResults['max_shift_swap_per_day'] = (countResult.rows[0] as any).cnt < maxShiftChange
     }
 
-    // Rule 4: Max PTO hours per day (team-wide)
-    if (['pto_full_day', 'pto_partial', 'leave_early'].includes(request_type)) {
+    // Rule 4: Max PTO hours per day (team-wide). Counts hour-reducing requests only —
+    // 'leave_on_time' is informational (0 hours) and is intentionally excluded.
+    if (['pto_full_day', 'pto_partial', 'leave_early', 'arrive_late'].includes(request_type)) {
       const maxPtoHours = getSetting('max_pto_hours_per_day', 8)
 
       // Sum existing approved PTO hours for this team on this day
@@ -119,12 +124,13 @@ export default defineEventHandler(async (event) => {
             WHEN request_type = 'pto_partial' AND start_time IS NOT NULL AND end_time IS NOT NULL
               THEN EXTRACT(EPOCH FROM (end_time - start_time)) / 3600
             WHEN request_type = 'leave_early' THEN 2
+            WHEN request_type = 'arrive_late' THEN 2
             ELSE 0
           END
         ), 0)::numeric as total_hours
         FROM schedule_requests
         WHERE team_id = $1 AND status = 'approved'
-          AND request_type IN ('pto_full_day', 'pto_partial', 'leave_early')
+          AND request_type IN ('pto_full_day', 'pto_partial', 'leave_early', 'arrive_late')
           AND request_date = $2`,
         [teamId, request_date]
       )
@@ -133,6 +139,7 @@ export default defineEventHandler(async (event) => {
       let requestedHours = 0
       if (request_type === 'pto_full_day') requestedHours = 8
       else if (request_type === 'leave_early') requestedHours = 2
+      else if (request_type === 'arrive_late') requestedHours = 2
       else if (request_type === 'pto_partial' && start_time && end_time) {
         const [sh, sm] = start_time.split(':').map(Number)
         const [eh, em] = end_time.split(':').map(Number)
@@ -159,7 +166,7 @@ export default defineEventHandler(async (event) => {
     // If the employee has no team (orphaned super-admin-created records), match ANY
     // team's blocked dates — safer default than silently letting the request through.
     let blockedReason: string | null = null
-    if (['pto_full_day', 'pto_partial', 'leave_early'].includes(request_type)) {
+    if (['pto_full_day', 'pto_partial', 'leave_early', 'arrive_late', 'leave_on_time'].includes(request_type)) {
       const blockedResult = await client.query(
         `SELECT reason FROM team_blocked_dates
          WHERE blocked_date = $2
@@ -248,7 +255,22 @@ export default defineEventHandler(async (event) => {
           [(ptoResult.rows[0] as any).id, request.id]
         )
         request.created_pto_id = (ptoResult.rows[0] as any).id
-      } else if (request_type === 'shift_swap') {
+      } else if (request_type === 'arrive_late') {
+        // Absence runs from the start of the shift until the arrival time, so the
+        // builder clips the morning. start_time holds the arrival time.
+        const ptoResult = await client.query(
+          `INSERT INTO pto_days (employee_id, pto_date, start_time, end_time, pto_type, notes, team_id)
+           VALUES ($1, $2, '00:00:00', $3, 'arrive_late', $4, $5) RETURNING id`,
+          [employee_id, request_date, start_time, notes || 'Auto-approved request', teamId]
+        )
+        await client.query(
+          'UPDATE schedule_requests SET created_pto_id = $1 WHERE id = $2',
+          [(ptoResult.rows[0] as any).id, request.id]
+        )
+        request.created_pto_id = (ptoResult.rows[0] as any).id
+      }
+      // 'leave_on_time' is informational — no downstream record is created.
+      else if (request_type === 'shift_swap') {
         const swapResult = await client.query(
           `INSERT INTO shift_swaps (employee_id, swap_date, original_shift_id, swapped_shift_id, notes, team_id)
            VALUES ($1, $2, $3, $4, $5, $6)

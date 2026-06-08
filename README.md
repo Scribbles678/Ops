@@ -5,7 +5,7 @@ A web-based scheduling application for distribution center operations. Built wit
 ## Features
 
 - **Daily Schedule Management** - Visual grid editor for employee assignments with 15-minute granularity
-- **Automated Schedule Builder** - Generates schedules from staffing targets, training, and required assignments using a two-halves algorithm (AM/PM blocks per employee) with PTO integration and a lunch/break coverage pass
+- **Automated Schedule Builder** - Generates schedules from staffing targets, training, and required assignments: deterministic scarce-first fill that treats targets as a minimum, deploys surplus labor (with per-function caps and overflow sinks), and integrates PTO + a lunch/break coverage pass
 - **Staffing Targets** - Set target headcount per job function per hour in a grid UI
 - **Coverage Requirements** - Flag job functions that need lunch/break coverage so the builder keeps the station continuously staffed
 - **Employee Training Matrix** - Track which employees are trained for which job functions, with auto-save
@@ -100,7 +100,7 @@ scheduling-app-v2/
 │   ├── schedule/             # Schedule grid, shift groups, assignment cards
 │   └── schedule-requests/    # Request form modal + auto-approval result banner
 ├── composables/              # Shared reactive logic
-│   ├── useAIScheduleBuilder.ts   # Automated schedule generation (two-halves algorithm)
+│   ├── useAIScheduleBuilder.ts   # Automated schedule generation (scarce-first fill + surplus deploy)
 │   ├── useAuth.ts                # JWT authentication
 │   ├── useEmployees.ts           # Employee CRUD + training
 │   ├── useJobFunctions.ts        # Job function CRUD
@@ -184,20 +184,22 @@ Core tables:
 
 ## Automated Schedule Builder
 
-The builder uses a **two-halves algorithm** (see [composables/useAIScheduleBuilder.ts](composables/useAIScheduleBuilder.ts)):
+The builder is deterministic (not an LLM). **Per-hour `staffing_targets` are a minimum, not a cap** — once targets are met, surplus labor is deployed so workers aren't idle, and over-target staffing is reported. See [composables/useAIScheduleBuilder.ts](composables/useAIScheduleBuilder.ts):
 
-1. Each employee's day is split into AM (shift start → lunch start) and PM (lunch end → shift end). An employee gets at most two assignments per day.
-2. **PTO is applied first** — full-day PTO removes the employee; partial-day PTO clips AM/PM blocks and invalidates any block < 30 min.
-3. **Break carve-out** — AM/PM blocks are split around the shift's break windows so employees aren't scheduled through their own breaks.
-4. **Meter fan-out** — parent functions like "Meter" distribute headcount across numbered children ("Meter 1", "Meter 2", ...).
-5. **Required assignments** — employees with `is_required=true` get their locked function for both halves (AM/PM-specific functions supported).
-6. **Most-constrained-first greedy** — remaining employees filled by demand. Each iteration picks the employee with fewest feasible options, then the highest-scoring (function, window) pair. Preferred assignments get a scoring bonus.
-7. **Lunch/break coverage pass** — for functions flagged `lunch_coverage_required` / `break_coverage_required`, another trained, available employee is assigned to cover the primary's lunch/break so the station stays staffed.
-8. **Gaps** — any remaining unfilled demand is reported as a warning (non-fatal).
+1. **Prep** — each employee's day becomes break-free availability windows (AM = shift start → lunch, PM = lunch → shift end, minus breaks).
+2. **PTO** — full-day PTO removes the employee; partial-day clips blocks (<30-min fragments dropped).
+3. **Break carve-out** — windows split around the shift's break windows.
+4. **Meter fan-out** — parent "Meter" distributes headcount across numbered children ("Meter 1", "Meter 2", ...).
+5. **Required pins** — `is_required` employees locked to their function (AM/PM-specific supported).
+6. **PASS 1 — scarce-first target fill** — functions filled in order of trained-supply ÷ demand (hard-to-staff roles first), longest sticky blocks, respecting each function's `max_headcount` (per-hour ceiling).
+7. **Lunch/break coverage** — for `lunch_coverage_required` / `break_coverage_required` functions, a trained employee covers the primary's lunch/break.
+8. **PASS 2 — surplus fill** — remaining labor deployed so nobody's idle: still-under-target functions first, then `surplus_overflow`-flagged sinks; per-hour caps always respected; soft limit of 4 functions/person.
+9. **PASS 3 — merge** — touching same-function blocks merged into one segment.
+10. **Gaps & over-target** — final coverage vs target reported (gaps = under, over-target = surplus).
 
-Inputs: `staffing_targets` + `employee_training` + `preferred_assignments` + `shifts` (with lunch times) + `pto_days` for the target date.
+Inputs: `staffing_targets` + `employee_training` + `preferred_assignments` + `shifts` (with lunch times) + `job_functions` (incl. `max_headcount` / `surplus_overflow`) + `pto_days` for the target date.
 
-Outputs: `{ schedule, warnings, errors, gaps }` — user reviews in a modal before approving, then `replaceScheduleForDate()` writes via a transactional delete+insert.
+Outputs: `{ schedule, warnings, errors, gaps, overTarget }` — user reviews in a modal before approving, then `replaceScheduleForDate()` writes via a transactional delete+insert.
 
 ## Deployment
 

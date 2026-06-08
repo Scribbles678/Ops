@@ -141,6 +141,8 @@
             >
               <option value="">Select type...</option>
               <option value="leave_early">Leave Early</option>
+              <option value="leave_on_time">Leave on Time</option>
+              <option value="arrive_late">Arrive Late</option>
               <option value="pto_full_day">Full Day Off</option>
               <option value="pto_partial">Partial Day Off</option>
               <option value="shift_swap">Shift Change</option>
@@ -171,6 +173,23 @@
               required
               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
             />
+          </div>
+
+          <!-- Arrive late: new start time -->
+          <div v-if="form.request_type === 'arrive_late'">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Arrive At (new start time)</label>
+            <input
+              v-model="form.start_time"
+              type="time"
+              required
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+            />
+          </div>
+
+          <!-- Leave on time: informational note -->
+          <div v-if="form.request_type === 'leave_on_time'" class="bg-blue-50 border border-blue-200 rounded-md p-3 text-xs text-blue-700">
+            Notifies that this employee will leave at their scheduled end time (declining overtime).
+            Scheduled hours are unchanged.
           </div>
 
           <!-- Partial PTO: start & end time -->
@@ -366,9 +385,10 @@ const weekAvailability = computed(() => {
       const reqDate = req.request_date?.split('T')[0] ?? req.request_date
       if (reqDate !== dateStr) continue
       if (req.status !== 'approved') continue
-      if (!['pto_full_day', 'pto_partial', 'leave_early'].includes(req.request_type)) continue
+      if (!['pto_full_day', 'pto_partial', 'leave_early', 'arrive_late'].includes(req.request_type)) continue
       if (req.request_type === 'pto_full_day') dayPtoUsed += 8
       else if (req.request_type === 'leave_early') dayPtoUsed += 2
+      else if (req.request_type === 'arrive_late') dayPtoUsed += 2
       else if (req.request_type === 'pto_partial' && req.start_time && req.end_time) {
         const [sh, sm] = String(req.start_time).split(':').map(Number)
         const [eh, em] = String(req.end_time).split(':').map(Number)
@@ -382,6 +402,7 @@ const weekAvailability = computed(() => {
       const ptoDate = pto.pto_date?.split('T')[0] ?? pto.pto_date
       if (ptoDate !== dateStr) continue
       if (pto.pto_type === 'full_day') dayPtoUsed += 8
+      else if (pto.pto_type === 'arrive_late') dayPtoUsed += 2
       else if (pto.start_time && pto.end_time) {
         const [sh, sm] = String(pto.start_time).split(':').map(Number)
         const [eh, em] = String(pto.end_time).split(':').map(Number)

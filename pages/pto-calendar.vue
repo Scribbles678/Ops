@@ -368,7 +368,7 @@ const entriesByDate = computed(() => {
       id: `pto-${pto.id}`,
       employee_name: pto.employee_name || 'Unknown',
       status: 'approved',
-      typeLabel: pto.pto_type === 'full_day' ? 'Full Day' : (pto.pto_type || 'PTO'),
+      typeLabel: ptoTypeLabel(pto.pto_type),
       notes: pto.notes,
       date,
     })
@@ -424,9 +424,21 @@ const formatDate = (dateStr: string | null | undefined) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
+const ptoTypeLabel = (type: string | null | undefined) => {
+  const labels: Record<string, string> = {
+    full_day: 'Full Day',
+    partial: 'Partial Day',
+    leave_early: 'Leave Early',
+    arrive_late: 'Arrive Late',
+  }
+  return labels[type || ''] || type || 'PTO'
+}
+
 const formatRequestType = (type: string) => {
   const labels: Record<string, string> = {
     leave_early: 'Leave Early',
+    leave_on_time: 'Leave on Time',
+    arrive_late: 'Arrive Late',
     pto_full_day: 'Full Day Off',
     pto_partial: 'Partial Day',
     shift_swap: 'Shift Change',

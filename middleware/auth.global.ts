@@ -19,6 +19,15 @@ export default defineNuxtRouteMiddleware(async (to) => {
     await fetchCurrentUser()
   }
 
-  if (user.value && to.path === '/login') return navigateTo('/')
+  // Display-only (kiosk) accounts are locked to the display page: they can't reach
+  // any other route, even by typing the URL. /display is public, so this only fires
+  // for an authenticated display user trying to go elsewhere.
+  if (user.value?.is_display_user && to.path !== '/display') {
+    return navigateTo('/display')
+  }
+
+  if (user.value && to.path === '/login') {
+    return navigateTo(user.value.is_display_user ? '/display' : '/')
+  }
   if (!user.value && !isPublicRoute) return navigateTo('/login')
 })

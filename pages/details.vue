@@ -591,6 +591,29 @@
               <span class="block text-xs font-normal text-gray-500">Use for roles handled by Required Assignments (e.g. Coordinator, TL)</span>
             </label>
           </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Max people at once (per hour)</label>
+            <input
+              v-model.number="jobFunctionFormData.max_headcount"
+              type="number"
+              min="0"
+              placeholder="No limit"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <span class="block text-xs text-gray-500 mt-1">Builder never assigns more than this many people to this function in any hour. Leave blank for no limit.</span>
+          </div>
+          <div class="flex items-center space-x-2.5">
+            <input
+              id="jobFunction_surplus_overflow"
+              v-model="jobFunctionFormData.surplus_overflow"
+              type="checkbox"
+              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label for="jobFunction_surplus_overflow" class="block text-sm font-medium text-gray-700">
+              Surplus overflow function
+              <span class="block text-xs font-normal text-gray-500">After targets are met, extra workers flow into this function first (e.g. Pick, Projects)</span>
+            </label>
+          </div>
           <div class="flex items-center">
             <input
               v-model="jobFunctionFormData.is_active"
@@ -818,7 +841,9 @@ const jobFunctionFormData = ref({
   custom_unit: '',
   is_active: true,
   sort_order: 0,
-  exclude_from_targets: false
+  exclude_from_targets: false,
+  max_headcount: null,
+  surplus_overflow: false
 })
 
 const getJobFunctionUnitLabel = (jobFunction) => {
@@ -858,7 +883,9 @@ const openAddJobFunctionModal = () => {
     custom_unit: '',
     is_active: true,
     sort_order: jobFunctions.value.length,
-    exclude_from_targets: false
+    exclude_from_targets: false,
+    max_headcount: null,
+    surplus_overflow: false
   }
   showJobFunctionModal.value = true
 }
@@ -873,7 +900,9 @@ const openEditJobFunctionModal = (jobFunction) => {
     custom_unit: jobFunction.custom_unit || '',
     is_active: jobFunction.is_active,
     sort_order: jobFunction.sort_order,
-    exclude_from_targets: jobFunction.exclude_from_targets ?? false
+    exclude_from_targets: jobFunction.exclude_from_targets ?? false,
+    max_headcount: jobFunction.max_headcount ?? null,
+    surplus_overflow: jobFunction.surplus_overflow ?? false
   }
   showJobFunctionModal.value = true
 }

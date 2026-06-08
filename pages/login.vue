@@ -112,10 +112,10 @@ useHead({
   ]
 })
 
-// Redirect if already authenticated
+// Redirect if already authenticated (display-only accounts go straight to the kiosk page)
 const { user, login } = useAuth()
 if (user.value) {
-  await navigateTo('/')
+  await navigateTo(user.value.is_display_user ? '/display' : '/')
 }
 
 // State
@@ -143,8 +143,8 @@ async function handleLogin() {
   loading.value = true
 
   try {
-    await login(email.value.trim().toLowerCase(), password.value)
-    await navigateTo('/')
+    const loggedIn = await login(email.value.trim().toLowerCase(), password.value)
+    await navigateTo(loggedIn.is_display_user ? '/display' : '/')
   } catch (err: any) {
     const msg = err?.data?.message ?? err?.message ?? 'An unexpected error occurred.'
     if (msg.includes('Invalid') || msg.includes('credentials')) {

@@ -2,7 +2,7 @@ export interface ScheduleRequest {
   id: string
   employee_id: string
   team_id: string | null
-  request_type: 'leave_early' | 'pto_full_day' | 'pto_partial' | 'shift_swap'
+  request_type: 'leave_early' | 'pto_full_day' | 'pto_partial' | 'shift_swap' | 'leave_on_time' | 'arrive_late'
   status: 'pending' | 'approved' | 'rejected'
   request_date: string
   start_time: string | null

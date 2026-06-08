@@ -45,12 +45,16 @@ scheduling-app-v2/
 │       ├── business-rules.vue # Staffing targets grid (headcount per job function per hour)
 │       └── cleanup.vue        # Data archival, export, retention management
 ├── components/
-│   ├── details/
-│   │   ├── EmployeesTab.vue          # Employee CRUD list
-│   │   ├── JobFunctionsTab.vue       # Job function CRUD (color, coverage flags, exclude-from-targets)
-│   │   ├── ProductivityRatesTab.vue  # Productivity rate/unit editing
-│   │   ├── ShiftManagementTab.vue    # Shift CRUD with break/lunch times
-│   │   └── ShiftsTab.vue             # Read-only shift display
+│   ├── details/                      # ⚠ LEGACY / UNUSED — none of these *Tab.vue
+│   │   │                             #   components are referenced. The Details page
+│   │   │                             #   (pages/details.vue) is monolithic: the Job
+│   │   │                             #   Functions / Shifts / etc. editors are inline
+│   │   │                             #   in that file. Edit pages/details.vue, NOT these.
+│   │   ├── EmployeesTab.vue          # (unused)
+│   │   ├── JobFunctionsTab.vue       # (unused) — real job-function editor is inline in pages/details.vue
+│   │   ├── ProductivityRatesTab.vue  # (unused)
+│   │   ├── ShiftManagementTab.vue    # (unused)
+│   │   └── ShiftsTab.vue             # (unused)
 │   ├── schedule/
 │   │   ├── AssignmentModal.vue       # Create/edit assignment with validation
 │   │   ├── HorizontalSchedule.vue    # Horizontal timeline view
@@ -76,7 +80,7 @@ scheduling-app-v2/
 │   ├── useTeam.ts                 # Team CRUD + super admin checks
 │   ├── useTeamSettings.ts         # Per-team settings (request-rule limits)
 │   ├── useTeamBlockedDates.ts     # Per-team blocked dates for request auto-rejection
-│   └── useAIScheduleBuilder.ts    # ~900 lines: two-halves schedule generation algorithm
+│   └── useAIScheduleBuilder.ts    # deterministic schedule generation (scarce-first fill + surplus deploy)
 ├── server/
 │   ├── plugins/
 │   │   └── bootstrap.ts          # On-boot self-setup: schema + migrations + first admin
@@ -144,7 +148,7 @@ teams (multi-tenant root)
   │     ├── employee_training ←→ job_functions (many-to-many)
   │     ├── preferred_assignments ←→ job_functions (priority, is_required, AM/PM split)
   │     ├── pto_days
-  │     ├── schedule_requests (unified: pto_full_day, pto_partial, leave_early, shift_swap)
+  │     ├── schedule_requests (unified: pto_full_day, pto_partial, leave_early, leave_on_time, arrive_late, shift_swap)
   │     └── shift_swaps (original_shift ↔ swapped_shift)
   ├── shifts (with break/lunch times)
   ├── job_functions (color, productivity rate, sort order, coverage flags)
@@ -167,13 +171,13 @@ cleanup_log (archival run audit)
 | **user_profiles** | email, username, password_hash, full_name, team_id, is_super_admin, is_admin, is_display_user, is_active, last_login, **employee_id** (optional FK to employees) |
 | **password_reset_tokens** | user_id, token_hash, expires_at, used_at (self-service reset) |
 | **employees** | first_name, last_name, is_active, shift_id (FK), team_id |
-| **job_functions** | name, color_code (#hex), productivity_rate, unit_of_measure, custom_unit, sort_order, **lunch_coverage_required**, **break_coverage_required**, **exclude_from_targets**, team_id |
+| **job_functions** | name, color_code (#hex), productivity_rate, unit_of_measure, custom_unit, sort_order, **lunch_coverage_required**, **break_coverage_required**, **exclude_from_targets**, **max_headcount** (per-hour ceiling for the builder, NULL=unlimited), **surplus_overflow** (preferred surplus sink), team_id |
 | **shifts** | name, start/end time, break_1/break_2/lunch start/end times, is_active, team_id |
 | **schedule_assignments** | employee_id, job_function_id, shift_id, schedule_date, assignment_order, start_time, end_time, team_id |
 | **employee_training** | employee_id, job_function_id (junction; unique pair) |
 | **staffing_targets** | job_function_id, hour_start, headcount, is_active, team_id (primary input to Automated Builder) |
 | **preferred_assignments** | employee_id, job_function_id, is_required, priority, **am_job_function_id**, **pm_job_function_id** |
-| **pto_days** | employee_id, pto_date, optional start_time/end_time, pto_type (`full_day`/`partial`/`leave_early`), notes |
+| **pto_days** | employee_id, pto_date, optional start_time/end_time, pto_type (`full_day`/`partial`/`leave_early`/`arrive_late`), notes. `arrive_late` rows store `start_time='00:00:00'`, `end_time=arrival` so the builder clips the morning. No CHECK on pto_type (free text). |
 | **schedule_requests** | employee_id, request_type, status, request_date, start/end_time, original/requested_shift_id, approval_rule_results (JSONB), admin_override, rejection_reason, approved_by, submitted_by, created_pto_id, created_swap_id |
 | **shift_swaps** | employee_id, swap_date (unique per employee), original_shift_id, swapped_shift_id |
 | **daily_targets** | schedule_date, job_function_id, target_units (unique per date+function+team) |
@@ -205,7 +209,7 @@ cleanup_log (archival run audit)
 ### Auth Flow
 1. User logs in via `/login` → POST `/api/auth/login` → constant-time bcrypt verify → `last_login` updated → JWT set as HttpOnly cookie (`sameSite=strict`, `secure` in production, 8hr maxAge)
 2. Every server request → `server/middleware/auth.ts` reads the cookie → verifies JWT → populates `event.context.user`
-3. Client middleware (`middleware/auth.global.ts`) redirects unauthenticated users to `/login`
+3. Client middleware (`middleware/auth.global.ts`) redirects unauthenticated users to `/login`. **Display-only (kiosk) users are redirected to `/display` on login and locked there** — the middleware bounces them back to `/display` from any other route.
 4. Public routes: `/login`, `/display`, `/reset-password`
 
 The login endpoint always runs a bcrypt comparison (against a dummy hash when the email is unknown) so response timing doesn't leak whether an account exists.
@@ -219,7 +223,7 @@ The signed token carries: `id`, `email`, `username`, `full_name`, `team_id`, `is
 | **Super Admin** | All data across all teams, user/team management, cleanup |
 | **Admin** | Team-scoped data + approvals; **cannot** create users / reset passwords (super-admin only) |
 | **User** | Team-scoped data, schedule viewing/editing |
-| **Display User** | Read-only display mode access |
+| **Display User** | Kiosk account: locked to `/display` (today's schedule, read-only) + can submit time-off/schedule-change requests via the display form. Settable as "Display Only" in the user-management role dropdown. |
 
 See `ROLES.md` for the full permission matrix.
 
@@ -229,6 +233,7 @@ See `ROLES.md` for the full permission matrix.
 - **Writes** use `getWriteTeamId(user)` → always the user's own `team_id`, **including super admins**. A new record is stamped with the creating user's team so the rest of that team can see it.
   - This split matters: a super admin's *reads* span all teams, but their *saves* land in their own assigned team. A super admin changes which team their saves target by changing their own team assignment in Settings. **Never stamp writes with `getTeamFilter` — for a super admin it returns `null` and orphans the row (no team can see it).** This was the cause of the "team lead can't see what the super admin set up" bug; fixed in migration 009 + the `getWriteTeamId` switch across write endpoints.
   - `team-settings` and `team-blocked-dates` writes require a team and reject the request if the user has none.
+- **Orphaned `team_id = NULL` rows are a real hazard.** Rows created before team stamping (or by a migration that didn't match the install's team name — see migration 009) stay invisible to normal team-scoped reads but get **unioned in by any super-admin read** (`getTeamFilter = null`), polluting aggregate views and especially the **Automated Builder** (duplicate/inflated demand). Fixing them is a **per-install data repair**, not a shipped migration — on a single-team install you can adopt NULL rows into that team and dedup; on a multi-team install you must scope NULL rows to the correct team by hand. Do this directly against the target DB (backup first, single transaction), never as an auto-applied migration that blindly stamps NULL → one team.
 - Enforcement is **API-level**, not database RLS (legacy `rls-policies.sql` is from an earlier Supabase prototype and is not used)
 
 ### Rate Limiting (in-memory, per-IP)
@@ -250,37 +255,47 @@ Job functions can be flagged `lunch_coverage_required` and/or `break_coverage_re
 ### Exclude From Targets
 Job functions flagged `exclude_from_targets` are hidden from the staffing-targets grid (used for functions that shouldn't be driven by per-hour headcount demand).
 
-### Automated Schedule Builder (`useAIScheduleBuilder.ts`, ~900 lines)
+### Automated Schedule Builder (`useAIScheduleBuilder.ts`)
 
-A deterministic **two-halves** algorithm (not an LLM). Each employee's workday is split into at most two assignment blocks: **AM** (shift start → lunch start) and **PM** (lunch end → shift end). An employee receives at most two primary job-function assignments per day, plus possible short coverage assignments.
+A deterministic, dependency-free algorithm (not an LLM, no solver). Core design principle: **per-hour staffing targets are a MINIMUM, not a cap.** After targets are met, remaining available labor is deployed so workers aren't left idle; surplus above target is reported (not suppressed). Each employee's day is built from break-free availability **windows** (derived from AM = shift start→lunch, PM = lunch→shift end, minus breaks), and the builder favors **long contiguous, low-switch** assignments (≈1–4 functions/person/day).
+
+> Redesigned June 2026, replacing the original "two-halves demand-cap greedy" (which capped at demand and left large idle gaps + understated coverage). If you're touching this, read `buildSchedule()` end-to-end.
 
 **Inputs:**
 - Active employees (with `shift_id` and training records)
-- Job functions (including "Meter" parent/child relationships and coverage flags)
+- Job functions, incl. "Meter" parent/child relationships, coverage flags, and surplus controls **`max_headcount`** (per-hour ceiling, NULL = unlimited) + **`surplus_overflow`** (preferred sink flag)
 - Shifts (start/end + lunch_start/lunch_end + break_1/break_2 windows)
-- `staffing_targets` (headcount per job function per hour)
+- `staffing_targets` (headcount per job function per hour — the per-hour MINIMUM target)
 - `preferred_assignments` (with `is_required` lock flag and optional AM/PM split via `am_job_function_id` / `pm_job_function_id`)
 - `pto_days` for the target date (full-day and partial-day)
 
 **Algorithm flow** (`buildSchedule()`):
 
-1. **STEP 0 — Employee prep:** Filter to active employees with shifts + training. Compute AM/PM block times in minutes. Build `trainedFunctionIds` per employee.
-2. **PTO application:** Full-day PTO removes the employee from the pool. Partial-day PTO clips AM and/or PM blocks (invalidates blocks < 30 min). Warnings accumulated.
-3. **Break carve-out:** Each AM/PM block is split around the shift's break windows (`break_1`, `break_2`), dropping sub-30-min fragments, so employees aren't scheduled through their own breaks.
-4. **Meter fan-out expansion:** Parent functions with numbered children distribute parent headcount evenly across children (numeric sort so "Meter 2" precedes "Meter 10"; duplicate-named children deduped to the oldest record).
-5. **Demand matrix build:** `demand[jobFunctionId][hourStart] = headcount`, normalized from staffing_targets (`HH:MM:SS` → `HH:MM`).
-6. **STEP 1 — Required assignment phase:** Employees with `is_required=true` get their locked function (AM/PM-specific if configured) for each available segment. `resolveMeterChild()` picks the best Meter variant by remaining demand.
-7. **STEP 2 — Multi-block greedy assignment (most-constrained-first):** Each iteration lists employees with available windows; for each, enumerates feasible (trained) functions whose demand window overlaps. Scores by total demand; preferred assignments (incl. Meter-parent preference) get a +10,000 bonus. Picks the **most-constrained** employee first (fewest feasible options), then the best-scoring assignment for their first contiguous demand block. Decrements demand and carves the used time out of availability. Repeats until no feasible assignment remains.
-8. **STEP 2.5 — Lunch/break coverage pass:** For functions flagged `lunch_coverage_required` / `break_coverage_required`, finds another trained, available employee to cover the primary's lunch/break window (greedy longest-overlap, skipping coverers who are themselves on break). Coverage assignments do **not** decrement demand. Unfillable coverage is a warning.
-9. **STEP 3 — Gap detection:** Remaining non-zero demand entries are reported as gaps (non-fatal warnings).
+1. **STEP 0 — Employee prep:** active employees with shifts + training; compute AM/PM blocks; build `trainedFunctionIds`.
+2. **PTO application:** full-day PTO removes the employee; partial-day clips AM/PM blocks (invalidating <30-min fragments).
+3. **Break carve-out:** split each block around `break_1`/`break_2` into availability windows, dropping sub-30-min fragments.
+4. **Meter fan-out expansion:** parent functions with numbered children distribute headcount evenly across children (numeric sort; duplicate names deduped to oldest).
+5. **Target & coverage matrices:** `target[jfId][hour] = headcount` (overwrite, not sum — `(jfId,hour)` is unique per the data model); a running `covered[jfId][hour]` counter; plus `maxHeadcount[jfId]` and an `overflowFns` set.
+6. **STEP 1 — Required pins:** `is_required` employees locked to their function (AM/PM-specific), split around breaks; counted into `covered`. `resolveMeterChild()` picks the best Meter variant.
+7. **PASS 1 — scarce-first target fill:** functions processed in order of `trainedSupply ÷ totalDemand` ascending (hard-to-staff roles like Help desk claim their few trained people first). For each function's first contiguous **unmet, fillable** run (`covered < target` AND `covered < max`), pick the best trained employee/block: score = block length + stickiness + preferred bonus − (other trained functions × weight). Respects `capRoom`. Repeats until no fillable candidate remains.
+8. **STEP 2.5 — Lunch/break coverage pass:** for `lunch_coverage_required`/`break_coverage_required` functions, insert a coverer for the primary's lunch/break window (greedy longest-overlap, skipping coverers on their own break). Coverage assignments do **not** count toward target coverage. Unfillable coverage → warning.
+9. **PASS 2 — surplus fill:** deploy any remaining availability so nobody's idle. Priority per window: (a) **still-under-target** functions first (meeting targets beats overflow), else (b) **overflow-flagged** functions (the surplus sink), else (c) continue an existing function. Soft cap of `MAX_FUNCTIONS = 4` distinct functions/person; per-hour `max_headcount` always respected (a fully-capped worker is left idle).
+10. **PASS 3 — merge:** merge touching same-employee, same-function blocks into one segment (collapses break-split fragments).
+11. **STEP 3 — gaps & over-target:** from final `covered` vs `target`: `covered < target` → gap (warning); `covered > target` → over-target surplus (skipped for `exclude_from_targets` functions, whose required pins would otherwise read as "over" a zero target).
 
-**Outputs:** `{ schedule, warnings, errors, gaps }`. `applyAISchedule()` translates job function names to IDs and calls `replaceScheduleForDate()`, which wraps delete+insert in a transaction.
+**Outputs:** `{ schedule, warnings, errors, gaps, overTarget }`. `applyAISchedule()` maps function names → IDs and calls `replaceScheduleForDate()` (transactional delete+insert).
 
-**Entry point:** `pages/schedule/tomorrow.vue` calls `generateAISchedule(date)`; the user reviews the proposed schedule + warnings + gaps in a modal before approving.
+**Entry point:** `pages/schedule/tomorrow.vue` → `generateAISchedule(date)`; the user reviews the proposed schedule, gaps, and a "Staffed Above Target" (over-target) summary in a modal before it's written.
+
+**Validation harness:** `scripts/sim-builder.mjs` (local-only, dev DB creds) replays real DB inputs through an equivalent algorithm and prints quality metrics (idle hours, functions/person, gaps, over-target, fixable-gap detector). Use it to validate target/training/cap changes before relying on a build. Keep its logic in sync with `buildSchedule()`.
+
+> **Builder gotcha — super-admin reads span all teams.** The builder fetches its inputs via the normal team-scoped APIs, which for a **super admin** use `getTeamFilter = null` → it reads **every team's** employees/targets/training at once. With one team that's fine; with multiple teams a super admin would build a cross-team schedule. Also beware **orphaned `team_id = NULL` rows** (created before team stamping): a super admin's build unions them in, inflating/duplicating demand. (A local install hit exactly this — see the consolidation note under Multi-Tenancy.)
 
 ### Schedule Requests & Auto-Approval Engine
 
-`schedule_requests` is a unified pipeline for `leave_early`, `pto_full_day`, `pto_partial`, and `shift_swap`. When a request is submitted (`POST /api/schedule-requests`), an auto-approval engine runs **inside a transaction** and instantly sets status to `approved` or `rejected`:
+`schedule_requests` is a unified pipeline for `leave_early`, `pto_full_day`, `pto_partial`, `shift_swap`, `leave_on_time`, and `arrive_late` (the `request_type` CHECK constraint enumerates these — a new type needs a migration; see 011). When a request is submitted (`POST /api/schedule-requests`), an auto-approval engine runs **inside a transaction** and instantly sets status to `approved` or `rejected`:
+
+> **`leave_on_time`** (decline overtime) is informational: it runs only the 24h-advance + date-not-blocked rules, counts 0 PTO hours, and creates **no** downstream record. **`arrive_late`** (late start) runs the full rule set, counts a flat ~2h toward the daily PTO-hours limit (like `leave_early`), and on approval materializes a `pto_days` row (`start='00:00:00'`, `end=arrival`, `pto_type='arrive_late'`) so the builder clips the employee's morning. Both the POST engine and the admin-override PUT materialize identically.
 
 **Rules evaluated** (a request is approved only if all applicable rules pass):
 - **24h advance notice** — request_date must be ≥ 24h out (hardcoded)
@@ -345,7 +360,9 @@ This means **no manual SQL on deploy or update** — new migrations ship in the 
 | 006-add-coverage-requirements | `lunch_coverage_required` / `break_coverage_required` on job_functions |
 | 007-add-team-blocked-dates | `team_blocked_dates` table |
 | 008-add-missing-columns | `user_profiles.employee_id`, `job_functions.exclude_from_targets`, `preferred_assignments.am/pm_job_function_id` |
-| 009-backfill-orphaned-team-data | one-time data repair: adopts NULL-team rows into the `domestic` team (see Multi-Tenancy). No-op on fresh installs; runs once via a `_data_backfills` marker. |
+| 009-backfill-orphaned-team-data | one-time data repair: adopts NULL-team rows into the `domestic` team (see Multi-Tenancy). No-op on fresh installs; runs once via a `_data_backfills` marker. **Note:** hardcodes the `domestic` team name — a no-op on installs whose team is named otherwise (e.g. `Default Team`), so orphaned NULL rows can persist there. |
+| 010-add-job-function-surplus-controls | `job_functions.max_headcount` (per-hour ceiling) + `surplus_overflow` (preferred surplus sink) — drive the Automated Builder's PASS 2. Additive/idempotent; multi-team safe. |
+| 011-add-request-types | extends `schedule_requests_request_type_check` to add `leave_on_time` + `arrive_late`. Drop+recreate constraint (idempotent); multi-team safe. |
 
 ---
 

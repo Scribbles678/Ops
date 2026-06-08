@@ -148,30 +148,29 @@ Display User (Read-Only)
 
 ---
 
-### 4. **Display User** 📺
-**Purpose**: Read-only access for TV displays
+### 4. **Display User** 📺 (kiosk)
+**Purpose**: Locked-down account for a shared wall/iPad kiosk showing today's schedule
 
 **Key Characteristics:**
-- **Read-only access** (cannot create, edit, or delete)
-- Can only view **today's schedule**
-- Restricted to `/display` route only
-- Cannot access any other pages
-- Can be assigned to specific team (optional)
-- Auto-refreshes every 2 minutes
+- **On login, redirected straight to `/display`** (login.vue + auth.global.ts).
+- **Locked to `/display`** — the global middleware (`middleware/auth.global.ts`) bounces a display user back to `/display` if they try to reach any other route, even by typing the URL.
+- Can only view **today's schedule** (read-only), auto-refreshing.
+- Assigned to a specific team (the team whose schedule the kiosk shows). The display page's data fetches are team-scoped, so the account **needs a `team_id`**.
+- **Can submit time-off / schedule-change requests** via the form on the display page — this is the one deliberate write the kiosk account performs (the request picks the employee from a dropdown; `submitted_by` is the kiosk account).
 
 **Database Flag**: `is_display_user = true` in `user_profiles`
 
 **Permissions:**
 - ✅ View today's schedule (read-only)
-- ✅ Access display mode page
-- ✅ Auto-refresh functionality
+- ✅ Access `/display` page (only)
+- ✅ Submit time-off / schedule-change requests via the display page form
 
 **Restrictions:**
-- ❌ Read-only (no write access)
+- ❌ No write access except submitting requests
 - ❌ Today's data only
-- ❌ Restricted to display mode page
-- ❌ Cannot navigate to other pages
-- ❌ Cannot create, edit, or delete anything
+- ❌ Locked to `/display` — cannot navigate to any other page
+
+> **iPad lockdown:** keeping the user *inside the app* (so they can't leave the browser/page) is an OS-level concern — use iOS **Guided Access** (or Single App Mode / MDM kiosk mode) on the iPad. The app-level lock above only governs in-app routes.
 
 **Use Cases:**
 - TV displays in break rooms
@@ -274,11 +273,11 @@ Display User (Read-Only)
    - **Password** (minimum 6 characters)
    - **Full Name** (optional)
    - **Team** (select from dropdown)
-5. Select role:
-   - ✅ **Super Admin** checkbox
-   - ✅ **Admin** checkbox
-   - ✅ **Display User** checkbox
-   - (If none checked = regular User)
+5. Select **Role** from the dropdown:
+   - **Standard User** (`is_super_admin=false, is_display_user=false`)
+   - **Super Admin** (`is_super_admin=true`)
+   - **Display Only (kiosk)** (`is_display_user=true`)
+   - (The **Admin** role — `is_admin=true` — is supported by the backend but is **not** currently exposed in the dropdown; set it via SQL if needed. Editing a user via the dropdown leaves an existing `is_admin` flag untouched.)
 6. Save
 
 **Note**: The username is automatically derived from the email address (part before '@').

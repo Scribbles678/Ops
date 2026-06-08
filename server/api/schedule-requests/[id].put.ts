@@ -59,7 +59,22 @@ export default defineEventHandler(async (event) => {
           ]
         )
         createdPtoId = (ptoResult.rows[0] as any).id
-      } else if (request.request_type === 'shift_swap') {
+      } else if (request.request_type === 'arrive_late') {
+        // Absence from start of shift to the arrival time (stored in start_time).
+        const ptoResult = await client.query(
+          `INSERT INTO pto_days (employee_id, pto_date, start_time, end_time, pto_type, notes, team_id)
+           VALUES ($1, $2, '00:00:00', $3, 'arrive_late', $4, $5) RETURNING id`,
+          [
+            request.employee_id, request.request_date,
+            request.start_time,
+            request.notes || 'Admin-approved request',
+            request.team_id,
+          ]
+        )
+        createdPtoId = (ptoResult.rows[0] as any).id
+      }
+      // 'leave_on_time' is informational — no downstream record.
+      else if (request.request_type === 'shift_swap') {
         const swapResult = await client.query(
           `INSERT INTO shift_swaps (employee_id, swap_date, original_shift_id, swapped_shift_id, notes, team_id)
            VALUES ($1, $2, $3, $4, $5, $6)

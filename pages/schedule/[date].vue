@@ -113,89 +113,14 @@
           <div class="card mb-0 h-full">
             <div class="flex items-center mb-2 p-2">
               <div class="flex flex-wrap gap-1.5">
-                <button 
-                  @click="activeDashboard = 'jobFunctions'"
+                <button
+                  v-for="pill in dashboardPills"
+                  :key="pill.key"
+                  @click="activeDashboard = pill.key"
                   class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'jobFunctions' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
+                  :class="activeDashboard === pill.key ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
                 >
-                  Job Functions
-                </button>
-                <button 
-                  @click="activeDashboard = 'meter'"
-                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'meter' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-                >
-                  Meter
-                </button>
-                <button 
-                  @click="activeDashboard = 'locus'"
-                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'locus' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-                >
-                  Locus
-                </button>
-                <button 
-                  @click="activeDashboard = 'pick'"
-                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'pick' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-                >
-                  Pick
-                </button>
-                <button 
-                  @click="activeDashboard = 'x4'"
-                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'x4' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-                >
-                  X4
-                </button>
-                <button 
-                  @click="activeDashboard = 'em9'"
-                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'em9' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-                >
-                  EM9
-                </button>
-                <button 
-                  @click="activeDashboard = 'speedcell'"
-                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'speedcell' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-                >
-                  Speedcell
-                </button>
-                <button 
-                  @click="activeDashboard = 'helpdesk'"
-                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'helpdesk' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-                >
-                  Helpdesk
-                </button>
-                <button 
-                  @click="activeDashboard = 'rtPick'"
-                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'rtPick' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-                >
-                  RT Pick
-                </button>
-                <button 
-                  @click="activeDashboard = 'projects'"
-                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'projects' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-                >
-                  Projects
-                </button>
-                <button 
-                  @click="activeDashboard = 'dgPick'"
-                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'dgPick' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-                >
-                  DG Pick
-                </button>
-                <button 
-                  @click="activeDashboard = 'runner'"
-                  class="px-1.5 py-0.5 text-[10px] rounded border transition-colors"
-                  :class="activeDashboard === 'runner' ? 'bg-blue-100 text-blue-700 border-blue-300' : 'bg-gray-100 text-gray-700 border-gray-300'"
-                >
-                  Runner
+                  {{ pill.label }}
                 </button>
               </div>
             </div>
@@ -654,7 +579,7 @@ const {
   loading: assignmentsLoading, 
   error: assignmentsError, 
   fetchScheduleForDate,
-  fetchDailyTargets,
+  fetchTargetHours,
   replaceScheduleForDate,
   createAssignment,
   deleteAssignment
@@ -732,7 +657,26 @@ const saveProgress = ref('')
 const targetHours = ref({})
 
 // Dashboard state - tracks which dashboard view is active
-const activeDashboard = ref<'jobFunctions' | 'meter' | 'locus' | 'pick' | 'x4' | 'em9' | 'speedcell' | 'helpdesk' | 'rtPick' | 'projects' | 'dgPick' | 'runner'>('jobFunctions')
+// 'jobFunctions' = summary cards, 'meter' = grouped Meter grid (only when Meter exists),
+// otherwise the key is the actual job function name (the detail grid matches by name).
+const activeDashboard = ref<string>('jobFunctions')
+
+// Dynamic dashboard selector pills, built from the real active job functions so new/renamed
+// functions appear automatically and stale ones don't. Individual "Meter N" children are
+// folded into a single "Meter" pill; the "Meter" parent isn't shown as its own pill.
+const dashboardPills = computed<{ key: string; label: string }[]>(() => {
+  const pills: { key: string; label: string }[] = [{ key: 'jobFunctions', label: 'Job Functions' }]
+  const jfs = (jobFunctions.value || []).filter((jf: any) => jf?.is_active !== false && jf?.name)
+  const isMeterChild = (n: string) => /^Meter \d+$/.test(n)
+  if (jfs.some((jf: any) => jf.name === 'Meter' || isMeterChild(jf.name))) {
+    pills.push({ key: 'meter', label: 'Meter' })
+  }
+  jfs
+    .filter((jf: any) => jf.name !== 'Meter' && !isMeterChild(jf.name))
+    .sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
+    .forEach((jf: any) => pills.push({ key: jf.name, label: jf.name }))
+  return pills
+})
 const meterBookings = ref<Record<string, number>>({}) // Changed to number to track count of bookings
 
 // Get route params - use client-only for date to avoid hydration mismatch
@@ -844,19 +788,13 @@ onMounted(() => {
   })
 })
 
-// Target hours functions - uses daily_targets API
+// Target hours — the default per-function hours saved in Details & Settings → Target
+// Hours tab (the `target_hours` table). NOTE: this is intentionally NOT `daily_targets`
+// (that table stores per-date target *units*, a different concept); reading daily_targets
+// here was the bug that always showed 0.
 const loadTargetHours = async () => {
-  const date = scheduleDate.value
-  if (!date) return
   try {
-    const data = await fetchDailyTargets(date)
-    const targetHoursData: Record<string, number> = {}
-    if (data && data.length > 0) {
-      data.forEach((item: any) => {
-        targetHoursData[item.job_function_id] = item.target_units ?? 0
-      })
-    }
-    targetHours.value = targetHoursData
+    targetHours.value = (await fetchTargetHours()) || {}
   } catch {
     targetHours.value = {}
   }
