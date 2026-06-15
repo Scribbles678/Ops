@@ -326,15 +326,31 @@ onMounted(() => {
     }
   }
   rolloverInterval.value = setInterval(tick, 60000)
+
+  // If the tab was backgrounded/asleep (timers paused), recompute the date and
+  // reload + slide the session the moment it becomes visible again.
+  document.addEventListener('visibilitychange', handleVisible)
+  window.addEventListener('focus', handleVisible)
 })
+
+const handleVisible = () => {
+  if (document.visibilityState !== 'visible') return
+  const current = getTZISODate(TIMEZONE)
+  if (today.value !== current) today.value = current
+  loadData()
+}
 
 onUnmounted(() => {
   if (refreshInterval.value) clearInterval(refreshInterval.value)
   if (rolloverInterval.value) clearInterval(rolloverInterval.value)
+  document.removeEventListener('visibilitychange', handleVisible)
+  window.removeEventListener('focus', handleVisible)
 })
 
 const loadData = async () => {
   try {
+    // Slide the session first so a 24/7 kiosk never expires while the page is open.
+    await $fetch('/api/auth/refresh', { method: 'POST' }).catch(() => {})
     await Promise.all([
       fetchShifts(),
       fetchEmployees(),

@@ -265,7 +265,15 @@
         </div>
 
         <!-- Action Buttons -->
-        <div class="flex justify-end space-x-2">
+        <div class="flex items-center justify-between space-x-2">
+          <button
+            @click="clearAllForEmployee"
+            class="px-3 py-1.5 text-sm border border-red-300 text-red-700 rounded-lg hover:bg-red-50"
+            title="Wipe every job-function assignment for this employee on this day"
+          >
+            Clear All Functions
+          </button>
+          <div class="flex justify-end space-x-2">
           <button
             @click="closeAssignmentModal"
             class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
@@ -286,6 +294,7 @@
           >
             {{ getAssignment(selectedEmployee?.id, selectedTimeBlock?.time) ? 'Update Assignment' : 'Assign Task' }}
           </button>
+          </div>
         </div>
       </div>
     </div>
@@ -338,6 +347,7 @@ const emit = defineEmits<{
   addPTO: [employee: any]
   addShiftSwap: [employee: any]
   addCallIn: [employee: any]
+  clearEmployee: [employee: any]
 }>()
 
 // Use the passed scheduleAssignmentsData directly instead of local state
@@ -981,6 +991,15 @@ const closeAssignmentModal = () => {
   assignmentStartTime.value = ''
   assignmentEndTime.value = ''
   selectedMeterNumber.value = ''
+}
+
+// Hard reset: wipe every assignment for this employee on this day. The parent
+// deletes them directly and reloads (works even if the staged grid is in a bad state).
+const clearAllForEmployee = () => {
+  const emp = selectedEmployee.value
+  if (!emp) return
+  emit('clearEmployee', emp)
+  closeAssignmentModal()
 }
 
 const selectJobFunction = (jobFunction: any) => {

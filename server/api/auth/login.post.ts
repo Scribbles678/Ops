@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs'
 import { query } from '../../utils/db'
-import { signToken, COOKIE_NAME } from '../../utils/jwt'
+import { signToken, COOKIE_NAME, sessionMaxAge } from '../../utils/jwt'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
@@ -60,7 +60,7 @@ export default defineEventHandler(async (event) => {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
-    maxAge: 60 * 60 * 8, // 8 hours, matches JWT expiry
+    maxAge: sessionMaxAge(userWithoutHash), // 8h normally; 30d for display/kiosk accounts
     path: '/',
   })
 

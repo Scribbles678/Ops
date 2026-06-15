@@ -148,19 +148,25 @@
 
         <div v-if="teamSettingsLoading" class="text-sm text-gray-500">Loading settings...</div>
         <div v-else class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Max PTO Hours / Day (team-wide, by weekday)</label>
+            <div class="grid grid-cols-3 sm:grid-cols-5 gap-3 mt-1">
+              <div v-for="day in ptoWeekdays" :key="day.key">
+                <label class="block text-xs font-medium text-gray-500 mb-1">{{ day.label }}</label>
+                <input
+                  v-model.number="ptoHoursByDow[day.key]"
+                  type="number"
+                  min="0"
+                  class="w-full px-2 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+            </div>
+            <p class="mt-1 text-xs text-gray-400">Total approved PTO hours allowed across the team, set per weekday. (Any weekend request falls back to the default limit.)</p>
+          </div>
+
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Max PTO Hours / Day (team-wide)</label>
-              <input
-                v-model.number="ruleFields.max_pto_hours_per_day"
-                type="number"
-                min="0"
-                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <p class="mt-1 text-xs text-gray-400">Total approved PTO hours allowed across the team per day</p>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Max Shift Swaps / Day (team-wide)</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Shift Changes / Day (whole team)</label>
               <input
                 v-model.number="ruleFields.max_shift_swaps_per_day"
                 type="number"
@@ -170,24 +176,34 @@
               <p class="mt-1 text-xs text-gray-400">Total shift swaps allowed per day across the team</p>
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Max Leave-Early / Employee / Day</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Shift Changes Allowed per Week per Employee</label>
               <input
-                v-model.number="ruleFields.max_leave_early_per_employee_per_day"
+                v-model.number="ruleFields.max_shift_change_per_employee_per_week"
                 type="number"
                 min="0"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
-              <p class="mt-1 text-xs text-gray-400">How many times one employee can leave early per day</p>
+              <p class="mt-1 text-xs text-gray-400">How many shift changes one employee can have approved within a week (Mon–Sun)</p>
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Max Shift Changes / Employee / Day</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Leave-On-Time Requests per Week per Employee</label>
               <input
-                v-model.number="ruleFields.max_shift_change_per_employee_per_day"
+                v-model.number="ruleFields.max_leave_on_time_per_employee_per_week"
                 type="number"
                 min="0"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
-              <p class="mt-1 text-xs text-gray-400">How many shift change requests one employee can make per day</p>
+              <p class="mt-1 text-xs text-gray-400">How many "leave on time" (decline overtime) requests one employee can make within a week (Mon–Sun)</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Advance Notice (business days)</label>
+              <input
+                v-model.number="ruleFields.min_business_days_notice"
+                type="number"
+                min="0"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p class="mt-1 text-xs text-gray-400">Full working days (Mon–Fri) required between submitting and the requested date. Weekends don't count — e.g. 1 means a Friday request for Monday is rejected.</p>
             </div>
           </div>
 
@@ -884,13 +900,24 @@ const { user, fetchCurrentUser, changePassword: changePasswordApi } = useAuth()
 const { isSuperAdmin, checkIsSuperAdmin, fetchAllTeams, createTeam: createTeamFn, deleteTeam: deleteTeamFn } = useTeam()
 const { fetchSettings, saveSetting, getSetting, loading: teamSettingsLoading, error: teamSettingsError } = useTeamSettings()
 
-// Request rules state
+// Request rules state (scalar settings)
 const ruleFields = ref({
-  max_pto_hours_per_day: 8,
   max_shift_swaps_per_day: 3,
-  max_leave_early_per_employee_per_day: 1,
-  max_shift_change_per_employee_per_day: 1,
+  max_shift_change_per_employee_per_week: 1,
+  max_leave_on_time_per_employee_per_week: 5,
+  min_business_days_notice: 1,
 })
+
+// Per-weekday team-wide PTO-hours limit (Mon–Fri). Stored as the JSON setting
+// `max_pto_hours_by_dow`; weekends fall back to `max_pto_hours_per_day`.
+const ptoWeekdays = [
+  { key: 'mon', label: 'Mon' },
+  { key: 'tue', label: 'Tue' },
+  { key: 'wed', label: 'Wed' },
+  { key: 'thu', label: 'Thu' },
+  { key: 'fri', label: 'Fri' },
+]
+const ptoHoursByDow = ref<Record<string, number>>({ mon: 8, tue: 8, wed: 8, thu: 8, fri: 8 })
 const savingRules = ref(false)
 const teamSettingsSuccess = ref('')
 
@@ -1359,6 +1386,7 @@ const saveRequestRules = async () => {
     for (const key of keys) {
       await saveSetting(key, ruleFields.value[key])
     }
+    await saveSetting('max_pto_hours_by_dow', JSON.stringify(ptoHoursByDow.value))
     teamSettingsSuccess.value = 'Rules saved successfully!'
     setTimeout(() => { teamSettingsSuccess.value = '' }, 3000)
   } catch (err: any) {
@@ -1372,10 +1400,24 @@ const saveRequestRules = async () => {
 const loadRequestRules = async () => {
   await fetchSettings()
   ruleFields.value = {
-    max_pto_hours_per_day: parseInt(getSetting('max_pto_hours_per_day', '8'), 10),
     max_shift_swaps_per_day: parseInt(getSetting('max_shift_swaps_per_day', '3'), 10),
-    max_leave_early_per_employee_per_day: parseInt(getSetting('max_leave_early_per_employee_per_day', '1'), 10),
-    max_shift_change_per_employee_per_day: parseInt(getSetting('max_shift_change_per_employee_per_day', '1'), 10),
+    max_shift_change_per_employee_per_week: parseInt(getSetting('max_shift_change_per_employee_per_week', '1'), 10),
+    max_leave_on_time_per_employee_per_week: parseInt(getSetting('max_leave_on_time_per_employee_per_week', '5'), 10),
+    min_business_days_notice: parseInt(getSetting('min_business_days_notice', '1'), 10),
+  }
+  // Per-weekday PTO limits: use saved JSON, else fall back to the legacy single value.
+  const fallback = parseInt(getSetting('max_pto_hours_per_day', '8'), 10)
+  let byDow: Record<string, number> = {}
+  try {
+    const raw = getSetting('max_pto_hours_by_dow', '')
+    if (raw) byDow = JSON.parse(raw)
+  } catch { byDow = {} }
+  ptoHoursByDow.value = {
+    mon: byDow.mon ?? fallback,
+    tue: byDow.tue ?? fallback,
+    wed: byDow.wed ?? fallback,
+    thu: byDow.thu ?? fallback,
+    fri: byDow.fri ?? fallback,
   }
 }
 

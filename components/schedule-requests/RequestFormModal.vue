@@ -43,6 +43,28 @@
           </form>
         </div>
 
+        <!-- Multi-day result summary (shown after a date-range submit) -->
+        <div v-else-if="submitResultsMulti.length" class="mb-4 space-y-3">
+          <div>
+            <h3 class="font-semibold text-lg text-gray-900">Multi-day request submitted</h3>
+            <p class="text-sm text-gray-600">{{ multiApprovedCount }} approved, {{ submitResultsMulti.length - multiApprovedCount }} not approved.</p>
+          </div>
+          <div class="border border-gray-200 rounded-md divide-y max-h-60 overflow-y-auto">
+            <div v-for="(r, i) in submitResultsMulti" :key="i" class="flex items-start justify-between gap-2 px-3 py-2 text-sm">
+              <span class="text-gray-700 font-medium whitespace-nowrap">{{ r.date }}</span>
+              <span class="text-right" :class="r.status === 'approved' ? 'text-green-700' : 'text-red-700'">
+                {{ r.status }}<span v-if="r.reason" class="text-gray-400 block text-xs">{{ r.reason }}</span>
+              </span>
+            </div>
+          </div>
+          <button
+            @click="resetForm"
+            class="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm"
+          >
+            Submit Another Request
+          </button>
+        </div>
+
         <!-- Result banner (shown after submit) -->
         <div v-else-if="submitResult" class="mb-4">
           <ScheduleRequestsRequestResultBanner
@@ -162,6 +184,20 @@
               <strong>Date is blocked.</strong> Requests for this date will be auto-rejected.
               <span v-if="selectedDateBlock.reason">Reason: {{ selectedDateBlock.reason }}</span>
             </div>
+          </div>
+
+          <!-- Full day off: optional end date for a multi-day range -->
+          <div v-if="form.request_type === 'pto_full_day'">
+            <label class="block text-sm font-medium text-gray-700 mb-1">End Date <span class="font-normal text-gray-400">(optional — for multiple days off)</span></label>
+            <input
+              v-model="form.end_date"
+              type="date"
+              :min="form.request_date"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+            />
+            <p class="text-xs text-gray-500 mt-1">
+              Leave blank for a single day. A range submits one full-day request per day (each day is approved/rejected on its own — e.g. a blocked day in the middle is skipped).
+            </p>
           </div>
 
           <!-- Leave early: new end time -->
@@ -317,12 +353,17 @@ const form = ref({
   employee_id: props.preselectedEmployeeId || '',
   request_type: '',
   request_date: defaultDate,
+  end_date: '', // optional: full-day multi-day range end (inclusive)
   start_time: '',
   end_time: '',
   original_shift_id: '',
   requested_shift_id: '',
   notes: '',
 })
+
+// Multi-day (date-range) submit results, one entry per day.
+const submitResultsMulti = ref<{ date: string; status: string; reason: string | null }[]>([])
+const multiApprovedCount = computed(() => submitResultsMulti.value.filter((r) => r.status === 'approved').length)
 
 // Week helpers
 const getMonday = (d: Date): Date => {
@@ -436,6 +477,7 @@ watch(() => form.value.request_type, () => {
   form.value.end_time = ''
   form.value.original_shift_id = ''
   form.value.requested_shift_id = ''
+  form.value.end_date = ''
 })
 
 // Reload availability when the selected week changes
@@ -448,22 +490,67 @@ watch(() => form.value.request_date, () => {
   weekOffset.value = 0
 })
 
+// Build the inclusive list of dates to submit. Only full-day requests support a
+// multi-day range; every other type is a single day.
+const datesToSubmit = (): string[] => {
+  const start = form.value.request_date
+  const end = form.value.end_date
+  if (form.value.request_type !== 'pto_full_day' || !end || end <= start) return [start]
+  const out: string[] = []
+  const [sy, sm, sd] = start.split('-').map(Number)
+  const [ey, em, ed] = end.split('-').map(Number)
+  const cur = new Date(sy, sm - 1, sd)
+  const last = new Date(ey, em - 1, ed)
+  while (cur <= last) {
+    out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`)
+    cur.setDate(cur.getDate() + 1)
+  }
+  return out
+}
+
+const buildBody = (date: string) => ({
+  employee_id: form.value.employee_id,
+  request_type: form.value.request_type,
+  request_date: date,
+  start_time: form.value.start_time || null,
+  end_time: form.value.end_time || null,
+  original_shift_id: form.value.original_shift_id || null,
+  requested_shift_id: form.value.requested_shift_id || null,
+  notes: form.value.notes || null,
+})
+
 const handleSubmit = async () => {
-  submitting.value = true
   submitError.value = null
+
+  if (form.value.request_type === 'pto_full_day' && form.value.end_date && form.value.end_date < form.value.request_date) {
+    submitError.value = 'End date must be on or after the start date'
+    return
+  }
+
+  const dates = datesToSubmit()
+  submitting.value = true
   try {
-    const result = await submitRequest({
-      employee_id: form.value.employee_id,
-      request_type: form.value.request_type,
-      request_date: form.value.request_date,
-      start_time: form.value.start_time || null,
-      end_time: form.value.end_time || null,
-      original_shift_id: form.value.original_shift_id || null,
-      requested_shift_id: form.value.requested_shift_id || null,
-      notes: form.value.notes || null,
-    })
-    submitResult.value = result
-    emit('submitted', result)
+    if (dates.length === 1) {
+      const result = await submitRequest(buildBody(dates[0]))
+      submitResult.value = result
+      emit('submitted', result)
+      return
+    }
+
+    // Multi-day range: submit one request per day, each judged independently.
+    const results: { date: string; status: string; reason: string | null }[] = []
+    let last = null
+    for (const d of dates) {
+      try {
+        const r = await submitRequest(buildBody(d))
+        results.push({ date: d, status: r.status, reason: r.request.rejection_reason })
+        last = r
+      } catch (e: any) {
+        results.push({ date: d, status: 'error', reason: e.data?.message || e.message || 'Failed' })
+      }
+    }
+    submitResultsMulti.value = results
+    if (last) emit('submitted', last)
   } catch (e: any) {
     submitError.value = e.data?.message || e.message || 'Failed to submit request'
   } finally {
@@ -473,11 +560,13 @@ const handleSubmit = async () => {
 
 const resetForm = () => {
   submitResult.value = null
+  submitResultsMulti.value = []
   submitError.value = null
   form.value = {
     employee_id: props.preselectedEmployeeId || '',
     request_type: '',
     request_date: defaultDate,
+    end_date: '',
     start_time: '',
     end_time: '',
     original_shift_id: '',

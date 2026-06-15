@@ -23,6 +23,12 @@
             >
               Month
             </button>
+            <button
+              @click="openHistory"
+              class="px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
+            >
+              History
+            </button>
           </div>
         </div>
         <!-- Navigation -->
@@ -39,6 +45,20 @@
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-green-500 inline-block"></span> Approved</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-yellow-400 inline-block"></span> Pending</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-red-200 border border-red-400 inline-block"></span> Blocked (no requests allowed)</span>
+      </div>
+
+      <!-- New Request card (above the calendar) -->
+      <div class="mb-6 bg-white shadow rounded-lg p-6 flex items-center justify-between">
+        <div>
+          <h2 class="text-lg font-semibold text-gray-900">Add or Edit a Request</h2>
+          <p class="text-sm text-gray-500 mt-1">Submit a new time-off or schedule-change request for an employee.</p>
+        </div>
+        <button
+          @click="showRequestModal = true"
+          class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
+        >
+          New Request
+        </button>
       </div>
 
       <!-- Loading -->
@@ -227,18 +247,67 @@
         </div>
       </div>
 
-      <!-- New Request card -->
-      <div class="mt-6 bg-white shadow rounded-lg p-6 flex items-center justify-between">
-        <div>
-          <h2 class="text-lg font-semibold text-gray-900">Add or Edit a Request</h2>
-          <p class="text-sm text-gray-500 mt-1">Submit a new time-off or schedule-change request for an employee.</p>
+    </div>
+
+    <!-- Request History Modal -->
+    <div v-if="showHistoryModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" @click.self="showHistoryModal = false">
+      <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div class="p-6">
+          <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold text-gray-900">Request History</h2>
+            <button @click="showHistoryModal = false" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+          </div>
+
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Employee</label>
+            <select
+              v-model="historyEmployeeId"
+              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+            >
+              <option value="">Select employee...</option>
+              <option v-for="emp in employees" :key="emp.id" :value="emp.id">
+                {{ emp.last_name }}, {{ emp.first_name }}
+              </option>
+            </select>
+          </div>
+
+          <div v-if="!historyEmployeeId" class="text-sm text-gray-500 py-8 text-center">
+            Select an employee to see their request history.
+          </div>
+          <div v-else-if="historyLoading" class="text-sm text-gray-500 py-8 text-center">Loading…</div>
+          <div v-else-if="historyRequests.length === 0" class="text-sm text-gray-500 py-8 text-center">
+            No requests found for this employee.
+          </div>
+          <div v-else class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-3 py-2 text-left font-medium text-gray-500">Date</th>
+                  <th class="px-3 py-2 text-left font-medium text-gray-500">Type</th>
+                  <th class="px-3 py-2 text-left font-medium text-gray-500">Status</th>
+                  <th class="px-3 py-2 text-left font-medium text-gray-500">Notes / Reason</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                <tr v-for="req in historyRequests" :key="req.id">
+                  <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(req.request_date) }}</td>
+                  <td class="px-3 py-2 whitespace-nowrap">{{ formatRequestType(req.request_type) }}</td>
+                  <td class="px-3 py-2">
+                    <span
+                      class="px-2 py-0.5 rounded-full text-xs font-medium"
+                      :class="{
+                        'bg-green-100 text-green-800': req.status === 'approved',
+                        'bg-yellow-100 text-yellow-800': req.status === 'pending',
+                        'bg-red-100 text-red-800': req.status === 'rejected',
+                      }"
+                    >{{ req.status }}</span>
+                  </td>
+                  <td class="px-3 py-2 text-gray-500 max-w-[240px] truncate">{{ req.rejection_reason || req.notes || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-        <button
-          @click="showRequestModal = true"
-          class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
-        >
-          New Request
-        </button>
       </div>
     </div>
 
@@ -255,10 +324,37 @@
 const { user } = useAuth()
 const { fetchRequests, requests, overrideRequest, cancelRequest, loading } = useScheduleRequests()
 const { blockedDates, fetchBlockedDates } = useTeamBlockedDates()
+const { employees, fetchEmployees } = useEmployees()
 
 const viewMode = ref<'week' | 'month'>('week')
 const referenceDate = ref(new Date())
 const showRequestModal = ref(false)
+
+// Request history modal (per-employee, all dates)
+const showHistoryModal = ref(false)
+const historyEmployeeId = ref('')
+const historyRequests = ref<any[]>([])
+const historyLoading = ref(false)
+
+const openHistory = async () => {
+  showHistoryModal.value = true
+  if (!employees.value?.length) await fetchEmployees()
+}
+
+watch(historyEmployeeId, async (empId) => {
+  historyRequests.value = []
+  if (!empId) return
+  historyLoading.value = true
+  try {
+    historyRequests.value = await $fetch<any[]>('/api/schedule-requests', {
+      params: { employee_id: empId },
+    })
+  } catch {
+    historyRequests.value = []
+  } finally {
+    historyLoading.value = false
+  }
+})
 
 const onRequestSubmitted = () => {
   loadCalendar()

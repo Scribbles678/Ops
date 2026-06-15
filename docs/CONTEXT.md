@@ -15,7 +15,7 @@ A distribution center scheduling application for managing employee work assignme
 | Styling | Tailwind CSS |
 | Server | Nitro (file-based API routes with method suffixes) |
 | Database | PostgreSQL 16 (direct `pg` library, no ORM) |
-| Auth | JWT (HttpOnly cookies, 8hr expiry), bcryptjs passwords |
+| Auth | JWT (HttpOnly cookies, 8hr expiry; 30d self-renewing for display/kiosk accounts), bcryptjs passwords |
 | Email | Nodemailer (SMTP) for password resets (optional) |
 | Export | xlsx for Excel export |
 | Deployment | Docker Compose / Rancher (Kubernetes) / Netlify |
@@ -112,7 +112,7 @@ scheduling-app-v2/
 │   │   └── rate-limit.ts      # Per-IP rate limiting (200/min default, stricter for auth)
 │   └── utils/
 │       ├── db.ts              # PostgreSQL pool (singleton), query(), transaction()
-│       ├── jwt.ts             # signToken (8hr), verifyToken, COOKIE_NAME
+│       ├── jwt.ts             # signToken (8hr; 30d for display users), verifyToken, sessionMaxAge, COOKIE_NAME
 │       ├── authorize.ts       # requireAuth, requireAdmin, requireSuperAdmin, getTeamFilter
 │       └── email.ts           # SMTP email via nodemailer
 ├── middleware/
@@ -176,7 +176,7 @@ cleanup_log (archival run audit)
 | **schedule_assignments** | employee_id, job_function_id, shift_id, schedule_date, assignment_order, start_time, end_time, team_id |
 | **employee_training** | employee_id, job_function_id (junction; unique pair) |
 | **staffing_targets** | job_function_id, hour_start, headcount, is_active, team_id (primary input to Automated Builder) |
-| **preferred_assignments** | employee_id, job_function_id, is_required, priority, **am_job_function_id**, **pm_job_function_id** |
+| **preferred_assignments** | employee_id, job_function_id, is_required, priority, **am_job_function_id**, **pm_job_function_id**. Each half is independent: a set column pins that half (1st = AM, 2nd = PM); a NULL half means "not pinned — fill by demand". (`job_function_id` is NOT NULL — set to whichever half is chosen.) Legacy rows with both halves NULL fall back to `job_function_id` for both; migration 012 made existing rows explicit. |
 | **pto_days** | employee_id, pto_date, optional start_time/end_time, pto_type (`full_day`/`partial`/`leave_early`/`arrive_late`), notes. `arrive_late` rows store `start_time='00:00:00'`, `end_time=arrival` so the builder clips the morning. No CHECK on pto_type (free text). |
 | **schedule_requests** | employee_id, request_type, status, request_date, start/end_time, original/requested_shift_id, approval_rule_results (JSONB), admin_override, rejection_reason, approved_by, submitted_by, created_pto_id, created_swap_id |
 | **shift_swaps** | employee_id, swap_date (unique per employee), original_shift_id, swapped_shift_id |
@@ -207,7 +207,7 @@ cleanup_log (archival run audit)
 ## Authentication & Authorization
 
 ### Auth Flow
-1. User logs in via `/login` → POST `/api/auth/login` → constant-time bcrypt verify → `last_login` updated → JWT set as HttpOnly cookie (`sameSite=strict`, `secure` in production, 8hr maxAge)
+1. User logs in via `/login` → POST `/api/auth/login` → constant-time bcrypt verify → `last_login` updated → JWT set as HttpOnly cookie (`sameSite=strict`, `secure` in production). Expiry: **8hr** normally, **30d** for display/kiosk accounts (`sessionMaxAge()` / `signToken` key off `is_display_user`). The `/display` page slides the session by POSTing `/api/auth/refresh` on every data refresh, so a 24/7 kiosk never logs out; it also reloads + re-checks the date on visibility/focus regain (wake from sleep) and rolls over at midnight.
 2. Every server request → `server/middleware/auth.ts` reads the cookie → verifies JWT → populates `event.context.user`
 3. Client middleware (`middleware/auth.global.ts`) redirects unauthenticated users to `/login`. **Display-only (kiosk) users are redirected to `/display` on login and locked there** — the middleware bounces them back to `/display` from any other route.
 4. Public routes: `/login`, `/display`, `/reset-password`
@@ -276,9 +276,9 @@ A deterministic, dependency-free algorithm (not an LLM, no solver). Core design 
 3. **Break carve-out:** split each block around `break_1`/`break_2` into availability windows, dropping sub-30-min fragments.
 4. **Meter fan-out expansion:** parent functions with numbered children distribute headcount evenly across children (numeric sort; duplicate names deduped to oldest).
 5. **Target & coverage matrices:** `target[jfId][hour] = headcount` (overwrite, not sum — `(jfId,hour)` is unique per the data model); a running `covered[jfId][hour]` counter; plus `maxHeadcount[jfId]` and an `overflowFns` set.
-6. **STEP 1 — Required pins:** `is_required` employees locked to their function (AM/PM-specific), split around breaks; counted into `covered`. `resolveMeterChild()` picks the best Meter variant.
+6. **STEP 1 — Required pins:** `is_required` employees locked to their function, **per half independently** — the 1st half is pinned only if `am_job_function_id` is set, the 2nd only if `pm_job_function_id` is set; a NULL half is left free for demand filling. (Legacy rows with both halves NULL pin both to `job_function_id`.) Split around breaks; counted into `covered`. `resolveMeterChild()` picks the best Meter variant.
 7. **PASS 1 — scarce-first target fill:** functions processed in order of `trainedSupply ÷ totalDemand` ascending (hard-to-staff roles like Help desk claim their few trained people first). For each function's first contiguous **unmet, fillable** run (`covered < target` AND `covered < max`), pick the best trained employee/block: score = block length + stickiness + preferred bonus − (other trained functions × weight). Respects `capRoom`. Repeats until no fillable candidate remains.
-8. **STEP 2.5 — Lunch/break coverage pass:** for `lunch_coverage_required`/`break_coverage_required` functions, insert a coverer for the primary's lunch/break window (greedy longest-overlap, skipping coverers on their own break). Coverage assignments do **not** count toward target coverage. Unfillable coverage → warning.
+8. **STEP 2.5 — Lunch/break coverage pass:** for `lunch_coverage_required`/`break_coverage_required` functions, insert a coverer for the primary's lunch/break window (greedy longest-overlap, skipping coverers on their own break). Coverage assignments do **not** count toward target coverage. Unfillable coverage → warning. **A coverage block under 30 min is skipped with a warning** (the DB enforces a 30-min minimum on every assignment) — so break coverage of typical 15-min breaks won't generate. STEP 4 also drops any sub-30 block as a final guardrail so a stray short assignment can never abort the whole save.
 9. **PASS 2 — surplus fill:** deploy any remaining availability so nobody's idle. Priority per window: (a) **still-under-target** functions first (meeting targets beats overflow), else (b) **overflow-flagged** functions (the surplus sink), else (c) continue an existing function. Soft cap of `MAX_FUNCTIONS = 4` distinct functions/person; per-hour `max_headcount` always respected (a fully-capped worker is left idle).
 10. **PASS 3 — merge:** merge touching same-employee, same-function blocks into one segment (collapses break-split fragments).
 11. **STEP 3 — gaps & over-target:** from final `covered` vs `target`: `covered < target` → gap (warning); `covered > target` → over-target surplus (skipped for `exclude_from_targets` functions, whose required pins would otherwise read as "over" a zero target).
@@ -298,10 +298,10 @@ A deterministic, dependency-free algorithm (not an LLM, no solver). Core design 
 > **`leave_on_time`** (decline overtime) is informational: it runs only the 24h-advance + date-not-blocked rules, counts 0 PTO hours, and creates **no** downstream record. **`arrive_late`** (late start) runs the full rule set, counts a flat ~2h toward the daily PTO-hours limit (like `leave_early`), and on approval materializes a `pto_days` row (`start='00:00:00'`, `end=arrival`, `pto_type='arrive_late'`) so the builder clips the employee's morning. Both the POST engine and the admin-override PUT materialize identically.
 
 **Rules evaluated** (a request is approved only if all applicable rules pass):
-- **24h advance notice** — request_date must be ≥ 24h out (hardcoded)
-- **Max leave-early per employee per day** — `team_settings.max_leave_early_per_employee_per_day` (default 1)
-- **Max shift-change per employee per day** — `max_shift_change_per_employee_per_day` (default 1)
-- **Max PTO hours per day, team-wide** — `max_pto_hours_per_day` (default 8); full-day counts 8h, leave-early 2h, partial = span
+- **Advance notice (business days)** — at least `team_settings.min_business_days_notice` (default 1) full working days (Mon–Fri) must fall strictly between today and the requested date; weekends don't count (so a Friday request for Monday = 0 business days → rejected at the default). Rule key: `advance_notice`.
+- **Max shift changes per employee per week** — `max_shift_change_per_employee_per_week` (default 1); counts the employee's approved `shift_swap` requests in the Mon–Sun week containing the requested date
+- **Max leave-on-time per employee per week** — `max_leave_on_time_per_employee_per_week` (default 5); counts the employee's approved `leave_on_time` requests in that same Mon–Sun week
+- **Max PTO hours per day, team-wide** — per-weekday cap from `max_pto_hours_by_dow` (JSON keyed `mon`..`fri`); weekends and any unset weekday fall back to the legacy single `max_pto_hours_per_day` (default 8). Counts: full-day 8h, leave-early 2h, arrive-late 2h, partial = span (leave-on-time 0).
 - **Max shift swaps per day, team-wide** — `max_shift_swaps_per_day` (default 3)
 - **Date not blocked** — for PTO/leave-early, checks `team_blocked_dates`; if blocked, the stored `reason` becomes the rejection message
 
@@ -363,6 +363,7 @@ This means **no manual SQL on deploy or update** — new migrations ship in the 
 | 009-backfill-orphaned-team-data | one-time data repair: adopts NULL-team rows into the `domestic` team (see Multi-Tenancy). No-op on fresh installs; runs once via a `_data_backfills` marker. **Note:** hardcodes the `domestic` team name — a no-op on installs whose team is named otherwise (e.g. `Default Team`), so orphaned NULL rows can persist there. |
 | 010-add-job-function-surplus-controls | `job_functions.max_headcount` (per-hour ceiling) + `surplus_overflow` (preferred surplus sink) — drive the Automated Builder's PASS 2. Additive/idempotent; multi-team safe. |
 | 011-add-request-types | extends `schedule_requests_request_type_check` to add `leave_on_time` + `arrive_late`. Drop+recreate constraint (idempotent); multi-team safe. |
+| 012-explicit-half-assignments | **one-time** backfill (guarded by `_data_backfills` marker): sets NULL `am`/`pm_job_function_id` to `job_function_id` so a NULL half can newly mean "not pinned". Preserves prior behavior; multi-team safe; never re-runs (would clobber intentional NULLs). |
 
 ---
 

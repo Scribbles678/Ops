@@ -149,14 +149,14 @@
                         {{ pref.employee?.first_name }} {{ pref.employee?.last_name }}
                       </h4>
                       <p v-if="!pref.am_job_function_id && !pref.pm_job_function_id" class="text-sm text-gray-600">
-                        AM &amp; PM: <span class="font-medium">{{ pref.job_function?.name }}</span>
+                        1st &amp; 2nd Half: <span class="font-medium">{{ pref.job_function?.name }}</span>
                       </p>
                       <template v-else>
                         <p class="text-sm text-gray-600">
-                          AM: <span class="font-medium">{{ getJfName(pref.am_job_function_id) ?? pref.job_function?.name }}</span>
+                          1st Half: <span class="font-medium">{{ pref.am_job_function_id ? getJfName(pref.am_job_function_id) : 'Not assigned' }}</span>
                         </p>
                         <p class="text-sm text-gray-600">
-                          PM: <span class="font-medium">{{ getJfName(pref.pm_job_function_id) ?? pref.job_function?.name }}</span>
+                          2nd Half: <span class="font-medium">{{ pref.pm_job_function_id ? getJfName(pref.pm_job_function_id) : 'Not assigned' }}</span>
                         </p>
                       </template>
                     </div>
@@ -222,13 +222,15 @@
                   </select>
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1">AM Job Function</label>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">
+                    1st Half Job Function
+                    <span class="text-gray-400 font-normal">(leave unassigned to fill by demand)</span>
+                  </label>
                   <select
                     v-model="preferredAssignmentFormData.am_job_function_id"
-                    required
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">Select job function...</option>
+                    <option value="">— Not assigned —</option>
                     <option
                       v-for="jf in sortedJobFunctions"
                       :key="jf.id"
@@ -240,14 +242,15 @@
                 </div>
                 <div>
                   <label class="block text-sm font-medium text-gray-700 mb-1">
-                    PM Job Function
-                    <span class="text-gray-400 font-normal">(leave blank to use same as AM)</span>
+                    2nd Half Job Function
+                    <span class="text-gray-400 font-normal">(leave unassigned to fill by demand)</span>
                   </label>
                   <select
                     v-model="preferredAssignmentFormData.pm_job_function_id"
                     class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
-                    <option value="">Same as AM</option>
+                    <option value="">— Not assigned —</option>
+                    <option value="SAME">Same as 1st Half</option>
                     <option
                       v-for="jf in sortedJobFunctions"
                       :key="jf.id"
@@ -257,6 +260,7 @@
                     </option>
                   </select>
                 </div>
+                <p class="text-xs text-gray-500">Assign one half, both, or different functions per half. At least one half is required.</p>
                 <div class="flex justify-end space-x-3 pt-4">
                   <button
                     type="button"
@@ -437,16 +441,20 @@ const closePreferredAssignmentsModal = () => {
 
 const openAddPreferredAssignmentModal = () => {
   editingPreferredAssignment.value = null
-  preferredAssignmentFormData.value = { employee_id: '', am_job_function_id: '', pm_job_function_id: '' }
+  // Default: 2nd half mirrors the 1st (the common all-day pin); user can change either.
+  preferredAssignmentFormData.value = { employee_id: '', am_job_function_id: '', pm_job_function_id: 'SAME' }
   showPreferredAssignmentFormModal.value = true
 }
 
 const openEditPreferredAssignmentModal = (pref: any) => {
   editingPreferredAssignment.value = pref
+  // Show explicit per-half values. Legacy rows where both halves are null map the
+  // base function onto both halves; otherwise an unset half shows "Not assigned".
+  const bothNull = !pref.am_job_function_id && !pref.pm_job_function_id
   preferredAssignmentFormData.value = {
     employee_id: pref.employee_id,
-    am_job_function_id: pref.am_job_function_id ?? pref.job_function_id ?? '',
-    pm_job_function_id: pref.pm_job_function_id ?? ''
+    am_job_function_id: pref.am_job_function_id ?? (bothNull ? pref.job_function_id : '') ?? '',
+    pm_job_function_id: pref.pm_job_function_id ?? (bothNull ? pref.job_function_id : '') ?? ''
   }
   showPreferredAssignmentFormModal.value = true
 }
@@ -459,12 +467,19 @@ const closePreferredAssignmentFormModal = () => {
 const handlePreferredAssignmentSubmit = async () => {
   try {
     const { employee_id, am_job_function_id, pm_job_function_id } = preferredAssignmentFormData.value
+    // Resolve each half: '' = not pinned (null); 'SAME' on the 2nd half mirrors the 1st.
+    const am = am_job_function_id || null
+    const pm = pm_job_function_id === 'SAME' ? am : (pm_job_function_id || null)
+    if (!am && !pm) {
+      alert('Choose a job function for at least one half (1st or 2nd).')
+      return
+    }
     const payload = {
       employee_id,
-      // job_function_id is the AM function (required for the unique constraint)
-      job_function_id: am_job_function_id,
-      am_job_function_id,
-      pm_job_function_id: pm_job_function_id || null,
+      // job_function_id must be non-null (unique constraint); use whichever half is set.
+      job_function_id: am ?? pm,
+      am_job_function_id: am,
+      pm_job_function_id: pm,
       is_required: true,
       priority: 0,
       notes: ''

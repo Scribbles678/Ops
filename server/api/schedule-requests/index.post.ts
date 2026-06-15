@@ -83,38 +83,74 @@ export default defineEventHandler(async (event) => {
     const reqDate = new Date(request_date + 'T00:00:00')
     const now = new Date()
 
-    // Rule 1: 24-hour advance notice
-    const hoursUntil = (reqDate.getTime() - now.getTime()) / (1000 * 60 * 60)
-    ruleResults['24h_advance'] = hoursUntil >= 24
+    // Rule 1: advance notice in BUSINESS days (Mon–Fri). Counts full working days
+    // strictly between today and the requested date — weekends don't count, so a
+    // Friday request for Monday gives 0 business days' notice.
+    const minBusinessDaysNotice = getSetting('min_business_days_notice', 1)
+    const countBusinessDaysBetween = (from: Date, to: Date): number => {
+      let count = 0
+      const d = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+      d.setDate(d.getDate() + 1) // strictly after `from`
+      const end = new Date(to.getFullYear(), to.getMonth(), to.getDate())
+      while (d < end) {
+        const dow = d.getDay()
+        if (dow !== 0 && dow !== 6) count++
+        d.setDate(d.getDate() + 1)
+      }
+      return count
+    }
+    const businessDaysNotice = countBusinessDaysBetween(now, reqDate)
+    ruleResults['advance_notice'] = businessDaysNotice >= minBusinessDaysNotice
 
-    // Rule 2: Leave early — max per employee per day
-    if (request_type === 'leave_early') {
-      const maxLeaveEarly = getSetting('max_leave_early_per_employee_per_day', 1)
-      const countResult = await client.query(
+    // Mon–Sun week bounds containing the requested date (shared by per-week rules).
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const fmtDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    const reqDow = reqDate.getDay() // 0 Sun..6 Sat
+    const weekStart = new Date(reqDate)
+    weekStart.setDate(reqDate.getDate() + (reqDow === 0 ? -6 : 1 - reqDow)) // Monday
+    const weekEnd = new Date(weekStart)
+    weekEnd.setDate(weekStart.getDate() + 6) // Sunday
+
+    // Count an employee's approved requests of a type within that week.
+    const countEmployeeWeek = async (type: string): Promise<number> => {
+      const r = await client.query(
         `SELECT COUNT(*)::int as cnt FROM schedule_requests
-         WHERE employee_id = $1 AND request_type = 'leave_early' AND status = 'approved'
-           AND request_date = $2`,
-        [employee_id, request_date]
+         WHERE employee_id = $1 AND request_type = $2 AND status = 'approved'
+           AND request_date BETWEEN $3 AND $4`,
+        [employee_id, type, fmtDate(weekStart), fmtDate(weekEnd)]
       )
-      ruleResults['max_leave_early_per_day'] = (countResult.rows[0] as any).cnt < maxLeaveEarly
+      return (r.rows[0] as any).cnt
     }
 
-    // Rule 3: Shift swap — max per employee per day
+    // Rule 2: Shift change — max per employee per WEEK.
     if (request_type === 'shift_swap') {
-      const maxShiftChange = getSetting('max_shift_change_per_employee_per_day', 1)
-      const countResult = await client.query(
-        `SELECT COUNT(*)::int as cnt FROM schedule_requests
-         WHERE employee_id = $1 AND request_type = 'shift_swap' AND status = 'approved'
-           AND request_date = $2`,
-        [employee_id, request_date]
-      )
-      ruleResults['max_shift_swap_per_day'] = (countResult.rows[0] as any).cnt < maxShiftChange
+      const maxShiftChange = getSetting('max_shift_change_per_employee_per_week', 1)
+      ruleResults['max_shift_change_per_week'] = (await countEmployeeWeek('shift_swap')) < maxShiftChange
+    }
+
+    // Rule 2b: Leave on time — max per employee per WEEK.
+    if (request_type === 'leave_on_time') {
+      const maxLeaveOnTime = getSetting('max_leave_on_time_per_employee_per_week', 5)
+      ruleResults['max_leave_on_time_per_week'] = (await countEmployeeWeek('leave_on_time')) < maxLeaveOnTime
     }
 
     // Rule 4: Max PTO hours per day (team-wide). Counts hour-reducing requests only —
     // 'leave_on_time' is informational (0 hours) and is intentionally excluded.
     if (['pto_full_day', 'pto_partial', 'leave_early', 'arrive_late'].includes(request_type)) {
-      const maxPtoHours = getSetting('max_pto_hours_per_day', 8)
+      // Per-weekday team-wide cap (max_pto_hours_by_dow JSON, keyed mon..fri);
+      // weekends (and any unset weekday) fall back to the legacy single setting.
+      const maxPtoHours = (() => {
+        const dowName = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][reqDate.getDay()]
+        try {
+          const raw = settings['max_pto_hours_by_dow']
+          if (raw) {
+            const map = JSON.parse(raw)
+            const v = Number(map?.[dowName])
+            if (!isNaN(v)) return v
+          }
+        } catch { /* fall through to default */ }
+        return getSetting('max_pto_hours_per_day', 8)
+      })()
 
       // Sum existing approved PTO hours for this team on this day
       const existingResult = await client.query(
@@ -190,9 +226,9 @@ export default defineEventHandler(async (event) => {
     if (!allPassed) {
       const failed = Object.entries(ruleResults).filter(([, v]) => !v).map(([k]) => k)
       const labels: Record<string, string> = {
-        '24h_advance': 'Requests must be made at least 24 hours in advance',
-        'max_leave_early_per_day': 'Max leave-early requests for the day reached',
-        'max_shift_swap_per_day': 'Max shift change requests for the day reached',
+        'advance_notice': `Requests must be made at least ${minBusinessDaysNotice} business day(s) in advance`,
+        'max_shift_change_per_week': 'Max shift changes for this employee this week reached',
+        'max_leave_on_time_per_week': 'Max leave-on-time requests for this employee this week reached',
         'max_pto_hours_per_day': 'Team PTO hours limit for the day exceeded',
         'max_shift_swaps_per_day': 'Max shift swaps for the day exceeded',
         'date_not_blocked': blockedReason

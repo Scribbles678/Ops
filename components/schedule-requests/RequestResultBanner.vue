@@ -40,9 +40,10 @@ const props = defineProps<{
 }>()
 
 const ruleLabels: Record<string, string> = {
+  'advance_notice': 'Advance-notice (business days)',
   '24h_advance': '24-hour advance notice',
-  'max_leave_early_per_day': 'Leave-early limit per day',
-  'max_shift_swap_per_day': 'Shift change limit per day',
+  'max_shift_change_per_week': 'Shift changes / employee / week',
+  'max_leave_on_time_per_week': 'Leave-on-time / employee / week',
   'max_pto_hours_per_day': 'Team PTO hours limit per day',
   'max_shift_swaps_per_day': 'Shift swaps limit per day',
   'date_not_blocked': 'Date is not blocked for requests',

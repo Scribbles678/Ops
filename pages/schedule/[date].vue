@@ -235,15 +235,22 @@
                       >
                         <div
                           class="w-full h-4 flex items-center justify-center rounded transition-all"
-                          :class="getJobFunctionSlotClasses(employee.id, timeSlot.time, activeDashboard)"
-                          :style="getJobFunctionSlotStyle(employee.id, timeSlot.time, activeDashboard)"
+                          :class="[
+                            isEmployeeOnBreak(employee.id, timeSlot.time) ? 'bg-gray-300' : getJobFunctionSlotClasses(employee.id, timeSlot.time, activeDashboard)
+                          ]"
+                          :style="isEmployeeOnBreak(employee.id, timeSlot.time) ? {} : getJobFunctionSlotStyle(employee.id, timeSlot.time, activeDashboard)"
+                          :title="isEmployeeOnBreak(employee.id, timeSlot.time) ? 'Break / Lunch' : ''"
                         >
-                          <span 
-                            v-if="isEmployeeAssignedToJobFunction(employee.id, timeSlot.time, activeDashboard)" 
+                          <span
+                            v-if="isEmployeeOnBreak(employee.id, timeSlot.time)"
+                            class="w-2 h-0.5 rounded-sm bg-gray-600"
+                          ></span>
+                          <span
+                            v-else-if="isEmployeeAssignedToJobFunction(employee.id, timeSlot.time, activeDashboard)"
                             class="w-1.5 h-1.5 rounded-full bg-white shadow-sm"
                           ></span>
-                          <span 
-                            v-else 
+                          <span
+                            v-else
                             class="w-1 h-1 rounded-full bg-gray-200"
                           ></span>
                         </div>
@@ -308,6 +315,7 @@
             @addPTO="openPTOModal"
             @addShiftSwap="openShiftSwapModal"
             @addCallIn="openCallInModal"
+            @clearEmployee="handleClearEmployee"
           />
         </div>
       </div>
@@ -1686,6 +1694,22 @@ const openCallInModal = (employee: any) => {
   showCallInModal.value = true
 }
 
+// Delete every schedule assignment for one employee on a given date. Used by call-in:
+// a called-in employee isn't working, so their day is wiped clean.
+const clearEmployeeAssignmentsForDate = async (employeeId: string, date: string): Promise<number> => {
+  let list: any[] = []
+  try {
+    list = await $fetch<any[]>(`/api/schedule/${date}`)
+  } catch {
+    list = []
+  }
+  const mine = (Array.isArray(list) ? list : []).filter((a: any) => a.employee_id === employeeId && a.id)
+  for (const a of mine) {
+    await deleteAssignment(a.id)
+  }
+  return mine.length
+}
+
 const saveCallIn = async () => {
   if (!callInForm.value.employee_id || !callInForm.value.pto_date) return
   const prior = resolvedCallInRecord.value
@@ -1705,9 +1729,20 @@ const saveCallIn = async () => {
     notes: callInForm.value.notes || null
   })
   if (ok) {
+    // A call-in clears that employee's entire day — wipe all their assignments.
+    const cleared = await clearEmployeeAssignmentsForDate(callInForm.value.employee_id, callInForm.value.pto_date)
     await fetchPTOForDate(scheduleDate.value)
+    // Refresh the grid only if the call-in is for the day currently in view.
+    if (toYMD(callInForm.value.pto_date) === toYMD(scheduleDate.value)) {
+      await fetchScheduleForDate(scheduleDate.value)
+      await nextTick()
+      initializeScheduleData()
+    }
     showCallInModal.value = false
-    showNotification('Call-in saved.', 'success')
+    showNotification(
+      cleared > 0 ? `Call-in saved. Cleared ${cleared} assignment(s).` : 'Call-in saved.',
+      'success'
+    )
   } else {
     showNotification('Failed to save call-in. Please try again.', 'error')
   }
@@ -1715,6 +1750,20 @@ const saveCallIn = async () => {
 
 const closeCallInModal = () => {
   showCallInModal.value = false
+}
+
+// "Clear All Functions" from the assignment modal — hard-wipe an employee's day.
+const handleClearEmployee = async (employee: any) => {
+  if (!employee?.id) return
+  const name = `${employee.last_name || ''}, ${employee.first_name || ''}`.replace(/^,\s*/, '')
+  const cleared = await clearEmployeeAssignmentsForDate(employee.id, scheduleDate.value)
+  await fetchScheduleForDate(scheduleDate.value)
+  await nextTick()
+  initializeScheduleData()
+  showNotification(
+    cleared > 0 ? `Cleared ${cleared} assignment(s) for ${name}.` : `${name} had no assignments to clear.`,
+    'success'
+  )
 }
 
 const deleteCurrentCallIn = async () => {
@@ -1983,13 +2032,36 @@ const getEmployeesForJobFunction = (jobFunctionKey: string) => {
     })
 }
 
+// Is this time slot inside the employee's shift break/lunch window? Driven by the
+// shift's break/lunch times (Details & Settings → Shift Management), independent of
+// the assignment data — so breaks always show in the dashboard even when an
+// assignment block happens to span them.
+const isEmployeeOnBreak = (employeeId: string, timeSlot: string): boolean => {
+  const emp = employees.value?.find((e: any) => e.id === employeeId)
+  if (!emp?.shift_id) return false
+  const shift = shifts.value?.find((s: any) => s.id === emp.shift_id)
+  if (!shift) return false
+  const t = timeToMinutesHelper(timeSlot)
+  const within = (start: any, end: any) =>
+    !!start && !!end && t >= timeToMinutesHelper(start) && t < timeToMinutesHelper(end)
+  return (
+    within(shift.break_1_start, shift.break_1_end) ||
+    within(shift.break_2_start, shift.break_2_end) ||
+    within(shift.lunch_start, shift.lunch_end)
+  )
+}
+
 // Check if employee is assigned to job function at a specific time slot
 const isEmployeeAssignedToJobFunction = (employeeId: string, timeSlot: string, jobFunctionKey: string): boolean => {
   if (!scheduleAssignmentsData.value || !scheduleAssignmentsData.value[employeeId]) return false
-  
+
+  // A slot inside the employee's break/lunch is never "working" the function, even if
+  // an assignment block spans it.
+  if (isEmployeeOnBreak(employeeId, timeSlot)) return false
+
   const employeeSchedule = scheduleAssignmentsData.value[employeeId]
   const assignment = employeeSchedule[timeSlot]
-  
+
   if (!assignment || !assignment.assignment) return false
   
   const jobFunctionName = normalizeJobFunctionName(jobFunctionKey)

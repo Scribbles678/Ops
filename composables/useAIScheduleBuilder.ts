@@ -449,15 +449,17 @@ const buildSchedule = (
     for (const pa of Object.values(preferred)) {
       if (!pa?.is_required) continue
 
-      const amJfIdRaw: string = pa.am_job_function_id ?? pa.job_function_id
-      const pmJfIdRaw: string = pa.pm_job_function_id ?? pa.job_function_id
-
-      if (!isTrainedFor(emp.id, amJfIdRaw, jobFunctions, trainingData)) continue
+      // A half is pinned ONLY if its column is set. A NULL half means "not pinned —
+      // fill by demand". Legacy rows where BOTH halves are null fall back to
+      // job_function_id for both (pre-migration "applies all day" behavior).
+      const bothNull = !pa.am_job_function_id && !pa.pm_job_function_id
+      const amJfIdRaw: string | null = pa.am_job_function_id ?? (bothNull ? pa.job_function_id : null)
+      const pmJfIdRaw: string | null = pa.pm_job_function_id ?? (bothNull ? pa.job_function_id : null)
 
       const shift = shifts.find((s: any) => s.id === emp.shift_id)
       const breaks = getShiftBreaks(shift)
 
-      if (emp.amEnd > emp.amStart) {
+      if (amJfIdRaw && isTrainedFor(emp.id, amJfIdRaw, jobFunctions, trainingData) && emp.amEnd > emp.amStart) {
         for (const seg of splitAroundBreaks(emp.amStart, emp.amEnd, breaks)) {
           const amJfId = resolveMeterChild(amJfIdRaw, seg.start, seg.end)
           allAssignments.push({ empId: emp.id, jfId: amJfId, start: seg.start, end: seg.end })
@@ -466,7 +468,7 @@ const buildSchedule = (
         }
       }
 
-      if (emp.pmStart != null && emp.pmEnd != null) {
+      if (pmJfIdRaw && isTrainedFor(emp.id, pmJfIdRaw, jobFunctions, trainingData) && emp.pmStart != null && emp.pmEnd != null) {
         for (const seg of splitAroundBreaks(emp.pmStart, emp.pmEnd, breaks)) {
           const pmJfId = resolveMeterChild(pmJfIdRaw, seg.start, seg.end)
           allAssignments.push({ empId: emp.id, jfId: pmJfId, start: seg.start, end: seg.end })
@@ -751,6 +753,16 @@ const buildSchedule = (
         )
         break
       }
+      // The DB requires every assignment to be ≥ 30 min, so a shorter coverage block
+      // (e.g. a 15-min break) can't be written. Skip it with a warning instead of
+      // emitting an assignment that would fail the whole save.
+      if (found.coverEnd - found.coverStart < 30) {
+        warnings.push(
+          `Coverage for ${jf?.name || g.jfId} during ${primaryName}'s ${g.label} is under the 30-minute minimum and was skipped.`
+        )
+        remaining = found.coverEnd
+        continue
+      }
       allAssignments.push({
         empId: found.empId,
         jfId: g.jfId,
@@ -880,17 +892,23 @@ const buildSchedule = (
     jfNameById.set(jf.id, jf.name)
   }
 
+  // Guardrail: the DB rejects any assignment under 30 minutes (and aborts the whole
+  // save). Never emit a sub-30 block — drop it with a warning rather than fail the save.
   const schedule: ScheduleAssignment[] = []
+  let droppedShort = 0
   for (const {empId, jfId, start, end} of mergedAssignments) {
     const name = jfNameById.get(jfId)
-    if (name && end > start) {
-      schedule.push({
-        employee_id: empId,
-        job_function: name,
-        start_time: minutesToTime(start),
-        end_time: minutesToTime(end),
-      })
-    }
+    if (!name || end <= start) continue
+    if (end - start < 30) { droppedShort++; continue }
+    schedule.push({
+      employee_id: empId,
+      job_function: name,
+      start_time: minutesToTime(start),
+      end_time: minutesToTime(end),
+    })
+  }
+  if (droppedShort > 0) {
+    warnings.push(`${droppedShort} assignment(s) under the 30-minute minimum were dropped.`)
   }
 
   return { schedule, gaps, overTarget }
