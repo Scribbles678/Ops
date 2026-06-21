@@ -8,10 +8,7 @@
           <p class="text-gray-600 mt-1 text-xs md:text-sm">Set target headcount per job function per hour for automated scheduling</p>
         </div>
         <div class="flex space-x-2 md:space-x-3">
-          <button @click="handleLogout" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-xs md:text-sm font-medium transition-colors">
-            Logout
-          </button>
-          <NuxtLink to="/" class="btn-secondary-sm md:btn-secondary">
+          <NuxtLink to="/" class="btn-secondary">
             ← Back to Home
           </NuxtLink>
         </div>
@@ -148,9 +145,17 @@
                       <h4 class="text-lg font-semibold text-gray-800">
                         {{ pref.employee?.first_name }} {{ pref.employee?.last_name }}
                       </h4>
-                      <p v-if="!pref.am_job_function_id && !pref.pm_job_function_id" class="text-sm text-gray-600">
-                        1st &amp; 2nd Half: <span class="font-medium">{{ pref.job_function?.name }}</span>
-                      </p>
+                      <template v-if="pref.blocks && pref.blocks.length">
+                        <p v-for="(b, i) in pref.blocks" :key="i" class="text-sm text-gray-600">
+                          {{ fmtTime12(b.start_time) }}–{{ fmtTime12(b.end_time) }}:
+                          <span class="font-medium">{{ getJfName(b.job_function_id) }}</span>
+                        </p>
+                      </template>
+                      <template v-else-if="!pref.am_job_function_id && !pref.pm_job_function_id">
+                        <p class="text-sm text-gray-600">
+                          1st &amp; 2nd Half: <span class="font-medium">{{ pref.job_function?.name }}</span>
+                        </p>
+                      </template>
                       <template v-else>
                         <p class="text-sm text-gray-600">
                           1st Half: <span class="font-medium">{{ pref.am_job_function_id ? getJfName(pref.am_job_function_id) : 'Not assigned' }}</span>
@@ -222,45 +227,48 @@
                   </select>
                 </div>
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1">
-                    1st Half Job Function
-                    <span class="text-gray-400 font-normal">(leave unassigned to fill by demand)</span>
-                  </label>
-                  <select
-                    v-model="preferredAssignmentFormData.am_job_function_id"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">— Not assigned —</option>
-                    <option
-                      v-for="jf in sortedJobFunctions"
-                      :key="jf.id"
-                      :value="jf.id"
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Time Blocks</label>
+                  <div class="space-y-2">
+                    <div
+                      v-for="(blk, idx) in preferredAssignmentFormData.blocks"
+                      :key="idx"
+                      class="flex items-center gap-2"
                     >
-                      {{ jf.name }}
-                    </option>
-                  </select>
+                      <input
+                        v-model="blk.start_time"
+                        type="time"
+                        class="px-2 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-28"
+                      />
+                      <span class="text-gray-400">–</span>
+                      <input
+                        v-model="blk.end_time"
+                        type="time"
+                        class="px-2 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-28"
+                      />
+                      <select
+                        v-model="blk.job_function_id"
+                        class="flex-1 px-2 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Select function…</option>
+                        <option v-for="jf in sortedJobFunctions" :key="jf.id" :value="jf.id">{{ jf.name }}</option>
+                      </select>
+                      <button
+                        type="button"
+                        @click="preferredAssignmentFormData.blocks.splice(idx, 1)"
+                        class="px-2 py-1 text-red-500 hover:text-red-700"
+                        title="Remove block"
+                      >✕</button>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    @click="addBlockRow"
+                    class="mt-2 px-3 py-1.5 text-sm border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                  >+ Add block</button>
+                  <p class="text-xs text-gray-500 mt-2">
+                    Pin this employee to a function for each time block. Times are clock times (clipped to their shift; breaks auto-removed). Leave a gap to fill that time by demand. At least one block is required.
+                  </p>
                 </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1">
-                    2nd Half Job Function
-                    <span class="text-gray-400 font-normal">(leave unassigned to fill by demand)</span>
-                  </label>
-                  <select
-                    v-model="preferredAssignmentFormData.pm_job_function_id"
-                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">— Not assigned —</option>
-                    <option value="SAME">Same as 1st Half</option>
-                    <option
-                      v-for="jf in sortedJobFunctions"
-                      :key="jf.id"
-                      :value="jf.id"
-                    >
-                      {{ jf.name }}
-                    </option>
-                  </select>
-                </div>
-                <p class="text-xs text-gray-500">Assign one half, both, or different functions per half. At least one half is required.</p>
                 <div class="flex justify-end space-x-3 pt-4">
                   <button
                     type="button"
@@ -286,9 +294,9 @@
 </template>
 
 <script setup lang="ts">
-const { logout } = useAuth()
 const { jobFunctions, fetchJobFunctions } = useJobFunctions()
 const { employees, fetchEmployees } = useEmployees()
+const { shifts, fetchShifts } = useSchedule()
 const { targets, loading: targetsLoading, error: targetsError, fetchTargets, saveTargets } = useStaffingTargets()
 const {
   preferredAssignments,
@@ -311,7 +319,12 @@ let successTimeout: ReturnType<typeof setTimeout> | null = null
 const showPreferredAssignmentsModal = ref(false)
 const showPreferredAssignmentFormModal = ref(false)
 const editingPreferredAssignment = ref<any>(null)
-const preferredAssignmentFormData = ref({ employee_id: '', am_job_function_id: '', pm_job_function_id: '' })
+interface AssignmentBlock { start_time: string; end_time: string; job_function_id: string }
+const preferredAssignmentFormData = ref<{ employee_id: string; blocks: AssignmentBlock[] }>({ employee_id: '', blocks: [] })
+
+const addBlockRow = () => {
+  preferredAssignmentFormData.value.blocks.push({ start_time: '', end_time: '', job_function_id: '' })
+}
 const showSavedIcon = ref(false)
 
 // Grid data: { "jfId|hour": headcount }
@@ -362,6 +375,16 @@ const hasChanges = computed(() => {
 const getJfName = (id: string | null | undefined): string | null => {
   if (!id) return null
   return jobFunctions.value?.find((jf: any) => jf.id === id)?.name ?? null
+}
+
+// Format "HH:MM[:SS]" as "h:MM AM/PM" for the block list display.
+const fmtTime12 = (t: string | null | undefined): string => {
+  if (!t) return ''
+  const [h, m] = String(t).split(':').map(Number)
+  if (Number.isNaN(h)) return ''
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const hr = h % 12 === 0 ? 12 : h % 12
+  return `${hr}:${String(m || 0).padStart(2, '0')} ${ampm}`
 }
 
 const gridKey = (jfId: string, hour: string) => `${jfId}|${hour}`
@@ -420,9 +443,6 @@ const showSuccessIndicator = (message: string) => {
   successTimeout = setTimeout(() => { showSuccessToast.value = false }, 2000)
 }
 
-const handleLogout = async () => {
-  await logout()
-}
 
 // Required Assignments Functions
 const openPreferredAssignmentsModal = async () => {
@@ -441,20 +461,44 @@ const closePreferredAssignmentsModal = () => {
 
 const openAddPreferredAssignmentModal = () => {
   editingPreferredAssignment.value = null
-  // Default: 2nd half mirrors the 1st (the common all-day pin); user can change either.
-  preferredAssignmentFormData.value = { employee_id: '', am_job_function_id: '', pm_job_function_id: 'SAME' }
+  preferredAssignmentFormData.value = {
+    employee_id: '',
+    blocks: [{ start_time: '', end_time: '', job_function_id: '' }],
+  }
   showPreferredAssignmentFormModal.value = true
+}
+
+// Convert a legacy AM/PM row into explicit time blocks using the employee's shift
+// (AM = shift start → lunch, PM = lunch end → shift end). Used when editing old rows.
+const legacyAmPmToBlocks = (pref: any): AssignmentBlock[] => {
+  const shift = shifts.value?.find((s: any) => s.id === employees.value?.find((e: any) => e.id === pref.employee_id)?.shift_id)
+  const bothNull = !pref.am_job_function_id && !pref.pm_job_function_id
+  const amJf = pref.am_job_function_id ?? (bothNull ? pref.job_function_id : null)
+  const pmJf = pref.pm_job_function_id ?? (bothNull ? pref.job_function_id : null)
+  const out: AssignmentBlock[] = []
+  if (!shift) return out
+  const t = (v: any) => (v ? String(v).substring(0, 5) : '')
+  const start = t(shift.start_time)
+  const end = t(shift.end_time)
+  const lunchStart = t(shift.lunch_start)
+  const lunchEnd = t(shift.lunch_end)
+  if (amJf) out.push({ start_time: start, end_time: lunchStart || end, job_function_id: amJf })
+  if (pmJf && lunchEnd) out.push({ start_time: lunchEnd, end_time: end, job_function_id: pmJf })
+  return out
 }
 
 const openEditPreferredAssignmentModal = (pref: any) => {
   editingPreferredAssignment.value = pref
-  // Show explicit per-half values. Legacy rows where both halves are null map the
-  // base function onto both halves; otherwise an unset half shows "Not assigned".
-  const bothNull = !pref.am_job_function_id && !pref.pm_job_function_id
+  const blocks: AssignmentBlock[] = Array.isArray(pref.blocks) && pref.blocks.length
+    ? pref.blocks.map((b: any) => ({
+        start_time: String(b.start_time).substring(0, 5),
+        end_time: String(b.end_time).substring(0, 5),
+        job_function_id: b.job_function_id,
+      }))
+    : legacyAmPmToBlocks(pref)
   preferredAssignmentFormData.value = {
     employee_id: pref.employee_id,
-    am_job_function_id: pref.am_job_function_id ?? (bothNull ? pref.job_function_id : '') ?? '',
-    pm_job_function_id: pref.pm_job_function_id ?? (bothNull ? pref.job_function_id : '') ?? ''
+    blocks: blocks.length ? blocks : [{ start_time: '', end_time: '', job_function_id: '' }],
   }
   showPreferredAssignmentFormModal.value = true
 }
@@ -466,23 +510,33 @@ const closePreferredAssignmentFormModal = () => {
 
 const handlePreferredAssignmentSubmit = async () => {
   try {
-    const { employee_id, am_job_function_id, pm_job_function_id } = preferredAssignmentFormData.value
-    // Resolve each half: '' = not pinned (null); 'SAME' on the 2nd half mirrors the 1st.
-    const am = am_job_function_id || null
-    const pm = pm_job_function_id === 'SAME' ? am : (pm_job_function_id || null)
-    if (!am && !pm) {
-      alert('Choose a job function for at least one half (1st or 2nd).')
+    const { employee_id, blocks } = preferredAssignmentFormData.value
+    if (!employee_id) {
+      alert('Select an employee.')
       return
+    }
+    const valid = blocks
+      .filter((b) => b.start_time && b.end_time && b.job_function_id && b.end_time > b.start_time)
+      .map((b) => ({ ...b, start_time: b.start_time, end_time: b.end_time }))
+      .sort((a, b) => (a.start_time < b.start_time ? -1 : 1))
+    if (valid.length === 0) {
+      alert('Add at least one valid time block (start, end with end after start, and a function).')
+      return
+    }
+    // Reject overlapping blocks.
+    for (let i = 1; i < valid.length; i++) {
+      if (valid[i].start_time < valid[i - 1].end_time) {
+        alert('Time blocks overlap. Adjust them so they do not overlap.')
+        return
+      }
     }
     const payload = {
       employee_id,
-      // job_function_id must be non-null (unique constraint); use whichever half is set.
-      job_function_id: am ?? pm,
-      am_job_function_id: am,
-      pm_job_function_id: pm,
+      job_function_id: valid[0].job_function_id, // base (NOT NULL); blocks drive the builder
       is_required: true,
       priority: 0,
-      notes: ''
+      notes: '',
+      blocks: valid,
     }
     if (editingPreferredAssignment.value) {
       await updatePreferredAssignment(editingPreferredAssignment.value.id, payload)
@@ -514,7 +568,8 @@ onMounted(async () => {
     await Promise.all([
       fetchTargets(),
       fetchJobFunctions(),
-      fetchEmployees(false)
+      fetchEmployees(false),
+      fetchShifts()
     ])
     loadGridFromTargets()
   } catch (e: any) {

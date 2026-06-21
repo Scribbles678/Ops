@@ -46,9 +46,6 @@
             </svg>
             {{ isSaving ? 'Saving...' : 'Save Schedule' }}
           </button>
-          <button @click="handleLogout" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">
-            Logout
-          </button>
           <NuxtLink to="/" class="btn-secondary text-sm px-3 py-1.5">
             ← Back to Home
           </NuxtLink>
@@ -2195,13 +2192,6 @@ const syncMeterBookings = () => {
 }
 
 
-const { logout } = useAuth()
-
-const handleLogout = async () => {
-  if (confirm('Are you sure you want to logout?')) {
-    await logout()
-  }
-}
 
 // Watch for changes in schedule assignments and update schedule data
 watch(scheduleAssignments, () => {

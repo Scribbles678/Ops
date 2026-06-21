@@ -146,7 +146,8 @@ teams (multi-tenant root)
   ├── team_blocked_dates (dates that auto-reject PTO/leave-early requests)
   ├── employees
   │     ├── employee_training ←→ job_functions (many-to-many)
-  │     ├── preferred_assignments ←→ job_functions (priority, is_required, AM/PM split)
+  │     ├── preferred_assignments ←→ job_functions (priority, is_required; legacy AM/PM split)
+  │     │     └── preferred_assignment_blocks (explicit start/end time blocks — the current model)
   │     ├── pto_days
   │     ├── schedule_requests (unified: pto_full_day, pto_partial, leave_early, leave_on_time, arrive_late, shift_swap)
   │     └── shift_swaps (original_shift ↔ swapped_shift)
@@ -176,7 +177,8 @@ cleanup_log (archival run audit)
 | **schedule_assignments** | employee_id, job_function_id, shift_id, schedule_date, assignment_order, start_time, end_time, team_id |
 | **employee_training** | employee_id, job_function_id (junction; unique pair) |
 | **staffing_targets** | job_function_id, hour_start, headcount, is_active, team_id (primary input to Automated Builder) |
-| **preferred_assignments** | employee_id, job_function_id, is_required, priority, **am_job_function_id**, **pm_job_function_id**. Each half is independent: a set column pins that half (1st = AM, 2nd = PM); a NULL half means "not pinned — fill by demand". (`job_function_id` is NOT NULL — set to whichever half is chosen.) Legacy rows with both halves NULL fall back to `job_function_id` for both; migration 012 made existing rows explicit. |
+| **preferred_assignments** | employee_id, job_function_id (NOT NULL base), is_required, priority. **Current model: explicit time blocks** in `preferred_assignment_blocks` (see below). Legacy `am_job_function_id`/`pm_job_function_id` columns kept as a fallback for rows without blocks. |
+| **preferred_assignment_blocks** | preferred_assignment_id (FK, cascade), start_time, end_time, job_function_id, team_id; `CHECK end_time > start_time`. A required assignment pins an employee to a function per explicit clock-time block (added migration 013). The builder uses these when present, else falls back to the legacy AM/PM columns. |
 | **pto_days** | employee_id, pto_date, optional start_time/end_time, pto_type (`full_day`/`partial`/`leave_early`/`arrive_late`), notes. `arrive_late` rows store `start_time='00:00:00'`, `end_time=arrival` so the builder clips the morning. No CHECK on pto_type (free text). |
 | **schedule_requests** | employee_id, request_type, status, request_date, start/end_time, original/requested_shift_id, approval_rule_results (JSONB), admin_override, rejection_reason, approved_by, submitted_by, created_pto_id, created_swap_id |
 | **shift_swaps** | employee_id, swap_date (unique per employee), original_shift_id, swapped_shift_id |
@@ -276,7 +278,7 @@ A deterministic, dependency-free algorithm (not an LLM, no solver). Core design 
 3. **Break carve-out:** split each block around `break_1`/`break_2` into availability windows, dropping sub-30-min fragments.
 4. **Meter fan-out expansion:** parent functions with numbered children distribute headcount evenly across children (numeric sort; duplicate names deduped to oldest).
 5. **Target & coverage matrices:** `target[jfId][hour] = headcount` (overwrite, not sum — `(jfId,hour)` is unique per the data model); a running `covered[jfId][hour]` counter; plus `maxHeadcount[jfId]` and an `overflowFns` set.
-6. **STEP 1 — Required pins:** `is_required` employees locked to their function, **per half independently** — the 1st half is pinned only if `am_job_function_id` is set, the 2nd only if `pm_job_function_id` is set; a NULL half is left free for demand filling. (Legacy rows with both halves NULL pin both to `job_function_id`.) Split around breaks; counted into `covered`. `resolveMeterChild()` picks the best Meter variant.
+6. **STEP 1 — Required pins:** `is_required` employees locked to their function. **Time-block model (current):** if the assignment has `preferred_assignment_blocks`, each block's `[start,end]` is intersected with the employee's available time (already PTO/break-free) and pinned — any number of blocks per day; gaps fill by demand. **Legacy fallback:** if no blocks, the old AM/PM columns apply (1st half pinned iff `am_job_function_id` set, 2nd iff `pm_job_function_id` set; both-NULL → `job_function_id` for both). Counted into `covered`. `resolveMeterChild()` picks the best Meter variant.
 7. **PASS 1 — scarce-first target fill:** functions processed in order of `trainedSupply ÷ totalDemand` ascending (hard-to-staff roles like Help desk claim their few trained people first). For each function's first contiguous **unmet, fillable** run (`covered < target` AND `covered < max`), pick the best trained employee/block: score = block length + stickiness + preferred bonus − (other trained functions × weight). Respects `capRoom`. Repeats until no fillable candidate remains.
 8. **STEP 2.5 — Lunch/break coverage pass:** for `lunch_coverage_required`/`break_coverage_required` functions, insert a coverer for the primary's lunch/break window (greedy longest-overlap, skipping coverers on their own break). Coverage assignments do **not** count toward target coverage. Unfillable coverage → warning. **A coverage block under 30 min is skipped with a warning** (the DB enforces a 30-min minimum on every assignment) — so break coverage of typical 15-min breaks won't generate. STEP 4 also drops any sub-30 block as a final guardrail so a stray short assignment can never abort the whole save.
 9. **PASS 2 — surplus fill:** deploy any remaining availability so nobody's idle. Priority per window: (a) **still-under-target** functions first (meeting targets beats overflow), else (b) **overflow-flagged** functions (the surplus sink), else (c) continue an existing function. Soft cap of `MAX_FUNCTIONS = 4` distinct functions/person; per-hour `max_headcount` always respected (a fully-capped worker is left idle).
@@ -364,6 +366,7 @@ This means **no manual SQL on deploy or update** — new migrations ship in the 
 | 010-add-job-function-surplus-controls | `job_functions.max_headcount` (per-hour ceiling) + `surplus_overflow` (preferred surplus sink) — drive the Automated Builder's PASS 2. Additive/idempotent; multi-team safe. |
 | 011-add-request-types | extends `schedule_requests_request_type_check` to add `leave_on_time` + `arrive_late`. Drop+recreate constraint (idempotent); multi-team safe. |
 | 012-explicit-half-assignments | **one-time** backfill (guarded by `_data_backfills` marker): sets NULL `am`/`pm_job_function_id` to `job_function_id` so a NULL half can newly mean "not pinned". Preserves prior behavior; multi-team safe; never re-runs (would clobber intentional NULLs). |
+| 013-add-required-assignment-blocks | `preferred_assignment_blocks` table — explicit per-block times for required assignments. Additive only (no backfill); builder reads blocks if present, else legacy AM/PM. Multi-team safe. |
 
 ---
 

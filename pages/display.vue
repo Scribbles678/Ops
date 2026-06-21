@@ -230,10 +230,15 @@ const shiftsWithAssignments = computed(() => {
     const targetShiftId = swap ? swap.swapped_shift_id : employee.shift_id
     
     if (shiftMap.has(targetShiftId)) {
-      // If employee has any PTO record for today, skip entirely to save space
-      const ptoRecords = ptoByEmployeeId.value?.[employee.id]
-      const hasAnyPTO = !!(ptoRecords && ptoRecords.length > 0)
-      if (hasAnyPTO) return
+      // Only hide employees who are out the WHOLE day (full-day PTO or a call-in).
+      // Partial absences (partial PTO, leave-early, arrive-late) still show — their
+      // working hours remain on the board; the overlapsPTO filter below trims the
+      // off-hours from their blocks.
+      const ptoRecords = ptoByEmployeeId.value?.[employee.id] || []
+      const isOutAllDay = ptoRecords.some((r: any) =>
+        r.pto_type === 'full_day' || r.pto_type === 'call_in' || (!r.start_time && !r.end_time)
+      )
+      if (isOutAllDay) return
 
       // Get assignments for this employee and filter out those overlapping PTO
       const employeeAssignmentsList = (employeeAssignments.get(employee.id) || [])

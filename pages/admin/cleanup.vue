@@ -8,9 +8,6 @@
           <p class="text-gray-600 mt-2">Manage schedule data retention and archiving</p>
         </div>
         <div class="flex space-x-4">
-          <button @click="handleLogout" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
-            Logout
-          </button>
           <NuxtLink to="/" class="btn-secondary">
             ← Back to Home
           </NuxtLink>
@@ -219,7 +216,6 @@
 <script setup lang="ts">
 // Import composables
 const { runCleanup, getCleanupStats, getCleanupLog, getCleanupStatus, fetchOldSchedulesForExport } = useSchedule()
-const { logout } = useAuth()
 
 // Reactive data
 const stats = ref(null)
@@ -312,13 +308,6 @@ const formatDateTime = (dateString: string) => {
     hour: '2-digit',
     minute: '2-digit'
   })
-}
-
-// Logout handler
-const handleLogout = async () => {
-  if (confirm('Are you sure you want to logout?')) {
-    await logout()
-  }
 }
 
 // Export to Excel function (client-only)

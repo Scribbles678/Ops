@@ -449,15 +449,37 @@ const buildSchedule = (
     for (const pa of Object.values(preferred)) {
       if (!pa?.is_required) continue
 
-      // A half is pinned ONLY if its column is set. A NULL half means "not pinned —
-      // fill by demand". Legacy rows where BOTH halves are null fall back to
-      // job_function_id for both (pre-migration "applies all day" behavior).
+      const shift = shifts.find((s: any) => s.id === emp.shift_id)
+      const breaks = getShiftBreaks(shift)
+
+      // Time-blocked required assignment (preferred over legacy AM/PM). Each block
+      // pins its [start,end] window, intersected with the employee's available time
+      // (which already excludes PTO + breaks), so blocks outside the shift or over a
+      // break are clipped automatically.
+      if (Array.isArray(pa.blocks) && pa.blocks.length > 0) {
+        for (const blk of pa.blocks) {
+          const jfId: string = blk.job_function_id
+          if (!jfId || !isTrainedFor(emp.id, jfId, jobFunctions, trainingData)) continue
+          const bStart = timeToMinutes(blk.start_time)
+          const bEnd = timeToMinutes(blk.end_time)
+          for (const w of [...(empAvailable.get(emp.id) ?? [])]) {
+            const s = Math.max(w.start, bStart)
+            const e = Math.min(w.end, bEnd)
+            if (e - s < 30) continue
+            const resolved = resolveMeterChild(jfId, s, e)
+            allAssignments.push({ empId: emp.id, jfId: resolved, start: s, end: e })
+            decrementDemand(resolved, s, e)
+            useEmpTime(emp.id, s, e)
+          }
+        }
+        break // only one required assignment record per employee
+      }
+
+      // Legacy AM/PM fallback. A half is pinned ONLY if its column is set; a NULL half
+      // means "not pinned". Rows where BOTH halves are null fall back to job_function_id.
       const bothNull = !pa.am_job_function_id && !pa.pm_job_function_id
       const amJfIdRaw: string | null = pa.am_job_function_id ?? (bothNull ? pa.job_function_id : null)
       const pmJfIdRaw: string | null = pa.pm_job_function_id ?? (bothNull ? pa.job_function_id : null)
-
-      const shift = shifts.find((s: any) => s.id === emp.shift_id)
-      const breaks = getShiftBreaks(shift)
 
       if (amJfIdRaw && isTrainedFor(emp.id, amJfIdRaw, jobFunctions, trainingData) && emp.amEnd > emp.amStart) {
         for (const seg of splitAroundBreaks(emp.amStart, emp.amEnd, breaks)) {

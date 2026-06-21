@@ -52,6 +52,7 @@ async function main() {
   const training = (await c.query('select employee_id, job_function_id from employee_training')).rows
   const targets = (await c.query('select job_function_id, hour_start, headcount from staffing_targets where is_active is not false')).rows
   const prefs = (await c.query('select * from preferred_assignments')).rows
+  const prefBlocks = (await c.query('select * from preferred_assignment_blocks').catch(() => ({ rows: [] }))).rows
   const pto = (await c.query('select * from pto_days where pto_date=$1', [DATE])).rows
   const dbAssigns = (await c.query('select employee_id, job_function_id, start_time, end_time from schedule_assignments where schedule_date=$1', [DATE])).rows
   await c.end()
@@ -61,6 +62,8 @@ async function main() {
   const trainedFns = {}
   for (const t of training) (trainedFns[t.employee_id] ??= []).push(t.job_function_id)
   const ptoBy = {}; for (const p of pto) ptoBy[p.employee_id] = p
+  const blocksByPa = {}; for (const b of prefBlocks) { (blocksByPa[b.preferred_assignment_id] ??= []).push(b) }
+  for (const p of prefs) { p.blocks = blocksByPa[p.id] || [] }
   const prefBy = {}; for (const p of prefs) { (prefBy[p.employee_id] ??= {})[p.job_function_id] = p }
 
   // ---- prep employees: availability windows (break-free, PTO-clipped) ----
@@ -142,6 +145,20 @@ async function main() {
   for (const e of emps) {
     const pref = prefBy[e.id]; if (!pref) continue
     const req = Object.values(pref).find((p) => p.is_required); if (!req) continue
+    // Time-block model (mirrors the composable): pin each block's window, intersected
+    // with availability; else fall back to AM/PM.
+    if (req.blocks && req.blocks.length) {
+      for (const blk of req.blocks) {
+        const jf = blk.job_function_id
+        if (!isTrained(e.id, jf)) continue
+        const bS = t2m(blk.start_time), bE = t2m(blk.end_time)
+        for (const w of [...(empById.get(e.id)?.windows ?? [])]) {
+          const s = Math.max(w.start, bS), en = Math.min(w.end, bE)
+          if (en - s >= MIN_BLOCK) addAssign(e.id, jf, s, en)
+        }
+      }
+      continue
+    }
     const amJf = req.am_job_function_id || req.job_function_id
     const pmJf = req.pm_job_function_id || req.job_function_id
     if (!isTrained(e.id, amJf)) continue

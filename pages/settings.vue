@@ -3,7 +3,7 @@
     <div class="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8">
       <!-- Header -->
       <div class="mb-8">
-        <NuxtLink to="/" class="text-blue-600 hover:text-blue-800 mb-4 inline-block">
+        <NuxtLink to="/" class="btn-secondary inline-block mb-4">
           ← Back to Home
         </NuxtLink>
         <h1 class="text-3xl font-bold text-gray-900">Account Settings</h1>
