@@ -192,50 +192,14 @@ export const useSchedule = () => {
     }
   }
 
-  const runCleanup = async () => {
-    loading.value = true
-    error.value = null
-    try {
-      return await $fetch('/api/admin/cleanup/run', { method: 'POST' })
-    } catch (e: any) {
-      error.value = e.message
-      return null
-    } finally {
-      loading.value = false
-    }
-  }
-
-  const getCleanupStats = async () => {
-    try {
-      return await $fetch('/api/admin/cleanup/stats')
-    } catch {
-      return null
-    }
-  }
-
-  const getCleanupLog = async (limit = 10) => {
-    try {
-      return await $fetch('/api/admin/cleanup/log', { params: { limit } })
-    } catch {
-      return []
-    }
-  }
-
-  const getCleanupStatus = async () => {
-    try {
-      const data = await $fetch<any>('/api/admin/cleanup/stats')
-      return data?.status ?? []
-    } catch {
-      return []
-    }
-  }
-
-  const fetchOldSchedulesForExport = async () => {
-    try {
-      return await $fetch<any[]>('/api/schedule/export')
-    } catch {
-      return []
-    }
+  /**
+   * Rows for a historical schedule export, across a date range.
+   * Spans live assignments and the archive, so ranges that straddle both are whole.
+   */
+  const fetchScheduleExport = async (dateFrom: string, dateTo: string) => {
+    return await $fetch<any[]>('/api/schedule/export', {
+      params: { date_from: dateFrom, date_to: dateTo },
+    })
   }
 
   const fetchTargetHours = async () => {
@@ -278,11 +242,7 @@ export const useSchedule = () => {
     copySchedule,
     fetchDailyTargets,
     upsertDailyTarget,
-    runCleanup,
-    getCleanupStats,
-    getCleanupLog,
-    getCleanupStatus,
-    fetchOldSchedulesForExport,
+    fetchScheduleExport,
     fetchTargetHours,
     saveTargetHours,
   }

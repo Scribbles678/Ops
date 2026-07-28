@@ -88,7 +88,6 @@ npm run dev
 | `/display` | TV display mode (read-only, auto-refresh every 2 min) |
 | `/settings` | User settings, password, and team settings |
 | `/admin/business-rules` | Staffing targets grid (headcount per function per hour) |
-| `/admin/users` | User account management (super admin only) |
 | `/admin/cleanup` | Database cleanup utilities |
 
 ## Project Structure

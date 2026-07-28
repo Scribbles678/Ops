@@ -96,46 +96,57 @@
                 </button>
               </div>
             </div>
-            <div class="grid grid-cols-7 gap-1.5">
+            <div class="grid grid-cols-5 gap-2">
               <div
                 v-for="day in weekAvailability"
                 :key="day.date"
-                class="text-center rounded-md py-1.5 px-1 transition-colors border"
+                class="text-center rounded-md py-2 px-1.5 transition-colors border"
                 :class="[
-                  day.isBlocked
+                  !day.eligible
                     ? 'bg-gray-100 border-gray-300 cursor-not-allowed opacity-70'
                     : form.request_date === day.date
                       ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-300 cursor-pointer'
                       : 'border-transparent hover:bg-gray-100 cursor-pointer',
                   day.isToday ? 'font-bold' : ''
                 ]"
-                :title="day.isBlocked ? `Blocked: ${day.blockReason || 'No requests allowed'}` : ''"
-                @click="day.isBlocked ? null : (form.request_date = day.date)"
+                :title="day.eligible
+                  ? `${day.used}h of ${day.cap}h used`
+                  : `${day.ineligibleReason} — ${day.used}h of ${day.cap}h used`"
+                @click="day.eligible ? (form.request_date = day.date) : null"
               >
-                <div class="text-[10px] text-gray-500">{{ day.dayName }}</div>
-                <div class="text-sm font-semibold" :class="[
-                  day.isBlocked ? 'text-gray-400 line-through' :
+                <div class="text-[11px] text-gray-500">{{ day.dayName }}</div>
+                <div class="text-base font-semibold leading-tight" :class="[
+                  !day.eligible ? 'text-gray-400 line-through' :
                   day.isToday ? 'text-blue-600' : 'text-gray-800'
                 ]">{{ day.dayNum }}</div>
                 <div
                   v-if="day.isBlocked"
-                  class="text-[10px] font-semibold mt-0.5 rounded px-1 text-red-700 bg-red-100"
+                  class="text-[11px] font-semibold mt-1 rounded px-1 py-0.5 text-red-700 bg-red-100"
                 >
                   Blocked
                 </div>
                 <div
+                  v-else-if="!day.eligible"
+                  class="text-[11px] font-semibold mt-1 rounded px-1 py-0.5 text-gray-500 bg-gray-200"
+                >
+                  {{ day.isPast ? 'Past' : 'Notice' }}
+                </div>
+                <div
                   v-else
-                  class="text-[10px] font-medium mt-0.5 rounded px-1"
-                  :class="day.hoursRemaining > 8
+                  class="text-[11px] font-medium mt-1 rounded px-1 py-0.5"
+                  :class="day.remaining >= day.cap
                     ? 'text-green-700 bg-green-100'
-                    : day.hoursRemaining > 0
+                    : day.remaining > 0
                       ? 'text-yellow-700 bg-yellow-100'
                       : 'text-red-700 bg-red-100'"
                 >
-                  {{ day.hoursRemaining }}h left
+                  {{ day.remaining }}h left
                 </div>
               </div>
             </div>
+            <p v-if="availabilityError" class="text-[10px] text-gray-400 mt-1.5">
+              {{ availabilityError }}
+            </p>
           </div>
 
           <!-- Employee selector -->
@@ -299,12 +310,79 @@
           <!-- Submit -->
           <button
             type="submit"
-            :disabled="submitting"
+            :disabled="submitting || checkingRange"
             class="w-full px-4 py-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-medium"
           >
-            {{ submitting ? 'Submitting...' : 'Submit Request' }}
+            {{ checkingRange ? 'Checking availability...' : submitting ? 'Submitting...' : 'Submit Request' }}
           </button>
         </form>
+      </div>
+    </div>
+
+    <!-- Range confirmation: some days in the requested range can't be approved.
+         Nothing has been submitted at this point — the user chooses. -->
+    <div
+      v-if="rangePreview"
+      class="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4"
+      @click.self="cancelRange"
+    >
+      <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto">
+        <div class="p-6">
+          <h3 class="text-lg font-bold text-gray-900 mb-1">Some days aren't available</h3>
+          <p class="text-sm text-gray-600 mb-4">
+            <template v-if="availableDates.length">
+              {{ availableDates.length }} of {{ rangePreview.results.length }} day<span v-if="rangePreview.results.length !== 1">s</span>
+              in this range can be approved. Nothing has been submitted yet.
+            </template>
+            <template v-else>
+              None of the {{ rangePreview.results.length }} days in this range can be approved. Nothing has been submitted.
+            </template>
+          </p>
+
+          <div class="mb-4">
+            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Not available ({{ unavailableRows.length }})
+            </h4>
+            <div class="border border-red-200 rounded-md divide-y divide-red-100 max-h-52 overflow-y-auto">
+              <div v-for="row in unavailableRows" :key="row.date" class="px-3 py-2 bg-red-50">
+                <div class="text-sm font-medium text-red-800">{{ formatLongDate(row.date) }}</div>
+                <div class="text-xs text-red-600 mt-0.5">{{ row.rejectionReason || 'Not available' }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="availableDates.length" class="mb-5">
+            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">
+              Will be requested ({{ availableDates.length }})
+            </h4>
+            <div class="border border-green-200 rounded-md bg-green-50 px-3 py-2 max-h-32 overflow-y-auto">
+              <span
+                v-for="d in availableDates"
+                :key="d"
+                class="inline-block text-xs text-green-800 mr-2 mb-1 whitespace-nowrap"
+              >{{ formatLongDate(d) }}</span>
+            </div>
+          </div>
+
+          <div class="flex gap-3">
+            <button
+              type="button"
+              @click="cancelRange"
+              class="flex-1 px-4 py-2.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 font-medium"
+            >
+              Cancel entire request
+            </button>
+            <button
+              v-if="availableDates.length"
+              type="button"
+              @click="confirmAvailableOnly"
+              :disabled="submitting"
+              class="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-medium"
+            >
+              Submit {{ availableDates.length }} available day<span v-if="availableDates.length !== 1">s</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -337,17 +415,26 @@ const loginPassword = ref('')
 const loginError = ref('')
 const loggingIn = ref(false)
 
-// Weekly availability data
-const maxPtoHoursPerDay = ref(8)
-const weekRequests = ref<any[]>([])
-const weekPtoDays = ref<any[]>([])
+// Weekly availability. The per-day numbers come straight from /api/pto/availability,
+// which shares its cap lookup and hours math with the auto-approval rule — do NOT
+// recompute them here, that divergence is exactly what used to make this strip lie.
+const availabilityDays = ref<any[]>([])
+const availabilityError = ref('')
 const weekBlockedDates = ref<any[]>([])
 const weekOffset = ref(0)
 
+// Local-timezone YYYY-MM-DD. toISOString() would render the UTC date, which rolls
+// over to the next day during the evening in any US timezone.
+const formatDateStr = (d: Date): string => {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 // Default date = tomorrow
-const tomorrow = new Date()
-tomorrow.setDate(tomorrow.getDate() + 1)
-const defaultDate = tomorrow.toISOString().split('T')[0]
+const defaultDate = (() => {
+  const t = new Date()
+  t.setDate(t.getDate() + 1)
+  return formatDateStr(t)
+})()
 
 const form = ref({
   employee_id: props.preselectedEmployeeId || '',
@@ -365,6 +452,31 @@ const form = ref({
 const submitResultsMulti = ref<{ date: string; status: string; reason: string | null }[]>([])
 const multiApprovedCount = computed(() => submitResultsMulti.value.filter((r) => r.status === 'approved').length)
 
+// Dry-run of a date range, held while the user decides what to do about the days
+// that would be refused. Nothing has been submitted while this is set.
+interface RangePreviewRow {
+  date: string
+  status: string
+  rejectionReason: string | null
+  requestedHours: number
+  cap: number
+  usedHours: number
+}
+interface RangePreview {
+  results: RangePreviewRow[]
+  approvedCount: number
+  rejectedCount: number
+}
+const rangePreview = ref<RangePreview | null>(null)
+const checkingRange = ref(false)
+
+const availableDates = computed(() =>
+  (rangePreview.value?.results ?? []).filter((r) => r.status === 'approved').map((r) => r.date)
+)
+const unavailableRows = computed(() =>
+  (rangePreview.value?.results ?? []).filter((r) => r.status !== 'approved')
+)
+
 // Week helpers
 const getMonday = (d: Date): Date => {
   const date = new Date(d)
@@ -372,10 +484,6 @@ const getMonday = (d: Date): Date => {
   const diff = day === 0 ? -6 : 1 - day
   date.setDate(date.getDate() + diff)
   return date
-}
-
-const formatDateStr = (d: Date): string => {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 const selectedWeekMonday = computed(() => {
@@ -392,7 +500,14 @@ const weekLabel = computed(() => {
   return `${formatDateStr(mon)} — ${formatDateStr(sun)}`
 })
 
-const todayStr = formatDateStr(new Date())
+// "2026-08-03" -> "Mon, Aug 3" for the range confirmation dialog.
+const formatLongDate = (dateStr: string): string => {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  if (!y || !m || !d) return dateStr
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+  })
+}
 
 // Banner shown when selected date is in the blocked list (drives auto-rejection)
 const selectedDateBlock = computed(() => {
@@ -403,72 +518,23 @@ const selectedDateBlock = computed(() => {
   }) || null
 })
 
+// Presentation only — every number here is computed server-side by the same code
+// that runs the approval rule. This just adds the day labels.
+//
+// Weekends are dropped from the strip (Mon–Fri only) so the five weekday cards get
+// the full width. The endpoint still returns all seven and the weekend caps still
+// apply — a Saturday typed into the Date field is evaluated normally, it just isn't
+// clickable here.
 const weekAvailability = computed(() => {
-  const mon = selectedWeekMonday.value
   const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const days = []
-
-  // Build a set of pto_day IDs linked from requests to avoid double-counting
-  const linkedPtoIds = new Set(
-    weekRequests.value
-      .filter(r => r.created_pto_id)
-      .map(r => r.created_pto_id)
-  )
-
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(mon)
-    d.setDate(mon.getDate() + i)
-    const dateStr = formatDateStr(d)
-
-    // Sum approved PTO hours from schedule_requests for this day
-    let dayPtoUsed = 0
-    for (const req of weekRequests.value) {
-      const reqDate = req.request_date?.split('T')[0] ?? req.request_date
-      if (reqDate !== dateStr) continue
-      if (req.status !== 'approved') continue
-      if (!['pto_full_day', 'pto_partial', 'leave_early', 'arrive_late'].includes(req.request_type)) continue
-      if (req.request_type === 'pto_full_day') dayPtoUsed += 8
-      else if (req.request_type === 'leave_early') dayPtoUsed += 2
-      else if (req.request_type === 'arrive_late') dayPtoUsed += 2
-      else if (req.request_type === 'pto_partial' && req.start_time && req.end_time) {
-        const [sh, sm] = String(req.start_time).split(':').map(Number)
-        const [eh, em] = String(req.end_time).split(':').map(Number)
-        dayPtoUsed += Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
-      }
-    }
-
-    // Also count manually-entered pto_days for this day (not linked to requests)
-    for (const pto of weekPtoDays.value) {
-      if (linkedPtoIds.has(pto.id)) continue
-      const ptoDate = pto.pto_date?.split('T')[0] ?? pto.pto_date
-      if (ptoDate !== dateStr) continue
-      if (pto.pto_type === 'full_day') dayPtoUsed += 8
-      else if (pto.pto_type === 'arrive_late') dayPtoUsed += 2
-      else if (pto.start_time && pto.end_time) {
-        const [sh, sm] = String(pto.start_time).split(':').map(Number)
-        const [eh, em] = String(pto.end_time).split(':').map(Number)
-        dayPtoUsed += Math.max(0, (eh * 60 + em - sh * 60 - sm) / 60)
-      } else {
-        dayPtoUsed += 2
-      }
-    }
-
-    const blocked = weekBlockedDates.value.find((b) => {
-      const bd = b.blocked_date?.split('T')[0] ?? b.blocked_date
-      return bd === dateStr
-    })
-
-    days.push({
-      date: dateStr,
-      dayName: dayNames[i],
-      dayNum: d.getDate(),
-      isToday: dateStr === todayStr,
-      hoursRemaining: Math.max(0, maxPtoHoursPerDay.value - dayPtoUsed),
-      isBlocked: !!blocked,
-      blockReason: blocked?.reason || null,
-    })
-  }
-  return days
+  return availabilityDays.value
+    .map((day, i) => ({
+      ...day,
+      dayName: dayNames[i] ?? '',
+      dayNum: Number(day.date.split('-')[2]),
+      weekdayIndex: i,
+    }))
+    .filter((day) => day.weekdayIndex < 5)
 })
 
 // Clear type-specific fields when type changes
@@ -482,6 +548,11 @@ watch(() => form.value.request_type, () => {
 
 // Reload availability when the selected week changes
 watch(selectedWeekMonday, () => {
+  loadWeekAvailability()
+})
+
+// The cap is team-wide, so switching employee can switch which team's budget applies.
+watch(() => form.value.employee_id, () => {
   loadWeekAvailability()
 })
 
@@ -519,15 +590,8 @@ const buildBody = (date: string) => ({
   notes: form.value.notes || null,
 })
 
-const handleSubmit = async () => {
-  submitError.value = null
-
-  if (form.value.request_type === 'pto_full_day' && form.value.end_date && form.value.end_date < form.value.request_date) {
-    submitError.value = 'End date must be on or after the start date'
-    return
-  }
-
-  const dates = datesToSubmit()
+// Actually submit a list of dates, one request per day.
+const runSubmit = async (dates: string[]) => {
   submitting.value = true
   try {
     if (dates.length === 1) {
@@ -537,7 +601,6 @@ const handleSubmit = async () => {
       return
     }
 
-    // Multi-day range: submit one request per day, each judged independently.
     const results: { date: string; status: string; reason: string | null }[] = []
     let last = null
     for (const d of dates) {
@@ -558,10 +621,68 @@ const handleSubmit = async () => {
   }
 }
 
+const handleSubmit = async () => {
+  submitError.value = null
+
+  if (form.value.request_type === 'pto_full_day' && form.value.end_date && form.value.end_date < form.value.request_date) {
+    submitError.value = 'End date must be on or after the start date'
+    return
+  }
+
+  const dates = datesToSubmit()
+
+  // Single day: submit straight away — the result banner already explains a rejection.
+  if (dates.length === 1) {
+    await runSubmit(dates)
+    return
+  }
+
+  // Multi-day range: dry-run every day FIRST so the user can decide what to do about
+  // the unavailable ones, rather than finding out after the good days are committed.
+  checkingRange.value = true
+  try {
+    const preview = await $fetch<RangePreview>('/api/schedule-requests/preview', {
+      method: 'POST',
+      body: {
+        employee_id: form.value.employee_id,
+        request_type: form.value.request_type,
+        dates,
+        start_time: form.value.start_time || null,
+        end_time: form.value.end_time || null,
+      },
+    })
+
+    if (preview.rejectedCount > 0) {
+      rangePreview.value = preview
+      return // wait for the user's choice in the confirmation dialog
+    }
+    await runSubmit(dates)
+  } catch (e: any) {
+    // Preview failed (offline, server error) — don't silently commit a partial range.
+    submitError.value = e.data?.message || e.message || 'Could not check availability for this range'
+  } finally {
+    checkingRange.value = false
+  }
+}
+
+// --- Range confirmation dialog -------------------------------------------------
+const confirmAvailableOnly = async () => {
+  const dates = availableDates.value
+  rangePreview.value = null
+  if (dates.length) await runSubmit(dates)
+}
+
+const cancelRange = () => {
+  rangePreview.value = null
+}
+
 const resetForm = () => {
   submitResult.value = null
   submitResultsMulti.value = []
   submitError.value = null
+  rangePreview.value = null
+  // Pull fresh numbers — the request just submitted has changed the day's budget.
+  loadWeekAvailability()
   form.value = {
     employee_id: props.preselectedEmployeeId || '',
     request_type: '',
@@ -577,34 +698,29 @@ const resetForm = () => {
 
 const loadWeekAvailability = async () => {
   try {
+    availabilityError.value = ''
     const mon = selectedWeekMonday.value
     const sun = new Date(mon)
     sun.setDate(mon.getDate() + 6)
-    const dateFrom = formatDateStr(mon)
-    const dateTo = formatDateStr(sun)
 
-    const [requests, calendar, settings, blocked] = await Promise.all([
-      $fetch<any[]>('/api/schedule-requests', {
-        params: { date_from: dateFrom, date_to: dateTo },
-      }),
-      $fetch<any>('/api/pto-calendar', {
-        params: { date_from: dateFrom, date_to: dateTo },
-      }),
-      $fetch<any[]>('/api/team-settings'),
+    const params: Record<string, string> = {
+      date_from: formatDateStr(mon),
+      date_to: formatDateStr(sun),
+    }
+    // Scope to the selected employee's team — that's the budget the rule measures
+    // against. Without it a super admin would see a cross-team total.
+    if (form.value.employee_id) params.employee_id = form.value.employee_id
+
+    const [availability, blocked] = await Promise.all([
+      $fetch<{ days: any[] }>('/api/pto/availability', { params }),
       $fetch<any[]>('/api/team-blocked-dates'),
     ])
 
-    weekRequests.value = requests
-    weekPtoDays.value = calendar?.pto_days || []
+    availabilityDays.value = availability?.days || []
     weekBlockedDates.value = blocked || []
-
-    for (const s of settings) {
-      if (s.setting_key === 'max_pto_hours_per_day') {
-        maxPtoHoursPerDay.value = parseInt(s.setting_value, 10) || 8
-      }
-    }
-  } catch {
-    // silently fail — availability strip just won't show
+  } catch (e: any) {
+    availabilityDays.value = []
+    availabilityError.value = 'Availability unavailable — limits still apply on submit.'
   }
 }
 

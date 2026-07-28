@@ -4,9 +4,17 @@
       <!-- Header -->
       <div class="flex items-center justify-between mb-3">
         <h1 class="text-xl md:text-2xl font-semibold text-gray-800">Employees & Training Matrix</h1>
-        <NuxtLink to="/" class="btn-secondary">
-          ← Back to Home
-        </NuxtLink>
+        <div class="flex items-center gap-2">
+          <button
+            @click="showOverviewModal = true"
+            class="px-3 py-1.5 rounded-md text-xs md:text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
+          >
+            Employee Overview
+          </button>
+          <NuxtLink to="/" class="btn-secondary">
+            ← Back to Home
+          </NuxtLink>
+        </div>
       </div>
 
       <!-- Search Bar -->
@@ -102,6 +110,13 @@
                 <span v-else class="px-2.5 py-1 bg-gray-100 text-gray-400 rounded text-xs md:text-sm">
                   No Changes
                 </span>
+                <button
+                  @click="openOverview(employee.id)"
+                  class="px-2.5 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition text-xs md:text-sm"
+                  title="Open this employee's overview"
+                >
+                  Overview
+                </button>
                 <button
                   @click="openEditEmployeeModal(employee)"
                   class="px-2.5 py-1 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition text-xs md:text-sm"
@@ -229,6 +244,15 @@
         </div>
       </div>
     </div>
+
+    <!-- Employee Overview. Keyed so reopening for a different employee remounts
+         with the new preselection rather than reusing the previous one. -->
+    <EmployeeOverview
+      v-if="showOverviewModal"
+      :key="overviewEmployeeId || 'all'"
+      :preselected-employee-id="overviewEmployeeId"
+      @close="showOverviewModal = false"
+    />
   </div>
 </template>
 
@@ -267,6 +291,20 @@ const employeeSaveState = ref<Record<string, 'idle' | 'pending' | 'saving' | 'sa
 const AUTOSAVE_DELAY = 1500 // ms to wait after last checkbox click before saving
 
 // Employee modal state
+// Employee Overview modal. The header button opens it with no one selected; the
+// per-row button preselects that employee.
+const showOverviewModal = ref(false)
+const overviewEmployeeId = ref<string | null>(null)
+
+const openOverview = (employeeId: string) => {
+  overviewEmployeeId.value = employeeId
+  showOverviewModal.value = true
+}
+
+watch(showOverviewModal, (open) => {
+  if (!open) overviewEmployeeId.value = null
+})
+
 const showEmployeeModal = ref(false)
 const editingEmployee = ref(null)
 const employeeFormData = ref({

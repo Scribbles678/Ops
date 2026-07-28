@@ -280,7 +280,7 @@ Display User (Read-Only)
    - (none checked = regular User)
 6. Save
 
-> **Where the live UI is:** user management is rendered inline in **`pages/settings.vue`** (the "Super Admin Management" section), not `pages/admin/users.vue`. The `/admin/users` page exists but is **unused/legacy** (nothing links to it) — edit `settings.vue`. (Same gotcha as the `components/details/*Tab.vue` files.)
+> **Where the live UI is:** user management is rendered inline in **`pages/settings.vue`** (the "Super Admin Management" section). The unused legacy `pages/admin/users.vue` twin was deleted in Jul 2026 — edit `settings.vue`. (The `components/details/*Tab.vue` files are the same kind of unused twin, still present.)
 
 **Note**: The username is automatically derived from the email address (part before '@').
 
@@ -432,7 +432,7 @@ WHERE id = 'user-uuid-here';
 
 ### Changing a User's Role
 
-1. **Super Admin** goes to Settings → User Management (or `/admin/users` page)
+1. **Super Admin** goes to Settings → User Management
 2. Finds user and clicks **Edit**
 3. Updates role checkboxes (Super Admin, Admin, Display User)
 4. Can also update team assignment, full name, and active status
@@ -441,7 +441,7 @@ WHERE id = 'user-uuid-here';
 
 ### Removing Access
 
-1. **Super Admin** goes to Settings → User Management (or `/admin/users` page)
+1. **Super Admin** goes to Settings → User Management
 2. Finds user and clicks **Edit**
 3. Sets `is_active = false` to deactivate (user cannot login but data is preserved)
 4. OR deletes user account (removes from auth and user_profiles)

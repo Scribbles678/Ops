@@ -596,90 +596,14 @@ CREATE TRIGGER update_business_rules_updated_at
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================
--- CLEANUP LOG
+-- SCHEDULE ARCHIVE (retained, no longer written to)
+-- The old "Database Cleanup" feature moved assignments older than 30 days into
+-- schedule_assignments_archive / daily_targets_archive. That feature was removed
+-- in Jul 2026 -- nothing archives automatically now, and schedule history simply
+-- stays in the live tables. The archive tables are kept because installs that ran
+-- the old cleanup still hold real history in them; readers (e.g. the schedule CSV
+-- export) UNION both so ranges spanning the old cutoff stay whole.
 -- ============================================================
-
-CREATE TABLE IF NOT EXISTS cleanup_log (
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  cleanup_date timestamp with time zone DEFAULT now(),
-  archived_assignments integer DEFAULT 0,
-  archived_targets integer DEFAULT 0,
-  cutoff_date date,
-  success boolean DEFAULT true,
-  error_message text,
-  CONSTRAINT cleanup_log_pkey PRIMARY KEY (id)
-);
-
--- ============================================================
--- CLEANUP STORED PROCEDURE
--- Replaces the Supabase RPC function cleanup_old_schedules_with_logging
--- ============================================================
-
-CREATE OR REPLACE FUNCTION cleanup_old_schedules_with_logging()
-RETURNS TABLE(archived_assignments int, archived_targets int, cutoff_date date) AS $$
-DECLARE
-  v_cutoff_date date := CURRENT_DATE - INTERVAL '30 days';
-  v_archived_assignments int := 0;
-  v_archived_targets int := 0;
-BEGIN
-  -- Archive old schedule assignments
-  WITH moved AS (
-    DELETE FROM schedule_assignments
-    WHERE schedule_date < v_cutoff_date
-    RETURNING *
-  )
-  INSERT INTO schedule_assignments_archive
-    SELECT id, employee_id, job_function_id, shift_id, schedule_date,
-           assignment_order, start_time, end_time, team_id,
-           created_at, updated_at, NOW()
-    FROM moved;
-
-  GET DIAGNOSTICS v_archived_assignments = ROW_COUNT;
-
-  -- Archive old daily targets
-  WITH moved AS (
-    DELETE FROM daily_targets
-    WHERE schedule_date < v_cutoff_date
-    RETURNING *
-  )
-  INSERT INTO daily_targets_archive
-    SELECT id, schedule_date, job_function_id, target_units, notes,
-           team_id, created_at, updated_at, NOW()
-    FROM moved;
-
-  GET DIAGNOSTICS v_archived_targets = ROW_COUNT;
-
-  -- Log the cleanup
-  INSERT INTO cleanup_log (archived_assignments, archived_targets, cutoff_date, success)
-  VALUES (v_archived_assignments, v_archived_targets, v_cutoff_date, true);
-
-  RETURN QUERY SELECT v_archived_assignments, v_archived_targets, v_cutoff_date;
-
-EXCEPTION WHEN OTHERS THEN
-  INSERT INTO cleanup_log (archived_assignments, archived_targets, cutoff_date, success, error_message)
-  VALUES (0, 0, v_cutoff_date, false, SQLERRM);
-  RAISE;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION get_cleanup_stats()
-RETURNS TABLE(
-  total_logs int,
-  last_cleanup timestamp with time zone,
-  total_archived_assignments bigint,
-  total_archived_targets bigint
-) AS $$
-BEGIN
-  RETURN QUERY
-  SELECT
-    COUNT(*)::int AS total_logs,
-    MAX(cleanup_date) AS last_cleanup,
-    COALESCE(SUM(archived_assignments), 0) AS total_archived_assignments,
-    COALESCE(SUM(archived_targets), 0) AS total_archived_targets
-  FROM cleanup_log
-  WHERE success = true;
-END;
-$$ LANGUAGE plpgsql;
 
 -- ============================================================
 -- EMPLOYEE TRAINING UPDATE FUNCTION

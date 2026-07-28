@@ -150,7 +150,7 @@
         <div v-else class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Max PTO Hours / Day (team-wide, by weekday)</label>
-            <div class="grid grid-cols-3 sm:grid-cols-5 gap-3 mt-1">
+            <div class="grid grid-cols-4 sm:grid-cols-7 gap-3 mt-1">
               <div v-for="day in ptoWeekdays" :key="day.key">
                 <label class="block text-xs font-medium text-gray-500 mb-1">{{ day.label }}</label>
                 <input
@@ -161,7 +161,7 @@
                 />
               </div>
             </div>
-            <p class="mt-1 text-xs text-gray-400">Total approved PTO hours allowed across the team, set per weekday. (Any weekend request falls back to the default limit.)</p>
+            <p class="mt-1 text-xs text-gray-400">Total approved PTO hours allowed across the team, set per weekday. Counts approved requests plus manually-entered PTO and call-ins, each priced at the paid shift hours it removes.</p>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -908,16 +908,18 @@ const ruleFields = ref({
   min_business_days_notice: 1,
 })
 
-// Per-weekday team-wide PTO-hours limit (Mon–Fri). Stored as the JSON setting
-// `max_pto_hours_by_dow`; weekends fall back to `max_pto_hours_per_day`.
+// Per-weekday team-wide PTO-hours limit. Stored as the JSON setting
+// `max_pto_hours_by_dow`; any weekday left unset falls back to `max_pto_hours_per_day`.
 const ptoWeekdays = [
   { key: 'mon', label: 'Mon' },
   { key: 'tue', label: 'Tue' },
   { key: 'wed', label: 'Wed' },
   { key: 'thu', label: 'Thu' },
   { key: 'fri', label: 'Fri' },
+  { key: 'sat', label: 'Sat' },
+  { key: 'sun', label: 'Sun' },
 ]
-const ptoHoursByDow = ref<Record<string, number>>({ mon: 8, tue: 8, wed: 8, thu: 8, fri: 8 })
+const ptoHoursByDow = ref<Record<string, number>>({ mon: 8, tue: 8, wed: 8, thu: 8, fri: 8, sat: 8, sun: 8 })
 const savingRules = ref(false)
 const teamSettingsSuccess = ref('')
 
@@ -1418,6 +1420,8 @@ const loadRequestRules = async () => {
     wed: byDow.wed ?? fallback,
     thu: byDow.thu ?? fallback,
     fri: byDow.fri ?? fallback,
+    sat: byDow.sat ?? fallback,
+    sun: byDow.sun ?? fallback,
   }
 }
 

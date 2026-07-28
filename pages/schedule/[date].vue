@@ -46,6 +46,13 @@
             </svg>
             {{ isSaving ? 'Saving...' : 'Save Schedule' }}
           </button>
+          <button
+            @click="showExportModal = true"
+            class="btn-secondary text-sm px-3 py-1.5 flex items-center"
+            title="Download any historical schedule as CSV"
+          >
+            Export CSV
+          </button>
           <NuxtLink to="/" class="btn-secondary text-sm px-3 py-1.5">
             ← Back to Home
           </NuxtLink>
@@ -549,6 +556,64 @@
         </div>
       </div>
     </div>
+
+    <!-- Export historical schedule -->
+    <div
+      v-if="showExportModal"
+      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      @click.self="showExportModal = false"
+    >
+      <div class="bg-white rounded-xl shadow-2xl max-w-md w-full">
+        <div class="p-6">
+          <div class="flex justify-between items-center mb-1">
+            <h2 class="text-xl font-bold text-gray-900">Export Schedule</h2>
+            <button @click="showExportModal = false" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+          </div>
+          <p class="text-sm text-gray-500 mb-4">
+            Download any past or upcoming schedule as a CSV, one row per assignment.
+          </p>
+
+          <div class="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">From</label>
+              <input
+                v-model="exportFrom"
+                type="date"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+              />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">To</label>
+              <input
+                v-model="exportTo"
+                type="date"
+                :min="exportFrom"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+              />
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-2 mb-4">
+            <button type="button" @click="setExportRange('day')" class="px-2.5 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50">This day</button>
+            <button type="button" @click="setExportRange('week')" class="px-2.5 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Last 7 days</button>
+            <button type="button" @click="setExportRange('month')" class="px-2.5 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Last 30 days</button>
+            <button type="button" @click="setExportRange('year')" class="px-2.5 py-1 text-xs rounded border border-gray-300 text-gray-600 hover:bg-gray-50">Last 12 months</button>
+          </div>
+
+          <div v-if="exportError" class="bg-red-50 border border-red-200 rounded-md p-3 mb-3">
+            <p class="text-sm text-red-600">{{ exportError }}</p>
+          </div>
+
+          <button
+            @click="downloadScheduleCsv"
+            :disabled="exporting || !exportFrom || !exportTo"
+            class="w-full px-4 py-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-medium"
+          >
+            {{ exporting ? 'Preparing...' : 'Download CSV' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -579,16 +644,92 @@ const {
   fetchShifts 
 } = useSchedule()
 
-const { 
-  scheduleAssignments: scheduleAssignmentsRef, 
-  loading: assignmentsLoading, 
-  error: assignmentsError, 
+const {
+  scheduleAssignments: scheduleAssignmentsRef,
+  loading: assignmentsLoading,
+  error: assignmentsError,
   fetchScheduleForDate,
   fetchTargetHours,
   replaceScheduleForDate,
   createAssignment,
-  deleteAssignment
+  deleteAssignment,
+  fetchScheduleExport
 } = useSchedule()
+
+// --- Historical schedule CSV export -------------------------------------------
+const showExportModal = ref(false)
+const exporting = ref(false)
+const exportError = ref('')
+const exportFrom = ref('')
+const exportTo = ref('')
+
+const toDateStr = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+const setExportRange = (preset: 'day' | 'week' | 'month' | 'year') => {
+  const end = scheduleDate.value || toDateStr(new Date())
+  if (preset === 'day') {
+    exportFrom.value = end
+    exportTo.value = end
+    return
+  }
+  const [y, m, d] = end.split('-').map(Number)
+  const start = new Date(y, m - 1, d)
+  if (preset === 'week') start.setDate(start.getDate() - 6)
+  else if (preset === 'month') start.setDate(start.getDate() - 29)
+  else start.setFullYear(start.getFullYear() - 1)
+  exportFrom.value = toDateStr(start)
+  exportTo.value = end
+}
+
+const csvEscape = (v: any) => {
+  const s = String(v ?? '')
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+}
+
+const downloadScheduleCsv = async () => {
+  exporting.value = true
+  exportError.value = ''
+  try {
+    const rows = await fetchScheduleExport(exportFrom.value, exportTo.value)
+    if (!rows.length) {
+      exportError.value = 'No assignments found in that date range.'
+      return
+    }
+
+    const header = ['Date', 'Last Name', 'First Name', 'Job Function', 'Shift', 'Start', 'End', 'Hours']
+    const lines = [header.join(',')]
+    for (const r of rows) {
+      lines.push([
+        r.schedule_date, r.last_name, r.first_name, r.job_function_name,
+        r.shift_name, r.start_time, r.end_time, r.hours,
+      ].map(csvEscape).join(','))
+    }
+
+    // UTF-8 BOM so Excel decodes accented names correctly rather than as Windows-1252.
+    const blob = new Blob([String.fromCharCode(0xFEFF) + lines.join('\r\n')], {
+      type: 'text/csv;charset=utf-8;',
+    })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = exportFrom.value === exportTo.value
+      ? `schedule-${exportFrom.value}.csv`
+      : `schedule-${exportFrom.value}_to_${exportTo.value}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    showExportModal.value = false
+  } catch (e: any) {
+    exportError.value = e.data?.message || e.message || 'Export failed'
+  } finally {
+    exporting.value = false
+  }
+}
+
+// Default the range to the schedule currently being viewed.
+watch(showExportModal, (open) => {
+  if (open && !exportFrom.value) setExportRange('day')
+})
 
 // PTO composable
 const {

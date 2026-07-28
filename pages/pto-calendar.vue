@@ -24,10 +24,10 @@
               Month
             </button>
             <button
-              @click="openHistory"
+              @click="showOverviewModal = true"
               class="px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
             >
-              History
+              Employee Overview
             </button>
           </div>
         </div>
@@ -176,6 +176,9 @@
               <span v-if="requestTimeLabel(req)" class="text-sm text-gray-400 ml-1">({{ requestTimeLabel(req) }})</span>
               <span class="text-sm text-gray-500 ml-2">{{ formatDate(req.request_date) }}</span>
               <span v-if="req.notes" class="text-xs text-gray-400 ml-2">— {{ req.notes }}</span>
+              <div class="text-xs text-gray-400 mt-0.5" :title="formatFullTimestamp(req.created_at)">
+                Submitted {{ formatSubmitted(req.created_at) }}
+              </div>
             </div>
             <div class="flex items-center gap-2">
               <button
@@ -207,6 +210,7 @@
                 <th class="px-3 py-2 text-left font-medium text-gray-500">Type</th>
                 <th class="px-3 py-2 text-left font-medium text-gray-500">Time</th>
                 <th class="px-3 py-2 text-left font-medium text-gray-500">Date</th>
+                <th class="px-3 py-2 text-left font-medium text-gray-500">Submitted</th>
                 <th class="px-3 py-2 text-left font-medium text-gray-500">Status</th>
                 <th class="px-3 py-2 text-left font-medium text-gray-500">Notes</th>
                 <th v-if="isAdmin" class="px-3 py-2 text-left font-medium text-gray-500">Actions</th>
@@ -218,6 +222,10 @@
                 <td class="px-3 py-2">{{ formatRequestType(req.request_type) }}</td>
                 <td class="px-3 py-2 text-gray-500 whitespace-nowrap">{{ requestTimeLabel(req) || '—' }}</td>
                 <td class="px-3 py-2">{{ formatDate(req.request_date) }}</td>
+                <td
+                  class="px-3 py-2 text-gray-500 whitespace-nowrap"
+                  :title="formatFullTimestamp(req.created_at)"
+                >{{ formatSubmitted(req.created_at) }}</td>
                 <td class="px-3 py-2">
                   <span
                     class="px-2 py-0.5 rounded-full text-xs font-medium"
@@ -253,79 +261,11 @@
 
     </div>
 
-    <!-- Request History Modal -->
-    <div v-if="showHistoryModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" @click.self="showHistoryModal = false">
-      <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div class="p-6">
-          <div class="flex justify-between items-center mb-4">
-            <h2 class="text-xl font-bold text-gray-900">Employee History</h2>
-            <div class="flex items-center gap-3">
-              <button
-                v-if="historyRows.length > 0"
-                @click="exportHistoryCsv"
-                class="px-3 py-1.5 text-sm rounded-md bg-green-600 text-white hover:bg-green-700"
-              >
-                Export CSV
-              </button>
-              <button @click="showHistoryModal = false" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
-            </div>
-          </div>
-
-          <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-1">Employee</label>
-            <select
-              v-model="historyEmployeeId"
-              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
-            >
-              <option value="">Select employee...</option>
-              <option v-for="emp in employees" :key="emp.id" :value="emp.id">
-                {{ emp.last_name }}, {{ emp.first_name }}
-              </option>
-            </select>
-          </div>
-
-          <div v-if="!historyEmployeeId" class="text-sm text-gray-500 py-8 text-center">
-            Select an employee to see their history (requests + call-ins).
-          </div>
-          <div v-else-if="historyLoading" class="text-sm text-gray-500 py-8 text-center">Loading…</div>
-          <div v-else-if="historyRows.length === 0" class="text-sm text-gray-500 py-8 text-center">
-            No requests or call-ins found for this employee.
-          </div>
-          <div v-else class="overflow-x-auto">
-            <table class="min-w-full text-sm">
-              <thead class="bg-gray-50">
-                <tr>
-                  <th class="px-3 py-2 text-left font-medium text-gray-500">Date</th>
-                  <th class="px-3 py-2 text-left font-medium text-gray-500">Type</th>
-                  <th class="px-3 py-2 text-left font-medium text-gray-500">Time</th>
-                  <th class="px-3 py-2 text-left font-medium text-gray-500">Status</th>
-                  <th class="px-3 py-2 text-left font-medium text-gray-500">Notes / Reason</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-100">
-                <tr v-for="row in historyRows" :key="row.id">
-                  <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(row.dateRaw) }}</td>
-                  <td class="px-3 py-2 whitespace-nowrap">{{ row.type }}</td>
-                  <td class="px-3 py-2 whitespace-nowrap text-gray-500">{{ row.time || '—' }}</td>
-                  <td class="px-3 py-2">
-                    <span
-                      class="px-2 py-0.5 rounded-full text-xs font-medium"
-                      :class="{
-                        'bg-green-100 text-green-800': row.status === 'approved',
-                        'bg-yellow-100 text-yellow-800': row.status === 'pending',
-                        'bg-red-100 text-red-800': row.status === 'rejected',
-                        'bg-orange-100 text-orange-800': row.status === 'logged',
-                      }"
-                    >{{ row.status === 'logged' ? 'call-in' : row.status }}</span>
-                  </td>
-                  <td class="px-3 py-2 text-gray-500 max-w-[240px] truncate">{{ row.notes || '-' }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- Employee Overview -->
+    <EmployeeOverview
+      v-if="showOverviewModal"
+      @close="showOverviewModal = false"
+    />
 
     <!-- Request Modal -->
     <ScheduleRequestsRequestFormModal
@@ -340,89 +280,14 @@
 const { user } = useAuth()
 const { fetchRequests, requests, overrideRequest, cancelRequest, loading } = useScheduleRequests()
 const { blockedDates, fetchBlockedDates } = useTeamBlockedDates()
-const { employees, fetchEmployees } = useEmployees()
 
 const viewMode = ref<'week' | 'month'>('week')
 const referenceDate = ref(new Date())
 const showRequestModal = ref(false)
 
-// Request history modal (per-employee, all dates) — schedule_requests + call-ins.
-const showHistoryModal = ref(false)
-const historyEmployeeId = ref('')
-const historyRequests = ref<any[]>([])
-const historyCallIns = ref<any[]>([])
-const historyLoading = ref(false)
+// Employee Overview modal (per-employee dashboard; replaced the old history modal).
+const showOverviewModal = ref(false)
 
-const openHistory = async () => {
-  showHistoryModal.value = true
-  if (!employees.value?.length) await fetchEmployees()
-}
-
-watch(historyEmployeeId, async (empId) => {
-  historyRequests.value = []
-  historyCallIns.value = []
-  if (!empId) return
-  historyLoading.value = true
-  try {
-    const [reqs, callIns] = await Promise.all([
-      $fetch<any[]>('/api/schedule-requests', { params: { employee_id: empId } }),
-      // Call-ins aren't schedule_requests — they're pto_days(pto_type='call_in').
-      $fetch<any[]>('/api/pto', { params: { employee_id: empId, pto_type: 'call_in' } }),
-    ])
-    historyRequests.value = reqs || []
-    historyCallIns.value = callIns || []
-  } catch {
-    historyRequests.value = []
-    historyCallIns.value = []
-  } finally {
-    historyLoading.value = false
-  }
-})
-
-// Unified, date-desc history rows combining requests and call-ins.
-const historyRows = computed(() => {
-  const rows = [
-    ...historyRequests.value.map((r: any) => ({
-      id: `req-${r.id}`,
-      dateRaw: String(r.request_date).split('T')[0],
-      type: formatRequestType(r.request_type),
-      time: requestTimeLabel(r),
-      status: r.status,
-      notes: r.rejection_reason || r.notes || '',
-    })),
-    ...historyCallIns.value.map((p: any) => ({
-      id: `ci-${p.id}`,
-      dateRaw: String(p.pto_date).split('T')[0],
-      type: 'Call-In',
-      time: '',
-      status: 'logged',
-      notes: p.notes || '',
-    })),
-  ]
-  return rows.sort((a, b) => (a.dateRaw < b.dateRaw ? 1 : a.dateRaw > b.dateRaw ? -1 : 0))
-})
-
-const exportHistoryCsv = () => {
-  const emp = employees.value?.find((e: any) => e.id === historyEmployeeId.value)
-  const empName = emp ? `${emp.last_name}, ${emp.first_name}` : 'employee'
-  const esc = (v: any) => {
-    const s = String(v ?? '')
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-  }
-  const lines = [['Employee', 'Date', 'Type', 'Time', 'Status', 'Notes'].join(',')]
-  for (const r of historyRows.value) {
-    lines.push([empName, r.dateRaw, r.type, r.time, r.status, r.notes].map(esc).join(','))
-  }
-  // Prepend a UTF-8 BOM so Excel decodes special chars (en-dash, accented names)
-  // correctly instead of as Windows-1252 (which turns "–" into "â€“").
-  const blob = new Blob([String.fromCharCode(0xFEFF) + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `history-${empName.replace(/[^a-z0-9]+/gi, '_')}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
-}
 
 const onRequestSubmitted = () => {
   loadCalendar()
@@ -589,6 +454,30 @@ const formatDate = (dateStr: string | null | undefined) => {
   if (!y || !m || !d) return dateStr
   const date = new Date(y, m - 1, d)
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+// When the request was submitted. schedule_requests.created_at has always recorded
+// this; it just wasn't surfaced anywhere. Rendered in the viewer's local timezone —
+// the column is stored as timestamptz, so the conversion is correct.
+const formatSubmitted = (ts: string | null | undefined) => {
+  if (!ts) return '—'
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return '—'
+  return d.toLocaleString('en-US', {
+    month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  })
+}
+
+// Full stamp incl. year and seconds, for the cell's hover title.
+const formatFullTimestamp = (ts: string | null | undefined) => {
+  if (!ts) return ''
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('en-US', {
+    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', second: '2-digit',
+  })
 }
 
 const ptoTypeLabel = (type: string | null | undefined) => {
