@@ -277,6 +277,8 @@
 </template>
 
 <script setup lang="ts">
+import { formatTimeOfDay, ptoTimeLabel, ptoTimeToMinutes } from '~/utils/ptoDisplay'
+
 const { user } = useAuth()
 const { fetchRequests, requests, overrideRequest, cancelRequest, loading } = useScheduleRequests()
 const { blockedDates, fetchBlockedDates } = useTeamBlockedDates()
@@ -492,23 +494,12 @@ const ptoTypeLabel = (type: string | null | undefined) => {
 
 // Format a stored time ("HH:MM[:SS]") as "h:MM AM/PM".
 const formatT = (t: string | null | undefined): string => {
-  if (!t) return ''
-  const parts = String(t).split(':')
-  const h = Number(parts[0])
-  const m = Number(parts[1] || 0)
-  if (Number.isNaN(h)) return ''
-  const ampm = h >= 12 ? 'PM' : 'AM'
-  const hr = h % 12 === 0 ? 12 : h % 12
-  return `${hr}:${String(m).padStart(2, '0')} ${ampm}`
+  const mins = ptoTimeToMinutes(t)
+  return mins == null ? '' : formatTimeOfDay(mins)
 }
 
-// Human time detail for a materialized pto_days record.
-const ptoTimeLabel = (pto: any): string => {
-  if (pto?.pto_type === 'arrive_late') return pto.end_time ? `arrives ${formatT(pto.end_time)}` : ''
-  if (pto?.pto_type === 'leave_early') return pto.start_time ? `leaves ${formatT(pto.start_time)}` : ''
-  if (pto?.pto_type === 'partial' && pto.start_time && pto.end_time) return `${formatT(pto.start_time)} – ${formatT(pto.end_time)}`
-  return '' // full_day, call_in — no time detail
-}
+// pto_days time detail now comes from the shared helper (utils/ptoDisplay), so
+// the calendar and the display board can't drift on how they read a record.
 
 // Human time detail for a schedule_requests row (used by tables + pending requests).
 const requestTimeLabel = (req: any): string => {

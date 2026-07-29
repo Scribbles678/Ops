@@ -124,6 +124,8 @@
 </template>
 
 <script setup lang="ts">
+import { describePto, ptoTimeToMinutes, subtractPto } from '~/utils/ptoDisplay'
+
 const { formatTime, formatDate } = useLaborCalculations()
 const {
   scheduleAssignments: assignments,
@@ -204,21 +206,38 @@ const shiftsWithAssignments = computed(() => {
     })
   })
   
-  // Helper to check if an assignment overlaps PTO
-  const overlapsPTO = (empId: string, startTime: string, endTime: string) => {
-    const ptoRecs = (ptoByEmployeeId.value && ptoByEmployeeId.value[empId]) ? ptoByEmployeeId.value[empId] : []
-    if (!ptoRecs || ptoRecs.length === 0) return false
-    const aS = parseInt(startTime.substring(0,2)) * 60 + parseInt(startTime.substring(3,5))
-    const aE = parseInt(endTime.substring(0,2)) * 60 + parseInt(endTime.substring(3,5))
-    for (const r of ptoRecs) {
-      if (!r.start_time && !r.end_time) return true // full day PTO
-      const rStart = r.start_time ? String(r.start_time).substring(0,5) : '00:00'
-      const rEnd = r.end_time ? String(r.end_time).substring(0,5) : '23:59'
-      const rS = parseInt(rStart.substring(0,2)) * 60 + parseInt(rStart.substring(3,5))
-      const rE = parseInt(rEnd.substring(0,2)) * 60 + parseInt(rEnd.substring(3,5))
-      if (!(aE <= rS || aS >= rE)) return true
+  // Absence windows for an employee, interpreted by type (see utils/ptoDisplay).
+  const absenceWindowsFor = (empId: string) => {
+    const recs = ptoByEmployeeId.value?.[empId] || []
+    return recs.map((r: any) => describePto(r)).filter(Boolean) as ReturnType<typeof describePto>[]
+  }
+
+  const minutesOf = (t: string) => ptoTimeToMinutes(t) ?? 0
+  const toTimeString = (mins: number) =>
+    `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}:00`
+
+  /**
+   * Clip an employee's assignments around their PTO instead of discarding them.
+   *
+   * The old behaviour dropped any assignment that overlapped PTO at all, so
+   * someone off 08:00-10:00 with an 08:00-12:30 block disappeared from the board
+   * entirely — hiding 2.5 hours they were genuinely working.
+   */
+  const trimAssignmentsAroundPTO = (empId: string, list: any[]) => {
+    const windows = absenceWindowsFor(empId)
+    if (!windows.length) return list
+    const out: any[] = []
+    for (const a of list) {
+      const pieces = subtractPto(minutesOf(String(a.start_time)), minutesOf(String(a.end_time)), windows as any)
+      for (const p of pieces) {
+        out.push(
+          p.start === minutesOf(String(a.start_time)) && p.end === minutesOf(String(a.end_time))
+            ? a
+            : { ...a, id: `${a.id}-trim-${p.start}`, start_time: toTimeString(p.start), end_time: toTimeString(p.end) }
+        )
+      }
     }
-    return false
+    return out
   }
   
   // Group employees by their shift_id, accounting for shift swaps
@@ -240,15 +259,18 @@ const shiftsWithAssignments = computed(() => {
       )
       if (isOutAllDay) return
 
-      // Get assignments for this employee and filter out those overlapping PTO
-      const employeeAssignmentsList = (employeeAssignments.get(employee.id) || [])
-        .filter((a: any) => a.shift_id === targetShiftId)
-        .filter((a: any) => !overlapsPTO(employee.id, String(a.start_time), String(a.end_time)))
-      
-      // Create employee object with assignments
+      // Clip assignments around PTO rather than dropping them wholesale.
+      const employeeAssignmentsList = trimAssignmentsAroundPTO(
+        employee.id,
+        (employeeAssignments.get(employee.id) || []).filter((a: any) => a.shift_id === targetShiftId)
+      )
+
+      // Create employee object with assignments + their absence blocks, so the
+      // board says WHY someone isn't on a job rather than leaving a silent hole.
       const employeeWithAssignments = {
         ...employee,
-        assignments: employeeAssignmentsList
+        assignments: employeeAssignmentsList,
+        absences: absenceWindowsFor(employee.id).filter((d: any) => d && !d.allDay),
       }
       
       shiftMap.get(targetShiftId).employees.push(employeeWithAssignments)
@@ -450,19 +472,34 @@ const timeToMinutes = (time: string): number => {
 }
 
 
-// Get schedule items (assignments only) for an employee, sorted by time
+// Schedule items for an employee: their work blocks PLUS any partial absence,
+// sorted by time. The absence is rendered as a neutral grey block so the board
+// shows when someone is away instead of leaving an unexplained gap.
+const ABSENCE_COLOR = '#94a3b8'
+
 const getEmployeeScheduleItems = (employee: any): Array<{id: string, assignment: any, timeRange: string, sortTime: number}> => {
-  if (!employee.assignments || employee.assignments.length === 0) {
-    return []
+  const items: Array<{id: string, assignment: any, timeRange: string, sortTime: number}> = []
+
+  for (const a of employee.assignments || []) {
+    items.push({
+      id: `assignment-${a.id}`,
+      assignment: a,
+      timeRange: `${formatTime(a.start_time)}-${formatTime(a.end_time)}`,
+      sortTime: timeToMinutes(String(a.start_time).substring(0, 5)),
+    })
   }
-  
-  // Return assignments sorted by start time
-  return employee.assignments.map((a: any) => ({
-    id: `assignment-${a.id}`,
-    assignment: a,
-    timeRange: `${formatTime(a.start_time)}-${formatTime(a.end_time)}`,
-    sortTime: timeToMinutes(a.start_time.substring(0, 5))
-  })).sort((a: any, b: any) => a.sortTime - b.sortTime)
+
+  for (const d of employee.absences || []) {
+    items.push({
+      id: `absence-${employee.id}-${d.startMin}`,
+      // Shaped like an assignment so the existing block template renders it.
+      assignment: { job_function: { name: d.label, color_code: ABSENCE_COLOR } },
+      timeRange: d.timeText,
+      sortTime: d.startMin,
+    })
+  }
+
+  return items.sort((a, b) => a.sortTime - b.sortTime)
 }
 </script>
 

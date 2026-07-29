@@ -54,7 +54,7 @@
       </div>
 
       <!-- Schedule Generation Options -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
         <!-- Copy Today's Schedule -->
         <div class="card hover:shadow-lg transition-all cursor-pointer" @click="copyTodaySchedule">
           <div class="text-center py-8">
@@ -89,6 +89,39 @@
             <p class="text-gray-600">
               {{ generating ? 'Please wait while we create your optimized schedule...' : 'Generate an optimized schedule based on staffing targets, training, and required assignments' }}
             </p>
+          </div>
+        </div>
+
+        <!-- Automated Schedule Builder V2 (Beta) — separate engine, V1 untouched -->
+        <div
+          class="card hover:shadow-lg transition-all cursor-pointer relative border-2 border-dashed border-indigo-300"
+          @click="generateV2ScheduleAndApply"
+          :class="{ 'opacity-50 cursor-not-allowed': generatingV2 }"
+        >
+          <span class="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide bg-indigo-100 text-indigo-700">
+            BETA
+          </span>
+          <div class="text-center py-8">
+            <div class="bg-indigo-100 rounded-full p-6 mb-4 mx-auto w-20 h-20 flex items-center justify-center">
+              <svg v-if="!generatingV2" class="w-10 h-10 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <div v-else class="w-10 h-10 text-indigo-600">
+                <svg class="animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+            </div>
+            <h3 class="text-xl font-bold text-gray-800 mb-2">
+              {{ generatingV2 ? '⏳ Generating…' : 'Automated Schedule Builder V2' }}
+            </h3>
+            <p class="text-gray-600">
+              {{ generatingV2
+                ? 'Running the 15-minute engine…'
+                : 'Experimental schedule engine.' }}
+            </p>
+            <p class="text-xs text-indigo-600 mt-2 italic">Beta — compare against V1 before relying on it</p>
           </div>
         </div>
 
@@ -127,6 +160,13 @@
           </svg>
           PTO Calendar
         </NuxtLink>
+      </div>
+
+      <!-- Coverage preview for the selected date. Shows demand vs the people
+           actually on the clock BEFORE building, so impossible targets and
+           break/lunch cliffs are visible up front rather than discovered after. -->
+      <div v-if="selectedDate" class="mt-8">
+        <ScheduleCoveragePreview :date="selectedDate" />
       </div>
 
       <!-- Build Review Modal -->
@@ -418,6 +458,7 @@ import { useAIScheduleBuilder } from '~/composables/useAIScheduleBuilder'
 const { copySchedule } = useSchedule()
 const { fetchJobFunctions } = useJobFunctions()
 const { generateAISchedule: generateAIScheduleFromBuilder, applyAISchedule } = useAIScheduleBuilder()
+const { generateV2Schedule, applyV2Schedule } = useScheduleBuilderV2()
 const { fetchTargets } = useStaffingTargets()
 const { fetchPreferredAssignments } = usePreferredAssignments()
 const { fetchPTOForDate } = usePTO()
@@ -457,6 +498,7 @@ const isWeekend = computed(() => {
 
 // AI Generation state
 const generating = ref(false)
+const generatingV2 = ref(false)
 const showWarningsModal = ref(false)
 const scheduleWarnings = ref<string[]>([])
 const scheduleGaps = ref<{ job_function_name: string; hour: string; shortfall: number }[]>([])
@@ -613,6 +655,49 @@ const generateAISchedule = async () => {
     } finally {
       generating.value = false
     }
+}
+
+// --- V2 Beta engine -----------------------------------------------------------
+// Runs the separate slot engine. Same review/warnings surface, same transactional
+// apply path. V1 is not involved and is unaffected by anything here.
+const generateV2ScheduleAndApply = async () => {
+  if (generatingV2.value) return
+  try {
+    generatingV2.value = true
+    scheduleWarnings.value = []
+    scheduleGaps.value = []
+    scheduleOverTarget.value = []
+
+    const { schedule, warnings, errors, gaps, overTarget, structuralSummary, stats } =
+      await generateV2Schedule(selectedDate.value || '')
+
+    if (schedule.length > 0) {
+      await applyV2Schedule(schedule, selectedDate.value || '')
+
+      // Only genuinely actionable gaps reach the table; the unfixable windows
+      // (whole shift on break, after-hours targets) are summarised in one line
+      // rather than listed as dozens of rows.
+      scheduleWarnings.value = [
+        `V2 Beta — ${schedule.length} assignments, ${stats?.employeesWithNoWork ?? 0} employees with no work.`,
+        ...(gaps?.length
+          ? [`${gaps.length} shortfall${gaps.length === 1 ? '' : 's'} below could be worth a look.`]
+          : ['Every staffing target that could be met, was met.']),
+        ...(structuralSummary || []),
+        ...warnings,
+      ]
+      scheduleGaps.value = gaps || []
+      scheduleOverTarget.value = overTarget || []
+      showWarningsModal.value = true
+    } else {
+      scheduleWarnings.value = errors.length ? errors : ['V2 produced no assignments.']
+      showWarningsModal.value = true
+    }
+  } catch (error: any) {
+    console.error('Error generating V2 schedule:', error)
+    showNotification(`❌ V2 Beta error: ${error?.message || 'unknown'}`, 'error')
+  } finally {
+    generatingV2.value = false
+  }
 }
 
 const closeWarningsModal = () => {
