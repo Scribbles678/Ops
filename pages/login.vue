@@ -4,7 +4,7 @@
       <!-- Logo/Title Section -->
       <div class="text-center mb-8">
         <img src="/abbott_full_logo.png" alt="Abbott" class="mx-auto h-auto max-h-14 mb-4 object-contain" />
-        <h1 class="text-3xl font-bold text-white mb-2">Staffing Planner</h1>
+        <h1 class="text-3xl font-bold text-white mb-2">Operations Planner</h1>
         <p class="text-blue-200">Secure Access Portal</p>
       </div>
 
@@ -96,7 +96,7 @@
             Need an account? Contact your administrator. <NuxtLink to="/reset-password" class="text-white underline hover:text-blue-200">Forgot your password?</NuxtLink>
           </p>
           <!-- Deploy canary: bump this on each release to confirm the pipeline shipped it -->
-          <p class="text-xs text-gray-300 mt-3">Build 2026.06.04-1</p>
+          <p class="text-xs text-gray-300 mt-3"></p>
         </div>
       </div>
     </div>
