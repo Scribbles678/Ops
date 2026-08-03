@@ -87,7 +87,14 @@
                       :style="{ backgroundColor: jobFunction.color_code }"
                     ></div>
                     <div>
-                      <h3 class="text-base md:text-lg font-semibold text-gray-800">{{ jobFunction.name }}</h3>
+                      <h3 class="text-base md:text-lg font-semibold text-gray-800 flex items-center gap-2">
+                        {{ jobFunction.name }}
+                        <span
+                          v-if="(jobFunction.staffing_priority ?? 3) !== 3"
+                          :class="priorityBadgeClass(jobFunction.staffing_priority)"
+                          class="px-1.5 py-0.5 rounded text-[11px] font-medium"
+                        >{{ priorityLabel(jobFunction.staffing_priority) }}</span>
+                      </h3>
                       <p class="text-xs md:text-sm text-gray-600">
                         <span class="font-medium text-gray-700">Rate:</span>
                         <span v-if="jobFunction.productivity_rate !== null && jobFunction.productivity_rate !== undefined">
@@ -387,6 +394,20 @@
             />
             <span class="block text-xs text-gray-500 mt-1">Builder never assigns more than this many people to this function in any hour. Leave blank for no limit.</span>
           </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Staffing priority</label>
+            <select
+              v-model.number="jobFunctionFormData.staffing_priority"
+              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option :value="1">1 — Critical (fill first)</option>
+              <option :value="2">2 — High</option>
+              <option :value="3">3 — Normal</option>
+              <option :value="4">4 — Low</option>
+              <option :value="5">5 — Optional (drop first)</option>
+            </select>
+            <span class="block text-xs text-gray-500 mt-1">When there aren't enough people to cover everything, the V2 builder fills higher-priority functions first and lets the lowest ones go short.</span>
+          </div>
           <div class="flex items-center space-x-2.5">
             <input
               id="jobFunction_surplus_overflow"
@@ -614,8 +635,21 @@ const jobFunctionFormData = ref({
   sort_order: 0,
   exclude_from_targets: false,
   max_headcount: null,
-  surplus_overflow: false
+  surplus_overflow: false,
+  staffing_priority: 3
 })
+
+const PRIORITY_LABELS = {
+  1: 'Priority 1 · Critical',
+  2: 'Priority 2 · High',
+  4: 'Priority 4 · Low',
+  5: 'Priority 5 · Optional'
+}
+
+const priorityLabel = (p) => PRIORITY_LABELS[p ?? 3] ?? ''
+
+const priorityBadgeClass = (p) =>
+  (p ?? 3) <= 2 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'
 
 const getJobFunctionUnitLabel = (jobFunction) => {
   if (!jobFunction) return ''
@@ -656,7 +690,8 @@ const openAddJobFunctionModal = () => {
     sort_order: jobFunctions.value.length,
     exclude_from_targets: false,
     max_headcount: null,
-    surplus_overflow: false
+    surplus_overflow: false,
+    staffing_priority: 3
   }
   showJobFunctionModal.value = true
 }
@@ -673,7 +708,8 @@ const openEditJobFunctionModal = (jobFunction) => {
     sort_order: jobFunction.sort_order,
     exclude_from_targets: jobFunction.exclude_from_targets ?? false,
     max_headcount: jobFunction.max_headcount ?? null,
-    surplus_overflow: jobFunction.surplus_overflow ?? false
+    surplus_overflow: jobFunction.surplus_overflow ?? false,
+    staffing_priority: jobFunction.staffing_priority ?? 3
   }
   showJobFunctionModal.value = true
 }

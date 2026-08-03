@@ -17,7 +17,8 @@
  */
 import {
   DEFAULT_WEIGHTS,
-  MIN_ASSIGNMENT_MINUTES,
+  ENGINE_MIN_BLOCK_MINUTES,
+  LOWEST_PRIORITY,
   PREFERRED_MIN_MINUTES,
   SLOTS_PER_DAY,
   SLOT_MINUTES,
@@ -110,7 +111,7 @@ interface CandidateContext {
 export function scoreCandidate(ctx: CandidateContext, w: EngineWeights): number {
   const { fn, startSlot, endSlot, distinctFunctions } = ctx
   const minutes = slotsToMinutesLength(startSlot, endSlot)
-  if (minutes < MIN_ASSIGNMENT_MINUTES) return -Infinity
+  if (minutes < ENGINE_MIN_BLOCK_MINUTES) return -Infinity
 
   // How much genuine unmet demand this run closes.
   let unmetClosed = 0
@@ -146,6 +147,11 @@ export function scoreCandidate(ctx: CandidateContext, w: EngineWeights): number 
 
   // Prefer hard-to-staff functions while their scarce people are still free.
   score += (1 - Math.min(1, fn.scarcity)) * w.scarce
+
+  // Business priority. Without this the engine only knows how hard a function is
+  // to staff, not how much the floor cares about it — which is how a low-value
+  // function can win a scarce person from a high-value one.
+  score += (LOWEST_PRIORITY - fn.priority) * w.priority
 
   // Mild preference for longer runs at equal value.
   score += minutes / 60
@@ -220,7 +226,7 @@ export function runEngine(input: EngineInput): EngineResult {
     }
     // Only the parts of the pin the employee is actually free for.
     for (const run of runsWhere(SLOTS_PER_DAY, (s) => s >= pin.startSlot && s < pin.endSlot && emp.free[s] === 1)) {
-      if (slotsToMinutesLength(run.start, run.end) < MIN_ASSIGNMENT_MINUTES) continue
+      if (slotsToMinutesLength(run.start, run.end) < ENGINE_MIN_BLOCK_MINUTES) continue
       commit(emp, fn, run.start, run.end, 'required-pin')
     }
   }
@@ -234,9 +240,11 @@ export function runEngine(input: EngineInput): EngineResult {
 
   while (progressed && guard++ < GUARD_LIMIT) {
     progressed = false
+    // Business priority leads; scarcity breaks ties inside a priority band, so
+    // hard-to-staff roles are still protected relative to their peers.
     const ordered = [...functions]
       .filter((f) => f.demand.some((d) => d > 0))
-      .sort((a, b) => a.scarcity - b.scarcity)
+      .sort((a, b) => a.priority - b.priority || a.scarcity - b.scarcity)
 
     for (const fn of ordered) {
       const unmetRuns = runsWhere(SLOTS_PER_DAY, (s) => (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0))
@@ -276,7 +284,7 @@ export function runEngine(input: EngineInput): EngineResult {
           // Short runs are allowed here rather than deferred: the cost function's
           // short-block penalty keeps them rare, but deferring them meant the
           // critical break-boundary slots were never fillable at all.
-          if (slotsToMinutesLength(run.start, run.end) < MIN_ASSIGNMENT_MINUTES) continue
+          if (slotsToMinutesLength(run.start, run.end) < ENGINE_MIN_BLOCK_MINUTES) continue
           if (!capRoom(fn, run.start, run.end)) continue
 
           const score = scoreCandidate(
@@ -312,7 +320,10 @@ export function runEngine(input: EngineInput): EngineResult {
   // minimum — the break/lunch cliffs. Fill them with short blocks, accepting the
   // cost penalty, because a covered 15 minutes beats an open hole.
   let cliffPatches = 0
-  for (const fn of functions) {
+  // Same priority-then-scarcity order as phase D: whatever labour is left over
+  // after coverage should patch the cliffs that matter most first.
+  const cliffOrder = [...functions].sort((a, b) => a.priority - b.priority || a.scarcity - b.scarcity)
+  for (const fn of cliffOrder) {
     if (!fn.demand.some((d) => d > 0)) continue
     for (const gapRun of runsWhere(SLOTS_PER_DAY, (s) => (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0))) {
       let filled = true
@@ -323,7 +334,7 @@ export function runEngine(input: EngineInput): EngineResult {
           if (!emp.trained.has(fn.id)) continue
           const run = longestFreeRun(emp.free, gapRun.start, gapRun.end)
           if (!run) continue
-          if (slotsToMinutesLength(run.start, run.end) < MIN_ASSIGNMENT_MINUTES) continue
+          if (slotsToMinutesLength(run.start, run.end) < ENGINE_MIN_BLOCK_MINUTES) continue
           if (!capRoom(fn, run.start, run.end)) continue
           const score = scoreCandidate(
             {
@@ -427,10 +438,10 @@ export function runEngine(input: EngineInput): EngineResult {
 
   // Drop anything still under the hard minimum (defensive — the DB enforces it too).
   const final = merged.filter(
-    (a) => slotsToMinutesLength(a.startSlot, a.endSlot) >= MIN_ASSIGNMENT_MINUTES
+    (a) => slotsToMinutesLength(a.startSlot, a.endSlot) >= ENGINE_MIN_BLOCK_MINUTES
   )
   if (final.length !== merged.length) {
-    warnings.push(`${merged.length - final.length} assignment(s) under ${MIN_ASSIGNMENT_MINUTES} minutes were dropped.`)
+    warnings.push(`${merged.length - final.length} assignment(s) under ${ENGINE_MIN_BLOCK_MINUTES} minutes were dropped.`)
   }
 
   // ---- Phase H: gaps, over-target, explanations ---------------------------

@@ -619,6 +619,7 @@
 
 <script setup lang="ts">
 // Import the component explicitly
+import { onBeforeRouteLeave } from 'vue-router'
 import ShiftGroupedSchedule from '~/components/schedule/ShiftGroupedSchedule.vue'
 
 // Use real composables instead of mock data
@@ -794,6 +795,31 @@ const selectedEmployee = ref<any>(null)
 const selectedShift = ref<any>(null)
 const selectedJobFunction = ref('')
 const scheduleAssignmentsData = ref<Record<string, any>>({})
+
+// --- Unsaved-change tracking --------------------------------------------------
+// Edits live only in scheduleAssignmentsData until "Save Schedule" is pressed.
+// Anything that rebuilds the grid from the server therefore destroys them, which
+// is exactly how a call-in used to wipe out unsaved work. We snapshot the grid
+// whenever it matches the server, and compare against that snapshot to know
+// whether there is anything at risk.
+const savedSnapshot = ref('')
+
+/** Order-independent serialisation, so key ordering can't fake a change. */
+const gridFingerprint = (grid: Record<string, any>): string => {
+  const empIds = Object.keys(grid || {}).sort()
+  return JSON.stringify(
+    empIds.map((id) => {
+      const slots = grid[id] || {}
+      return [id, Object.keys(slots).sort().map((k) => [k, slots[k]])]
+    })
+  )
+}
+
+const markGridSaved = () => { savedSnapshot.value = gridFingerprint(scheduleAssignmentsData.value) }
+
+const hasUnsavedChanges = computed(
+  () => savedSnapshot.value !== '' && gridFingerprint(scheduleAssignmentsData.value) !== savedSnapshot.value
+)
 
 // Save state
 const isSaving = ref(false)
@@ -1025,6 +1051,8 @@ const initializeScheduleData = () => {
   
   console.log('Initialized schedule data:', initialData)
   scheduleAssignmentsData.value = initialData
+  // The grid now mirrors the server, so this is the baseline for "unsaved".
+  markGridSaved()
   console.log('scheduleAssignmentsData after initialization:', scheduleAssignmentsData.value)
 }
 
@@ -1528,7 +1556,8 @@ const minutesToTime = (minutes: number): string => {
   return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
 }
 
-const saveSchedule = async () => {
+/** Returns true when the schedule is safely persisted, false if the save failed. */
+const saveSchedule = async (): Promise<boolean> => {
   try {
     isSaving.value = true
     saveProgress.value = 'Preparing to save schedule...'
@@ -1648,8 +1677,11 @@ const saveSchedule = async () => {
     // Success!
     isSaving.value = false
     saveProgress.value = ''
+    // What's on screen is now what's on the server.
+    markGridSaved()
     showNotification(`Schedule saved successfully! ${assignmentsToSave.length} assignments created.`, 'success')
-    
+    return true
+
   } catch (error: any) {
     console.error('Error saving schedule:', error)
     isSaving.value = false
@@ -1659,7 +1691,18 @@ const saveSchedule = async () => {
     await fetchScheduleForDate(scheduleDate.value)
     await nextTick()
     initializeScheduleData()
+    return false
   }
+}
+
+/**
+ * Persist pending edits before an action that would otherwise blow them away.
+ * Silent when there is nothing to save, so the CI and Clear buttons stay
+ * one-click — no dialog, no "you have unsaved changes" interruption.
+ */
+const saveIfDirty = async (): Promise<boolean> => {
+  if (!hasUnsavedChanges.value) return true
+  return await saveSchedule()
 }
 
 // Event handler: ShiftGroupedSchedule emits this after completing an assignment in its own modal.
@@ -1850,6 +1893,16 @@ const clearEmployeeAssignmentsForDate = async (employeeId: string, date: string)
 
 const saveCallIn = async () => {
   if (!callInForm.value.employee_id || !callInForm.value.pto_date) return
+
+  // Persist any in-progress edits FIRST. Recording a call-in used to refetch the
+  // day and rebuild the grid, silently discarding everything the user hadn't
+  // saved yet. Folding the save into this action keeps it one click.
+  const hadPendingEdits = hasUnsavedChanges.value
+  if (!(await saveIfDirty())) {
+    showNotification('Could not save your changes, so the call-in was not recorded. Nothing was lost.', 'error')
+    return
+  }
+
   const prior = resolvedCallInRecord.value
   if (prior?.id) {
     const removed = await deletePTO(prior.id)
@@ -1870,15 +1923,25 @@ const saveCallIn = async () => {
     // A call-in clears that employee's entire day — wipe all their assignments.
     const cleared = await clearEmployeeAssignmentsForDate(callInForm.value.employee_id, callInForm.value.pto_date)
     await fetchPTOForDate(scheduleDate.value)
-    // Refresh the grid only if the call-in is for the day currently in view.
+    // Only that one employee is affected, so clear their row in place rather than
+    // rebuilding the whole grid from the server. Everyone else's rows are left
+    // exactly as they are on screen.
     if (toYMD(callInForm.value.pto_date) === toYMD(scheduleDate.value)) {
       await fetchScheduleForDate(scheduleDate.value)
+      scheduleAssignmentsData.value = {
+        ...scheduleAssignmentsData.value,
+        [callInForm.value.employee_id]: {},
+      }
+      markGridSaved()
       await nextTick()
-      initializeScheduleData()
+      syncMeterBookings()
     }
     showCallInModal.value = false
     showNotification(
-      cleared > 0 ? `Call-in saved. Cleared ${cleared} assignment(s).` : 'Call-in saved.',
+      [
+        hadPendingEdits ? 'Your changes were saved.' : null,
+        cleared > 0 ? `Call-in saved and ${cleared} assignment(s) cleared.` : 'Call-in saved.',
+      ].filter(Boolean).join(' '),
       'success'
     )
   } else {
@@ -1894,12 +1957,26 @@ const closeCallInModal = () => {
 const handleClearEmployee = async (employee: any) => {
   if (!employee?.id) return
   const name = `${employee.last_name || ''}, ${employee.first_name || ''}`.replace(/^,\s*/, '')
+
+  // Same hazard as the call-in: this used to rebuild the grid and discard
+  // unsaved work for everyone else. Save first, then clear just this row.
+  const hadPendingEdits = hasUnsavedChanges.value
+  if (!(await saveIfDirty())) {
+    showNotification(`Could not save your changes, so ${name} was not cleared. Nothing was lost.`, 'error')
+    return
+  }
+
   const cleared = await clearEmployeeAssignmentsForDate(employee.id, scheduleDate.value)
   await fetchScheduleForDate(scheduleDate.value)
+  scheduleAssignmentsData.value = { ...scheduleAssignmentsData.value, [employee.id]: {} }
+  markGridSaved()
   await nextTick()
-  initializeScheduleData()
+  syncMeterBookings()
   showNotification(
-    cleared > 0 ? `Cleared ${cleared} assignment(s) for ${name}.` : `${name} had no assignments to clear.`,
+    [
+      hadPendingEdits ? 'Your changes were saved.' : null,
+      cleared > 0 ? `Cleared ${cleared} assignment(s) for ${name}.` : `${name} had no assignments to clear.`,
+    ].filter(Boolean).join(' '),
     'success'
   )
 }
@@ -2344,23 +2421,35 @@ watch(scheduleAssignmentsData, () => {
   syncMeterBookings()
 }, { deep: true })
 
-// Prevent accidental navigation during save
+// Warn before leaving with work at risk — either a save in flight, or edits that
+// were never saved. The old guard only covered the in-flight case, so closing the
+// tab mid-edit lost everything without a word.
+//
+// Note the handler is a named reference: the previous version passed a fresh
+// arrow function to both add and remove, so removeEventListener never matched and
+// the listener leaked on every visit to this page.
+const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+  if (isSaving.value) {
+    e.preventDefault()
+    e.returnValue = 'Schedule is currently saving. Are you sure you want to leave?'
+  } else if (hasUnsavedChanges.value) {
+    e.preventDefault()
+    e.returnValue = 'You have unsaved schedule changes. Leave without saving?'
+  }
+}
+
 onMounted(() => {
-  window.addEventListener('beforeunload', (e) => {
-    if (isSaving.value) {
-      e.preventDefault()
-      e.returnValue = 'Schedule is currently saving. Are you sure you want to leave?'
-    }
-  })
+  window.addEventListener('beforeunload', handleBeforeUnload)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('beforeunload', (e) => {
-    if (isSaving.value) {
-      e.preventDefault()
-      e.returnValue = 'Schedule is currently saving. Are you sure you want to leave?'
-    }
-  })
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
+
+// In-app navigation (Back to Home, date change) bypasses beforeunload entirely.
+onBeforeRouteLeave(() => {
+  if (!hasUnsavedChanges.value) return true
+  return window.confirm('You have unsaved schedule changes. Leave without saving?')
 })
 
 </script>

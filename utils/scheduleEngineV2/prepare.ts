@@ -121,6 +121,54 @@ export function prepare(input: PrepareInput): PreparedInput {
     for (let s = start; s < start + 4 && s < SLOTS_PER_DAY; s++) arr[s] = Number(t.headcount) || 0
   }
 
+  // Clip demand to the hours the building is actually open.
+  //
+  // Targets are stored hourly and are not cross-checked against shifts, so the grid
+  // can ask for people at times nobody works. Two ways that happens, both measured:
+  //   - a stale row survives a shift change (a 06:00 startup target after the 6am
+  //     shift was retired), and
+  //   - an hourly row over-extends a real target (20:00 covers 20:00-21:00, but the
+  //     last shift ends 20:30, so the final half-hour is unstaffable by definition).
+  // Chasing either produces permanent phantom gaps the floor can do nothing about.
+  // Demand outside the shift envelope is dropped and reported, not silently ignored.
+  const openSlots = new Uint8Array(SLOTS_PER_DAY)
+  let anyShift = false
+  for (const sh of input.shifts) {
+    if (sh?.is_active === false) continue
+    const s = toMinutes(sh?.start_time)
+    let e = toMinutes(sh?.end_time)
+    if (s == null || e == null) continue
+    if (e <= s) e += 1440
+    fillSlots(openSlots, s, e, 1)
+    anyShift = true
+  }
+  if (anyShift) {
+    // Only a target whose WHOLE hour falls outside the envelope is worth reporting:
+    // that is a stale row someone needs to delete. A target hour that merely runs
+    // past the last shift (20:00 covering 20:00-21:00 when shifts end 20:30) is a
+    // side effect of storing targets hourly, is not fixable from the grid, and would
+    // otherwise warn on every single build until the team lead stopped reading them.
+    const staleHours = new Map<string, number>()
+    for (const [fnId, arr] of demandByFn) {
+      for (let h = 0; h < SLOTS_PER_DAY; h += 4) {
+        let clipped = 0
+        let anyOpen = false
+        for (let s = h; s < h + 4 && s < SLOTS_PER_DAY; s++) {
+          if (openSlots[s] === 1) { anyOpen = true; continue }
+          clipped += arr[s]
+          arr[s] = 0
+        }
+        if (clipped > 0 && !anyOpen) staleHours.set(fnId, (staleHours.get(fnId) ?? 0) + clipped)
+      }
+    }
+    for (const [fnId, units] of staleHours) {
+      const name = input.jobFunctions.find((j: any) => j.id === fnId)?.name ?? 'a job function'
+      warnings.push(
+        `${name} has staffing targets set for hours no shift covers — ${units / 4} person-hour(s) were ignored because nobody is on the clock then. Clear those cells in the Target Hours grid.`
+      )
+    }
+  }
+
   const functions: EngineFunction[] = activeFunctions.map((j: any) => ({
     id: j.id,
     name: j.name,
@@ -130,6 +178,10 @@ export function prepare(input: PrepareInput): PreparedInput {
     isOverflow: !!j.surplus_overflow,
     excludeFromTargets: !!j.exclude_from_targets,
     scarcity: 1,
+    // 3 = normal, so a function with no explicit priority behaves as before.
+    priority: Number(j.staffing_priority) >= 1 && Number(j.staffing_priority) <= 5
+      ? Number(j.staffing_priority)
+      : 3,
   }))
 
   // ---- employees + availability grid ---------------------------------------

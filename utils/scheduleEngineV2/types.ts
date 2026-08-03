@@ -12,9 +12,30 @@ export const SLOT_MINUTES = 15
 /** 24h / 15min. Overnight shifts wrap via modulo. */
 export const SLOTS_PER_DAY = 96
 
-/** Minimum length the DB will accept (migration 017 lowered this from 30). */
-export const MIN_ASSIGNMENT_MINUTES = 15
-/** Below this, a block is considered "short" and pays a cost penalty. */
+/**
+ * Shortest block the ENGINE will ever produce.
+ *
+ * Deliberately 30, not 15. The engine *can* work at quarter-hour resolution, and
+ * briefly did — but auto-generated 15-minute assignments turned out to create more
+ * hand-correction than they saved, so the builder now only ever emits half-hour
+ * blocks or longer.
+ */
+export const ENGINE_MIN_BLOCK_MINUTES = 30
+
+/**
+ * Shortest block the DATABASE accepts (migration 017).
+ *
+ * Deliberately LOWER than the engine floor: a supervisor can still make 15-minute
+ * tweaks by hand after a build. Do not "tidy" this up to match the engine — the
+ * gap between the two numbers is the feature.
+ */
+export const DB_MIN_BLOCK_MINUTES = 15
+
+/**
+ * Below this a block is "short" and pays a cost penalty. Currently equal to the
+ * engine floor, so the penalty is inert; it stays wired up so shorter blocks can
+ * be re-enabled by lowering ENGINE_MIN_BLOCK_MINUTES alone.
+ */
 export const PREFERRED_MIN_MINUTES = 30
 
 export interface EngineEmployee {
@@ -44,6 +65,11 @@ export interface EngineFunction {
   excludeFromTargets: boolean
   /** trainedSupply / totalDemand — lower means harder to staff. */
   scarcity: number
+  /**
+   * Business priority: 1 = fill first, 5 = drop first (default 3).
+   * Leads the fill order; scarcity breaks ties within a priority band.
+   */
+  priority: number
 }
 
 export interface EngineAssignment {
@@ -127,6 +153,12 @@ export interface EngineWeights {
   /** Reward scaled by how scarce the function's trained supply is. */
   scarce: number
   /**
+   * Reward per priority step above the lowest. Large enough that a high-priority
+   * function outbids a low-priority one for the same person, but not so large it
+   * overrides genuine unmet demand.
+   */
+  priority: number
+  /**
    * Cost per slot consumed that was ALREADY covered. Without this the engine
    * happily spends a whole shift on a function that only needed the first hour,
    * burning labour that a later, tighter hour then can't get.
@@ -151,4 +183,8 @@ export const DEFAULT_WEIGHTS: EngineWeights = {
   scarce: 30,
   waste: 25,
   flexibility: 3,
+  priority: 45,
 }
+
+/** Lowest (worst) priority value; used to convert priority into a reward. */
+export const LOWEST_PRIORITY = 5
