@@ -40,14 +40,14 @@ Display User (Read-Only)
 **Key Characteristics:**
 - Highest level of access
 - Can manage all teams and users
-- Can see and modify data across all teams
+- Can see and modify any team's data by switching their current team (one team in view at a time)
 - Can assign roles to other users
 - Can create and manage teams
 
 **Database Flag**: `is_super_admin = true` in `user_profiles`
 
 **Permissions:**
-- ✅ View and manage data from ALL teams
+- ✅ View and manage data for **any** team — one at a time, by switching their current team in Settings (user and team management stay install-wide)
 - ✅ Create and manage users across all teams
 - ✅ Assign users to any team
 - ✅ Create and delete teams
@@ -87,7 +87,7 @@ Display User (Read-Only)
 - ✅ View users in their own team
 - ✅ View and manage all data for their own team
 - ✅ Approve/reject PTO and schedule requests for their team
-- ✅ Change their own team assignment (via Settings page)
+- ❌ **Cannot** change their own team assignment — super admin only. An admin who could reassign themselves could walk into another site's data at will, which defeats team isolation entirely.
 
 **Note**: Admin role can **view** team users, but **cannot create new users or reset passwords** — these operations require Super Admin privileges and are enforced by `requireSuperAdmin()` in server API routes (`server/utils/authorize.ts`).
 
@@ -97,7 +97,7 @@ Display User (Read-Only)
 - ❌ Cannot reset user passwords (requires Super Admin)
 - ❌ Cannot activate/deactivate users (requires Super Admin)
 - ❌ Cannot create or delete teams
-- ❌ Cannot assign users to teams (requires Super Admin)
+- ❌ Cannot assign users to teams, including themselves (requires Super Admin)
 - ❌ Cannot grant Admin or Super Admin roles
 - ❌ Cannot access User Management section (Super Admin only)
 - ❌ Cannot access Team Management section
@@ -202,7 +202,7 @@ Display User (Read-Only)
 | **View Historical Data** | ✅ | ✅ | ✅ | ❌ |
 | **Export Data** | ✅ | ✅ | ✅ | ❌ |
 
-*Display users can view all teams if `team_id = NULL`, or only their assigned team if `team_id` is set.
+*Every account must belong to a team — display users included. A team-less account is refused all data reads and writes (403); it can still sign in and list teams so a super admin can assign one. The create-user form requires a team, and `POST /api/admin/users/create` rejects a request without one.
 
 ---
 
@@ -213,7 +213,7 @@ Display User (Read-Only)
 1. **Data Filtering**: All API queries apply `WHERE team_id = $user.team_id` via `getTeamFilter()` in `server/utils/authorize.ts`
 2. **Server-side enforcement**: JWT middleware (`server/middleware/auth.ts`) populates `event.context.user`; API routes read `user.team_id` when filtering/writing data
 3. **Automatic Assignment**: New records receive the user's `team_id` on insert
-4. **Super Admin bypass**: `getTeamFilter()` returns `null` for super admins, which skips the team filter
+4. **Super Admin scoping** (changed Aug 2026): `getTeamFilter()` returns the caller's own `team_id` for **everyone, super admins included**. A super admin views another team by switching team in Settings → Change Team, which re-issues the session token so the change applies at once. Only genuinely install-wide screens (user management) opt out, via the explicit `readsAllTeams()` helper.
 
 > Note: The repo contains legacy `rls-policies.sql` from an earlier Supabase-based prototype. The current production enforcement is **API-level**, not database-level RLS.
 
@@ -236,7 +236,7 @@ Display User (Read-Only)
 
 **Scenario 2: Super Admin**
 - Not assigned to any specific team
-- Can see all teams' data
+- Can reach any team's data by switching team (one at a time)
 - Can create records for any team (by specifying `team_id`)
 - Can manage users across all teams
 
@@ -393,7 +393,7 @@ WHERE id = 'user-uuid-here';
 
 - **API-level enforcement**: Every server route applies `team_id` filter via `getTeamFilter(user)` in `server/utils/authorize.ts`
 - **JWT-backed**: `team_id` comes from the signed JWT payload, not the client — cannot be spoofed
-- **Super Admin override**: Can see all teams (by design)
+- **Super Admin scoping**: sees one team at a time — their current team — and switches between them in Settings. User and team management remain install-wide via `readsAllTeams()`.
 
 ### Display User Security
 

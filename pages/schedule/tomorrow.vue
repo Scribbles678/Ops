@@ -7,7 +7,16 @@
           <h1 class="text-4xl font-bold text-gray-800">Create Schedule</h1>
           <p class="text-gray-600 mt-2">Choose a date and create a schedule</p>
         </div>
-        <div class="flex space-x-4">
+        <div class="flex items-center space-x-4">
+          <NuxtLink
+            to="/pto-calendar"
+            class="inline-flex items-center px-5 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition"
+          >
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            PTO Calendar
+          </NuxtLink>
           <NuxtLink to="/" class="btn-secondary">
             ← Back to Home
           </NuxtLink>
@@ -69,8 +78,13 @@
           </div>
         </div>
 
-        <!-- AI Generated Schedule -->
-        <div class="card hover:shadow-lg transition-all cursor-pointer" @click="openBuildReview" :class="{ 'opacity-50 cursor-not-allowed': generating }">
+        <!-- Automated Schedule Builder. The only engine since V1 was retired
+             (Aug 2026) after the team lead confirmed this one schedules better. -->
+        <div
+          class="card hover:shadow-lg transition-all cursor-pointer"
+          @click="generateSchedule"
+          :class="{ 'opacity-50 cursor-not-allowed': generating }"
+        >
           <div class="text-center py-8">
             <div class="bg-purple-100 rounded-full p-6 mb-4 mx-auto w-20 h-20 flex items-center justify-center">
               <svg v-if="!generating" class="w-10 h-10 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -84,44 +98,13 @@
               </div>
             </div>
             <h3 class="text-xl font-bold text-gray-800 mb-2">
-              {{ generating ? '⏳ Generating Schedule...' : 'Automated Schedule Builder' }}
+              {{ generating ? '⏳ Generating Schedule…' : 'Automated Schedule Builder' }}
             </h3>
             <p class="text-gray-600">
-              {{ generating ? 'Please wait while we create your optimized schedule...' : 'Generate an optimized schedule based on staffing targets, training, and required assignments' }}
+              {{ generating
+                ? 'Please wait while we create your optimized schedule…'
+                : 'Generate an optimized schedule based on staffing targets, training, and required assignments' }}
             </p>
-          </div>
-        </div>
-
-        <!-- Automated Schedule Builder V2 (Beta) — separate engine, V1 untouched -->
-        <div
-          class="card hover:shadow-lg transition-all cursor-pointer relative border-2 border-dashed border-indigo-300"
-          @click="generateV2ScheduleAndApply"
-          :class="{ 'opacity-50 cursor-not-allowed': generatingV2 }"
-        >
-          <span class="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide bg-indigo-100 text-indigo-700">
-            BETA
-          </span>
-          <div class="text-center py-8">
-            <div class="bg-indigo-100 rounded-full p-6 mb-4 mx-auto w-20 h-20 flex items-center justify-center">
-              <svg v-if="!generatingV2" class="w-10 h-10 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              <div v-else class="w-10 h-10 text-indigo-600">
-                <svg class="animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              </div>
-            </div>
-            <h3 class="text-xl font-bold text-gray-800 mb-2">
-              {{ generatingV2 ? '⏳ Generating…' : 'Automated Schedule Builder V2' }}
-            </h3>
-            <p class="text-gray-600">
-              {{ generatingV2
-                ? 'Running the 15-minute engine…'
-                : 'Experimental schedule engine.' }}
-            </p>
-            <p class="text-xs text-indigo-600 mt-2 italic">Beta — compare against V1 before relying on it</p>
           </div>
         </div>
 
@@ -137,29 +120,22 @@
             <p class="text-gray-600">Create {{ formatDate(selectedDate || '') }} schedule manually from scratch</p>
           </div>
         </div>
-      </div>
 
-      <!-- Business Rules shortcut -->
-      <div class="flex justify-center gap-4 mt-6">
-        <NuxtLink
-          to="/admin/business-rules"
-          class="inline-flex items-center px-5 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition"
-        >
-          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>
-          Rules &amp; Targets
-        </NuxtLink>
-        <NuxtLink
-          to="/pto-calendar"
-          class="inline-flex items-center px-5 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition"
-        >
-          <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>
-          PTO Calendar
-        </NuxtLink>
+        <!-- Rules & Targets. Amber rather than the blue/purple/green of the three
+             cards above: those create a schedule, this configures what they build
+             against. -->
+        <div class="card hover:shadow-lg transition-all cursor-pointer" @click="goToRulesAndTargets">
+          <div class="text-center py-8">
+            <div class="bg-amber-100 rounded-full p-6 mb-4 mx-auto w-20 h-20 flex items-center justify-center">
+              <svg class="w-10 h-10 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <h3 class="text-xl font-bold text-gray-800 mb-2">Rules &amp; Targets</h3>
+            <p class="text-gray-600">Set the headcount each job function needs per hour, and pin required assignments</p>
+          </div>
+        </div>
       </div>
 
       <!-- Coverage preview for the selected date. Shows demand vs the people
@@ -169,128 +145,6 @@
         <ScheduleCoveragePreview :date="selectedDate" />
       </div>
 
-      <!-- Build Review Modal -->
-      <div v-if="showBuildReview" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-xl p-6 max-w-lg w-full mx-4 shadow-xl">
-          <!-- Header -->
-          <div class="flex items-center justify-between mb-1">
-            <h3 class="text-xl font-bold text-gray-800">Build Schedule</h3>
-            <button @click="showBuildReview = false" class="text-gray-400 hover:text-gray-600">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <p class="text-sm text-gray-500 mb-5">{{ formatDate(selectedDate || '') }}</p>
-
-          <!-- Loading -->
-          <div v-if="buildReviewLoading" class="py-10 text-center text-gray-500">
-            <div class="flex justify-center mb-3">
-              <svg class="animate-spin h-8 w-8 text-purple-500" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            </div>
-            <p class="text-sm">Checking schedule inputs…</p>
-          </div>
-
-          <!-- Preflight checklist -->
-          <div v-else class="space-y-2.5 mb-5">
-
-            <!-- Staffing Targets -->
-            <div class="flex items-center justify-between p-3.5 rounded-lg"
-              :class="reviewData.staffingFunctionsCount === 0 ? 'bg-red-50' : 'bg-green-50'">
-              <div class="flex items-center space-x-3">
-                <span class="text-xl leading-none">{{ reviewData.staffingFunctionsCount === 0 ? '🔴' : '✅' }}</span>
-                <div>
-                  <p class="text-sm font-semibold text-gray-800">Staffing Targets</p>
-                  <p class="text-xs text-gray-500 mt-0.5">
-                    {{ reviewData.staffingFunctionsCount === 0
-                      ? 'No targets configured — schedule cannot be built'
-                      : `${reviewData.staffingFunctionsCount} job function${reviewData.staffingFunctionsCount === 1 ? '' : 's'} with headcount targets` }}
-                  </p>
-                </div>
-              </div>
-              <NuxtLink to="/admin/business-rules" @click="showBuildReview = false"
-                class="text-xs text-blue-600 hover:underline font-medium shrink-0 ml-3">Edit →</NuxtLink>
-            </div>
-
-            <!-- Required Assignments -->
-            <div class="flex items-center justify-between p-3.5 rounded-lg"
-              :class="reviewData.requiredCount === 0 ? 'bg-yellow-50' : 'bg-green-50'">
-              <div class="flex items-center space-x-3">
-                <span class="text-xl leading-none">{{ reviewData.requiredCount === 0 ? '⚠️' : '✅' }}</span>
-                <div>
-                  <p class="text-sm font-semibold text-gray-800">Required Assignments</p>
-                  <p class="text-xs text-gray-500 mt-0.5">
-                    {{ reviewData.requiredCount === 0
-                      ? 'None pinned — all roles filled by demand only'
-                      : `${reviewData.requiredCount} pinned assignment${reviewData.requiredCount === 1 ? '' : 's'} (e.g. Coordinator, TL)` }}
-                  </p>
-                </div>
-              </div>
-              <NuxtLink to="/admin/business-rules" @click="showBuildReview = false"
-                class="text-xs text-blue-600 hover:underline font-medium shrink-0 ml-3">Edit →</NuxtLink>
-            </div>
-
-            <!-- PTO -->
-            <div class="flex items-center justify-between p-3.5 rounded-lg"
-              :class="reviewData.ptoCount === 0 ? 'bg-gray-50' : 'bg-blue-50'">
-              <div class="flex items-center space-x-3">
-                <span class="text-xl leading-none">{{ reviewData.ptoCount === 0 ? '✅' : 'ℹ️' }}</span>
-                <div>
-                  <p class="text-sm font-semibold text-gray-800">PTO</p>
-                  <p class="text-xs text-gray-500 mt-0.5">
-                    {{ reviewData.ptoCount === 0
-                      ? 'No employees on PTO this day'
-                      : `${reviewData.ptoCount} employee${reviewData.ptoCount === 1 ? '' : 's'} on PTO — excluded or adjusted automatically` }}
-                  </p>
-                </div>
-              </div>
-              <NuxtLink to="/pto-calendar" @click="showBuildReview = false"
-                class="text-xs text-blue-600 hover:underline font-medium shrink-0 ml-3">View →</NuxtLink>
-            </div>
-
-            <!-- Active Employees -->
-            <div class="flex items-center justify-between p-3.5 rounded-lg"
-              :class="reviewData.activeEmployeesCount === 0 ? 'bg-red-50' : 'bg-green-50'">
-              <div class="flex items-center space-x-3">
-                <span class="text-xl leading-none">{{ reviewData.activeEmployeesCount === 0 ? '🔴' : '✅' }}</span>
-                <div>
-                  <p class="text-sm font-semibold text-gray-800">Active Employees</p>
-                  <p class="text-xs text-gray-500 mt-0.5">
-                    {{ reviewData.activeEmployeesCount === 0
-                      ? 'No active employees found — schedule cannot be built'
-                      : `${reviewData.activeEmployeesCount} active employee${reviewData.activeEmployeesCount === 1 ? '' : 's'} will be considered` }}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-          </div>
-
-          <!-- Blocker message -->
-          <div v-if="!buildReviewLoading && buildReviewHasBlockers"
-            class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <p class="text-sm text-red-700">Resolve the issues above before building.</p>
-          </div>
-
-          <!-- Actions -->
-          <div class="flex justify-end space-x-3 pt-1">
-            <button @click="showBuildReview = false"
-              class="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
-              Cancel
-            </button>
-            <button
-              @click="confirmAndBuild"
-              :disabled="buildReviewLoading || buildReviewHasBlockers"
-              class="px-5 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
-            >
-              Build Schedule →
-            </button>
-          </div>
-        </div>
-      </div>
 
       <!-- Loading Modal -->
       <div v-if="generating" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -355,26 +209,60 @@
             </button>
           </div>
           
-          <!-- Success with gaps -->
-          <div v-if="scheduleGaps.length > 0" class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <p class="text-yellow-800 font-medium">
-              Schedule generated, but some staffing targets could not be met.
-            </p>
-          </div>
-
-          <!-- Success with warnings only -->
-          <div v-else-if="scheduleWarnings.length > 0 && !scheduleWarnings.some(w => w.includes('Error') || w.includes('No schedule') || w.includes('not configured'))" class="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
-            <p class="text-green-800 font-medium">
-              Schedule generated successfully with some notes.
-            </p>
-          </div>
-
-          <!-- Errors -->
-          <div v-else-if="scheduleWarnings.length > 0" class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <!-- Failure. Checked FIRST so a real failure is never masked, and keyed
+               off whether a schedule was actually produced rather than sniffing the
+               warning text: V2's own summary says "No schedule can fill these",
+               which used to trip the failure test and paint a perfect build red. -->
+          <div v-if="buildFailed" class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
             <p class="text-red-800 font-medium">
               Schedule could not be generated. Please review the issues below.
             </p>
           </div>
+
+          <!-- Success with gaps -->
+          <div v-else class="mb-5 p-4 rounded-lg border"
+            :class="scheduleGaps.length > 0 ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'">
+            <p class="font-semibold" :class="scheduleGaps.length > 0 ? 'text-amber-900' : 'text-green-900'">
+              Schedule created
+            </p>
+            <p class="text-sm mt-0.5" :class="scheduleGaps.length > 0 ? 'text-amber-800' : 'text-green-800'">
+              {{ resultSummary }}
+            </p>
+          </div>
+
+          <!-- What a person has to go and fix. First, and the only thing styled to
+               demand attention: everything else here is either good news or context.
+               These come from the engines as a separate `actions` list, not from
+               pattern-matching the notes. -->
+          <div v-if="resultActions.length > 0" class="mb-5">
+            <h4 class="text-base font-semibold text-gray-800 mb-2">
+              {{ resultActions.length }} thing{{ resultActions.length === 1 ? '' : 's' }} to fix
+            </h4>
+            <div class="space-y-2">
+              <div
+                v-for="(action, index) in resultActions"
+                :key="index"
+                class="flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-lg"
+              >
+                <span class="text-amber-500 mt-px shrink-0">&#9888;</span>
+                <p class="text-sm text-amber-900">{{ action }}</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Everything below is detail, hidden until asked for. On a normal day
+               it is all expected output, and showing it by default made a healthy
+               build look like a list of problems. -->
+          <button
+            v-if="hasResultDetails"
+            @click="showResultDetails = !showResultDetails"
+            class="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-3"
+          >
+            <span class="transition-transform" :class="showResultDetails ? 'rotate-90' : ''">&#9656;</span>
+            {{ showResultDetails ? 'Hide details' : 'Show details' }}
+          </button>
+
+          <div v-if="showResultDetails">
 
           <!-- Staffing Gaps Table -->
           <div v-if="scheduleGaps.length > 0" class="mb-6">
@@ -401,10 +289,10 @@
 
           <!-- Over-target (surplus) summary -->
           <div v-if="overTargetByFunction.length > 0" class="mb-6">
-            <h4 class="text-lg font-semibold text-gray-700 mb-3">Staffed Above Target (surplus deployed):</h4>
+            <h4 class="text-base font-semibold text-gray-800 mb-1">Extra coverage</h4>
             <p class="text-xs text-gray-500 mb-2">
-              You have more available staff than your targets require, so extra workers were assigned to keep everyone working.
-              These functions are staffed above their hourly targets.
+              More staff were available than your targets asked for, so the spare people were put to work here.
+              This is normal, not a problem.
             </p>
             <div class="flex flex-wrap gap-2">
               <span
@@ -418,24 +306,26 @@
             </div>
           </div>
 
-          <!-- Other warnings -->
+          <!-- Informational notes. Grey, not yellow: nothing here needs doing, and
+               colouring them as warnings is what made a clean build read as a list
+               of problems. -->
           <div v-if="scheduleWarnings.length > 0" class="mb-6">
-            <h4 class="text-lg font-semibold text-gray-700 mb-3">Details:</h4>
+            <h4 class="text-base font-semibold text-gray-800 mb-2">Notes</h4>
             <div class="space-y-2">
               <div
                 v-for="(warning, index) in scheduleWarnings"
                 :key="index"
-                :class="warning.includes('Error') || warning.includes('No schedule') || warning.includes('not configured')
+                :class="buildFailed
                   ? 'p-3 bg-red-50 border border-red-200 rounded-lg'
-                  : 'p-3 bg-yellow-50 border border-yellow-200 rounded-lg'"
+                  : 'p-3 bg-gray-50 border border-gray-200 rounded-lg'"
               >
-                <p :class="warning.includes('Error') || warning.includes('No schedule') || warning.includes('not configured')
-                  ? 'text-sm text-red-800'
-                  : 'text-sm text-yellow-800'"
+                <p :class="buildFailed ? 'text-sm text-red-800' : 'text-sm text-gray-600'"
                 >{{ warning }}</p>
               </div>
             </div>
           </div>
+
+          </div><!-- /details -->
 
           <div class="flex justify-end">
             <button
@@ -453,16 +343,9 @@
 </template>
 
 <script setup lang="ts">
-import { useAIScheduleBuilder } from '~/composables/useAIScheduleBuilder'
-
 const { copySchedule } = useSchedule()
 const { fetchJobFunctions } = useJobFunctions()
-const { generateAISchedule: generateAIScheduleFromBuilder, applyAISchedule } = useAIScheduleBuilder()
 const { generateV2Schedule, applyV2Schedule } = useScheduleBuilderV2()
-const { fetchTargets } = useStaffingTargets()
-const { fetchPreferredAssignments } = usePreferredAssignments()
-const { fetchPTOForDate } = usePTO()
-const { fetchEmployees } = useEmployees()
 
 // Tomorrow's date
 const tomorrowDate = computed(() => {
@@ -498,9 +381,31 @@ const isWeekend = computed(() => {
 
 // AI Generation state
 const generating = ref(false)
-const generatingV2 = ref(false)
 const showWarningsModal = ref(false)
 const scheduleWarnings = ref<string[]>([])
+// True only when a build produced no schedule at all. The banner used to infer
+// this from the warning text, which broke as soon as a warning contained the
+// words "No schedule".
+const buildFailed = ref(false)
+// Things a person must go and fix, supplied by the engines as their own list.
+const resultActions = ref<string[]>([])
+// One plain-language line under the headline, e.g.
+// "204 assignments · everyone has work · all reachable targets met".
+const resultSummary = ref('')
+const showResultDetails = ref(false)
+const hasResultDetails = computed(
+  () => scheduleGaps.value.length > 0 || overTargetByFunction.value.length > 0 || scheduleWarnings.value.length > 0
+)
+
+/** Build the headline summary from counts, so a zero never gets its own line. */
+const summarise = (assignmentCount: number, noWork: number | null, gapCount: number): string => {
+  const parts = [`${assignmentCount} assignment${assignmentCount === 1 ? '' : 's'}`]
+  if (noWork != null) {
+    parts.push(noWork === 0 ? 'everyone has work' : `${noWork} ${noWork === 1 ? 'person has' : 'people have'} no work`)
+  }
+  parts.push(gapCount === 0 ? 'all reachable targets met' : `${gapCount} target${gapCount === 1 ? '' : 's'} still short`)
+  return parts.join(' · ')
+}
 const scheduleGaps = ref<{ job_function_name: string; hour: string; shortfall: number }[]>([])
 const scheduleOverTarget = ref<{ job_function_name: string; hour: string; surplus: number }[]>([])
 
@@ -513,19 +418,6 @@ const overTargetByFunction = computed(() => {
   return Array.from(map, ([job_function_name, surplus]) => ({ job_function_name, surplus }))
     .sort((a, b) => b.surplus - a.surplus)
 })
-
-// Build Review state
-const showBuildReview = ref(false)
-const buildReviewLoading = ref(false)
-const reviewData = ref({
-  staffingFunctionsCount: 0,
-  requiredCount: 0,
-  ptoCount: 0,
-  activeEmployeesCount: 0,
-})
-const buildReviewHasBlockers = computed(
-  () => reviewData.value.staffingFunctionsCount === 0 || reviewData.value.activeEmployeesCount === 0
-)
 
 // Notification modal state
 const showNotificationModal = ref(false)
@@ -564,43 +456,6 @@ const formatDate = (dateString: string) => {
   })
 }
 
-const openBuildReview = async () => {
-  showBuildReview.value = true
-  buildReviewLoading.value = true
-  reviewData.value = { staffingFunctionsCount: 0, requiredCount: 0, ptoCount: 0, activeEmployeesCount: 0 }
-
-  try {
-    const [targets, assignments, ptoDays, employees] = await Promise.all([
-      fetchTargets(),
-      fetchPreferredAssignments(),
-      fetchPTOForDate(selectedDate.value || ''),
-      fetchEmployees(true),
-    ])
-
-    const targetsList = Array.isArray(targets) ? targets : []
-    const functionsWithTargets = new Set(
-      targetsList.filter((t: any) => (t.headcount ?? 0) > 0).map((t: any) => t.job_function_id)
-    )
-    reviewData.value.staffingFunctionsCount = functionsWithTargets.size
-
-    const assignmentsList = Array.isArray(assignments) ? assignments : []
-    reviewData.value.requiredCount = assignmentsList.filter((a: any) => a.is_required).length
-
-    reviewData.value.ptoCount = Array.isArray(ptoDays) ? ptoDays.length : 0
-
-    reviewData.value.activeEmployeesCount = Array.isArray(employees) ? employees.length : 0
-  } catch (e) {
-    console.error('Error loading build review data:', e)
-  } finally {
-    buildReviewLoading.value = false
-  }
-}
-
-const confirmAndBuild = () => {
-  showBuildReview.value = false
-  generateAISchedule()
-}
-
 const copyTodaySchedule = async () => {
   try {
     const today = new Date().toISOString().split('T')[0]
@@ -621,82 +476,46 @@ const copyTodaySchedule = async () => {
   }
 }
 
-const generateAISchedule = async () => {
-    try {
-      generating.value = true
-      scheduleWarnings.value = []
-      scheduleGaps.value = []
-      scheduleOverTarget.value = []
-
-      const { schedule, warnings, errors, gaps, overTarget } = await generateAIScheduleFromBuilder(selectedDate.value || '')
-
-      if (schedule.length > 0) {
-        await applyAISchedule(schedule, selectedDate.value || '')
-
-        scheduleWarnings.value = warnings
-        scheduleGaps.value = gaps || []
-        scheduleOverTarget.value = overTarget || []
-
-        if (warnings.length > 0 || scheduleGaps.value.length > 0 || scheduleOverTarget.value.length > 0) {
-          showWarningsModal.value = true
-        } else {
-          showNotification(`Schedule generated successfully! Created ${schedule.length} assignments for ${formatDate(selectedDate.value || '')}. Redirecting...`, 'success')
-          setTimeout(() => {
-            navigateTo(`/schedule/${selectedDate.value || ''}`)
-          }, 500)
-        }
-      } else {
-        scheduleWarnings.value = errors
-        showWarningsModal.value = true
-      }
-    } catch (error) {
-      console.error('Error generating schedule:', error)
-      showNotification('❌ Error generating schedule.\n\nPlease try again or check the console for details.', 'error')
-    } finally {
-      generating.value = false
-    }
-}
-
-// --- V2 Beta engine -----------------------------------------------------------
-// Runs the separate slot engine. Same review/warnings surface, same transactional
-// apply path. V1 is not involved and is unaffected by anything here.
-const generateV2ScheduleAndApply = async () => {
-  if (generatingV2.value) return
+// The schedule builder. V1 was deleted in Aug 2026; this is the only engine.
+const generateSchedule = async () => {
+  if (generating.value) return
   try {
-    generatingV2.value = true
+    generating.value = true
+    buildFailed.value = false
+    showResultDetails.value = false
+    resultActions.value = []
+    resultSummary.value = ''
     scheduleWarnings.value = []
     scheduleGaps.value = []
     scheduleOverTarget.value = []
 
-    const { schedule, warnings, errors, gaps, overTarget, structuralSummary, stats } =
+    const { schedule, warnings, actions, errors, gaps, overTarget, structuralSummary, stats } =
       await generateV2Schedule(selectedDate.value || '')
 
     if (schedule.length > 0) {
       await applyV2Schedule(schedule, selectedDate.value || '')
 
+      // The headline carries the counts, so they are no longer repeated as notes.
       // Only genuinely actionable gaps reach the table; the unfixable windows
       // (whole shift on break, after-hours targets) are summarised in one line
       // rather than listed as dozens of rows.
-      scheduleWarnings.value = [
-        `V2 Beta — ${schedule.length} assignments, ${stats?.employeesWithNoWork ?? 0} employees with no work.`,
-        ...(gaps?.length
-          ? [`${gaps.length} shortfall${gaps.length === 1 ? '' : 's'} below could be worth a look.`]
-          : ['Every staffing target that could be met, was met.']),
-        ...(structuralSummary || []),
-        ...warnings,
-      ]
+      resultSummary.value = summarise(schedule.length, stats?.employeesWithNoWork ?? null, gaps?.length ?? 0)
+      resultActions.value = actions || []
+      scheduleWarnings.value = [...(structuralSummary || []), ...warnings]
       scheduleGaps.value = gaps || []
       scheduleOverTarget.value = overTarget || []
       showWarningsModal.value = true
     } else {
-      scheduleWarnings.value = errors.length ? errors : ['V2 produced no assignments.']
+      buildFailed.value = true
+      scheduleWarnings.value = errors.length ? errors : ['The builder produced no assignments.']
+      resultSummary.value = ''
       showWarningsModal.value = true
     }
   } catch (error: any) {
-    console.error('Error generating V2 schedule:', error)
-    showNotification(`❌ V2 Beta error: ${error?.message || 'unknown'}`, 'error')
+    console.error('Error generating schedule:', error)
+    showNotification(`❌ Error generating schedule: ${error?.message || 'unknown'}`, 'error')
   } finally {
-    generatingV2.value = false
+    generating.value = false
   }
 }
 
@@ -704,6 +523,10 @@ const closeWarningsModal = () => {
   showWarningsModal.value = false
   // Navigate to schedule view after closing modal
   navigateTo(`/schedule/${selectedDate.value || ''}`)
+}
+
+const goToRulesAndTargets = () => {
+  navigateTo('/admin/business-rules')
 }
 
 const goToManualSchedule = () => {

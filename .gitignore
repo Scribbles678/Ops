@@ -35,3 +35,5 @@ logs
 *.sw?
 
 scheduling-backup-*.sql
+# Browser smoke-test screenshots (scripts/ui-smoke.mjs)
+scripts/.smoke/

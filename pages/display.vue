@@ -3,14 +3,14 @@
     <!-- Header bar -->
     <div class="sticky top-0 z-30 px-4 py-2 flex items-center justify-between" style="background: rgba(15, 18, 60, 0.9); backdrop-filter: blur(8px); border-bottom: 1px solid rgba(255,255,255,0.08)">
       <div class="flex items-center gap-3">
-        <h1 class="text-sm font-bold tracking-wide text-white/90">Today's Schedule</h1>
-        <span class="text-xs text-white/40">{{ formattedDate }}</span>
+        <h1 class="text-xl font-bold tracking-wide text-white">Today's Schedule</h1>
+        <span class="text-base text-white/60">{{ formattedDate }}</span>
       </div>
       <div class="flex items-center gap-3">
-        <span class="text-[10px] text-white/30 uppercase tracking-widest">{{ lastUpdated ? `Updated ${lastUpdated}` : '' }}</span>
+        <span class="text-xs text-white/50 uppercase tracking-widest">{{ lastUpdated ? `Updated ${lastUpdated}` : '' }}</span>
         <button
           @click="showRequestModal = true"
-          class="px-3 py-1.5 rounded-md text-[11px] text-white font-medium tracking-wide transition-colors"
+          class="px-4 py-2 rounded-md text-sm text-white font-medium tracking-wide transition-colors"
           style="background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.15)"
           onmouseover="this.style.background='rgba(255,255,255,0.2)'"
           onmouseout="this.style.background='rgba(255,255,255,0.12)'"
@@ -43,14 +43,14 @@
           <!-- Shift header -->
           <div class="flex items-center justify-between px-4 py-2" style="background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.06)">
             <div class="flex items-center gap-2">
-              <div class="w-1 h-5 rounded-full bg-blue-400"></div>
-              <h2 class="text-xs font-bold tracking-wide text-white/90 uppercase">{{ shift.name }}</h2>
+              <div class="w-1.5 h-7 rounded-full bg-blue-400"></div>
+              <h2 class="text-lg font-bold tracking-wide text-white uppercase">{{ shift.name }}</h2>
             </div>
             <div class="flex items-center gap-3">
-              <span class="text-[10px] text-white/40 uppercase tracking-widest">
+              <span class="text-xs text-white/60 uppercase tracking-widest">
                 {{ getAssignedCount(shift) }} assigned
               </span>
-              <span class="text-[10px] text-white/25 uppercase tracking-widest">
+              <span class="text-xs text-white/40 uppercase tracking-widest">
                 {{ shift.employees?.length || 0 }} total
               </span>
             </div>
@@ -61,25 +61,25 @@
             <article
               v-for="employee in getAssignedEmployees(shift)"
               :key="employee.id"
-              class="flex items-center gap-4 px-4 py-1.5"
+              class="flex items-center gap-4 px-4 py-1"
             >
-              <div class="w-36 flex-shrink-0 text-[11px] font-semibold uppercase tracking-wider text-white/70">
+              <div class="w-48 flex-shrink-0 text-base font-semibold uppercase tracking-wider text-white/95">
                 {{ employee.last_name }}, {{ employee.first_name }}
               </div>
               <div class="flex flex-wrap gap-1.5 flex-1">
                 <div
                   v-for="item in getEmployeeScheduleItems(employee)"
                   :key="item.id"
-                  class="flex items-center gap-1.5 px-2.5 py-1 rounded-md min-w-[8rem]"
+                  class="flex items-center gap-2 px-3 py-1.5 rounded-md min-w-[10rem]"
                   :style="{
-                    backgroundColor: addAlpha(item.assignment.job_function.color_code, 0.9),
+                    backgroundColor: item.assignment.job_function.color_code,
                     color: getTextColor(item.assignment.job_function.color_code),
                   }"
                 >
-                  <div class="w-0.5 h-5 rounded-full" :style="{ backgroundColor: darkenColor(item.assignment.job_function.color_code) }"></div>
+                  <div class="w-1 h-9 rounded-full flex-shrink-0" :style="{ backgroundColor: darkenColor(item.assignment.job_function.color_code) }"></div>
                   <div class="flex flex-col leading-tight">
-                    <span class="font-bold text-[10px] uppercase tracking-wide">{{ item.assignment.job_function.name }}</span>
-                    <span class="text-[9px] font-medium opacity-75">{{ item.timeRange }}</span>
+                    <span class="font-bold text-base uppercase tracking-wide">{{ item.assignment.job_function.name }}</span>
+                    <span class="text-xs font-semibold opacity-90">{{ item.timeRange }}</span>
                   </div>
                 </div>
               </div>
@@ -89,18 +89,18 @@
           <!-- Unassigned employees (collapsed) -->
           <div v-if="getUnassignedEmployees(shift).length > 0" class="px-4 py-1.5" style="background: rgba(255,255,255,0.02); border-top: 1px solid rgba(255,255,255,0.04)">
             <div class="flex flex-wrap gap-x-4 gap-y-0.5">
-              <span class="text-[10px] text-white/25 uppercase tracking-wider font-medium mr-1">Unassigned:</span>
+              <span class="text-xs text-white/45 uppercase tracking-wider font-medium mr-1">Unassigned:</span>
               <span
                 v-for="emp in getUnassignedEmployees(shift)"
                 :key="emp.id"
-                class="text-[10px] text-white/30"
+                class="text-xs text-white/55"
               >
                 {{ emp.last_name }}, {{ emp.first_name }}
               </span>
             </div>
           </div>
 
-          <div v-if="!shift.employees || shift.employees.length === 0" class="px-4 py-3 text-xs text-white/25 text-center">
+          <div v-if="!shift.employees || shift.employees.length === 0" class="px-4 py-3 text-sm text-white/50 text-center">
             No team members assigned to this shift
           </div>
         </section>
@@ -260,9 +260,16 @@ const shiftsWithAssignments = computed(() => {
       if (isOutAllDay) return
 
       // Clip assignments around PTO rather than dropping them wholesale.
+      //
+      // Deliberately NOT filtered by a.shift_id. Each employee lands in exactly
+      // one group, so filtering could only ever hide work — and it did: a swapped
+      // employee is grouped by the SWAPPED shift while their rows may still carry
+      // the original one (any schedule built before the swap, or copied forward).
+      // The board then showed them present with an empty day while real
+      // assignments sat in the database.
       const employeeAssignmentsList = trimAssignmentsAroundPTO(
         employee.id,
-        (employeeAssignments.get(employee.id) || []).filter((a: any) => a.shift_id === targetShiftId)
+        employeeAssignments.get(employee.id) || []
       )
 
       // Create employee object with assignments + their absence blocks, so the
@@ -447,20 +454,34 @@ const getAssignedCount = (shift: any) => {
   return getAssignedEmployees(shift).length
 }
 
+/** WCAG relative luminance of an #rrggbb colour. NaN for anything unparseable. */
+const relativeLuminance = (hex: string): number => {
+  const h = hex.replace('#', '')
+  const channel = (i: number) => {
+    const v = parseInt(h.substring(i, i + 2), 16) / 255
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+  }
+  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4)
+}
+
+/**
+ * Black or white label text — whichever measurably has more contrast on this chip.
+ *
+ * This used to be the NTSC luma formula (0.299/0.587/0.114) over raw sRGB with a
+ * hard 0.5 cutoff, which is not WCAG relative luminance and picked wrong: X4
+ * (#3B82F6) got white at 3.68:1, below the 4.5:1 floor, where black gives 5.71:1.
+ * Four of the fifteen job-function colours also sat within 0.06 of that cutoff, so
+ * changing a colour by one shade in Job Functions could flip the label unpredictably.
+ *
+ * Comparing the two real contrast ratios has no threshold to sit near, and stays
+ * correct for whatever colour someone picks later.
+ */
 const getTextColor = (hex: string): string => {
-  // Remove # if present
-  hex = hex.replace('#', '')
-  
-  // Convert to RGB
-  const r = parseInt(hex.substring(0, 2), 16)
-  const g = parseInt(hex.substring(2, 4), 16)
-  const b = parseInt(hex.substring(4, 6), 16)
-  
-  // Calculate relative luminance
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-  
-  // Return white text for dark backgrounds, black text for light backgrounds
-  return luminance > 0.5 ? '#000000' : '#ffffff'
+  const l = relativeLuminance(hex)
+  if (Number.isNaN(l)) return '#ffffff'
+  const onWhite = 1.05 / (l + 0.05)
+  const onBlack = (l + 0.05) / 0.05
+  return onBlack >= onWhite ? '#000000' : '#ffffff'
 }
 
 // Helper to convert time string to minutes

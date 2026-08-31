@@ -5,7 +5,10 @@ A web-based scheduling application for distribution center operations. Built wit
 ## Features
 
 - **Daily Schedule Management** - Visual grid editor for employee assignments with 15-minute granularity
-- **Automated Schedule Builder** - Generates schedules from staffing targets, training, and required assignments: deterministic scarce-first fill that treats targets as a minimum, deploys surplus labor (with per-function caps and overflow sinks), and integrates PTO + a lunch/break coverage pass
+- **Automated Schedule Builder** - Generates schedules from staffing targets, training, and required assignments. Deterministic (no LLM, no solver): scarce-first fill that treats targets as a minimum, deploys surplus labor (with per-function caps and overflow sinks), and integrates PTO + a lunch/break coverage pass
+- **Schedule Builder V2 (Beta)** - Parallel 15-minute-resolution engine with a cost function, per-gap explanations, pre-flight feasibility, and a business-priority matrix (`staffing_priority`) that decides which functions go short first
+- **Coverage Preview** - Read-at-a-glance grid on Create Schedule showing trained headcount vs demand before you build
+- **Employee Overview** - Per-employee dashboard: hours by function, PTO usage, rolling picking-error trend, and performance notes for reviews
 - **Staffing Targets** - Set target headcount per job function per hour in a grid UI
 - **Coverage Requirements** - Flag job functions that need lunch/break coverage so the builder keeps the station continuously staffed
 - **Employee Training Matrix** - Track which employees are trained for which job functions, with auto-save
@@ -88,7 +91,6 @@ npm run dev
 | `/display` | TV display mode (read-only, auto-refresh every 2 min) |
 | `/settings` | User settings, password, and team settings |
 | `/admin/business-rules` | Staffing targets grid (headcount per function per hour) |
-| `/admin/cleanup` | Database cleanup utilities |
 
 ## Project Structure
 
@@ -99,7 +101,7 @@ scheduling-app-v2/
 │   ├── schedule/             # Schedule grid, shift groups, assignment cards
 │   └── schedule-requests/    # Request form modal + auto-approval result banner
 ├── composables/              # Shared reactive logic
-│   ├── useAIScheduleBuilder.ts   # Automated schedule generation (scarce-first fill + surplus deploy)
+│   ├── useScheduleBuilderV2.ts   # The schedule builder (drives utils/scheduleEngineV2/)
 │   ├── useAuth.ts                # JWT authentication
 │   ├── useEmployees.ts           # Employee CRUD + training
 │   ├── useJobFunctions.ts        # Job function CRUD
@@ -137,20 +139,31 @@ scheduling-app-v2/
 │       ├── db.ts             # PostgreSQL connection pool
 │       ├── authorize.ts      # Auth middleware (JWT verification)
 │       ├── jwt.ts            # Token signing/verification
+│       ├── ptoHours.ts       # Single source for PTO-hour accounting
+│       ├── ptoUsage.ts       # Team PTO hours already committed per date
+│       ├── requestRules.ts   # Auto-approval rule engine
 │       └── email.ts          # Email utilities
+├── utils/
+│   ├── ptoDisplay.ts         # Single source for reading/displaying a pto_days row
+│   └── scheduleEngineV2/     # The schedule engine (types, slots, prepare, engine)
 ├── sql-schema/
 │   ├── setup.sql             # Full database schema (applied once on empty DB)
-│   ├── migrations/           # 001–008 incremental migrations (applied on boot)
+│   ├── migrations/           # 001–018 incremental migrations (applied on boot; no 009)
 │   └── ...                   # Individual table schemas for reference
 ├── scripts/
 │   ├── seed-first-user.js    # Create initial admin account
-│   └── seed-test-data1.js    # Optional test data
+│   ├── seed-test-data1.js    # Optional test data
+│   ├── sim-builder.mjs       # Engine harness (real engines, real data, quality metrics)
+│   └── ui-smoke.mjs          # Browser smoke test (screenshots + JS-error check)
 ├── docker-compose.yml        # Local development stack
 ├── Dockerfile                # Multi-stage production build
 └── docs/                     # Documentation
-    ├── RANCHER-DEPLOYMENT.md # Production deployment guide
-    ├── CONTEXT.md            # Technical context document
-    └── ...
+    ├── CONTEXT.md            # Architecture, data model, auth, deployment
+    ├── SCHEDULE-BUILDER.md   # Both builder engines, in depth
+    ├── PTO-AND-REQUESTS.md   # PTO hours, request rules, availability
+    ├── ROLES.md              # Roles, permissions matrix, team isolation
+    ├── TESTING.md            # How to verify a change (four tiers, harnesses, fixtures)
+    └── RANCHER-DEPLOYMENT.md # Production deployment guide
 ```
 
 ## Database Schema
@@ -165,40 +178,47 @@ Core tables:
 | `team_settings` | Per-team configuration (request-rule limits) |
 | `team_blocked_dates` | Dates that auto-reject PTO/leave-early requests |
 | `employees` | Employee records (name, shift, active status) |
-| `job_functions` | Job roles with colors, coverage flags, exclude-from-targets |
+| `job_functions` | Job roles with colors, coverage flags, exclude-from-targets, headcount caps, staffing priority |
 | `employee_training` | Which employees are trained for which functions (junction table) |
 | `shifts` | Shift definitions with break/lunch times |
 | `schedule_assignments` | Daily employee-to-function assignments |
-| `schedule_assignments_archive` | Assignments older than 30 days (retention) |
+| `schedule_assignments_archive` | Frozen history from the removed cleanup feature (read by CSV export) |
 | `staffing_targets` | Target headcount per function per hour (drives Automated Builder) |
 | `preferred_assignments` | Required/preferred employee-function pairings (AM/PM-aware) |
 | `pto_days` | PTO records by employee and date |
 | `schedule_requests` | Unified PTO / leave-early / shift-swap workflow with auto-approval |
 | `shift_swaps` | Shift swap records |
 | `daily_targets` | Daily production targets |
-| `daily_targets_archive` | Daily targets older than 30 days (retention) |
+| `daily_targets_archive` | Frozen history from the removed cleanup feature |
 | `target_hours` | Default target hours per job function |
-| `cleanup_log` | Audit log of archival runs |
+| `performance_errors` | Picking-error log (admin-only; drives the Employee Overview trend) |
+| `performance_notes` | Review notes with quick-add tags |
 | `business_rules` | Legacy staffing rules (replaced by staffing_targets) |
 
 ## Automated Schedule Builder
 
-The builder is deterministic (not an LLM). **Per-hour `staffing_targets` are a minimum, not a cap** — once targets are met, surplus labor is deployed so workers aren't idle, and over-target staffing is reported. See [composables/useAIScheduleBuilder.ts](composables/useAIScheduleBuilder.ts):
+One deterministic engine (not an LLM, no solver) —
+[utils/scheduleEngineV2/](utils/scheduleEngineV2/), driven by
+[composables/useScheduleBuilderV2.ts](composables/useScheduleBuilderV2.ts):
+96 x 15-minute slots, cost-function placement, per-gap explanations, and a
+business-priority matrix.
 
-1. **Prep** — each employee's day becomes break-free availability windows (AM = shift start → lunch, PM = lunch → shift end, minus breaks).
-2. **PTO** — full-day PTO removes the employee; partial-day clips blocks (<30-min fragments dropped).
-3. **Break carve-out** — windows split around the shift's break windows.
-4. **Meter fan-out** — parent "Meter" distributes headcount across numbered children ("Meter 1", "Meter 2", ...).
-5. **Required pins** — `is_required` employees locked to their function (AM/PM-specific supported).
-6. **PASS 1 — scarce-first target fill** — functions filled in order of trained-supply ÷ demand (hard-to-staff roles first), longest sticky blocks, respecting each function's `max_headcount` (per-hour ceiling).
-7. **Lunch/break coverage** — for `lunch_coverage_required` / `break_coverage_required` functions, a trained employee covers the primary's lunch/break.
-8. **PASS 2 — surplus fill** — remaining labor deployed so nobody's idle: still-under-target functions first, then `surplus_overflow`-flagged sinks; per-hour caps always respected; soft limit of 4 functions/person.
-9. **PASS 3 — merge** — touching same-function blocks merged into one segment.
-10. **Gaps & over-target** — final coverage vs target reported (gaps = under, over-target = surplus).
+> An earlier engine ("V1") was deleted in Aug 2026. The `V2` still in the file
+> names is history, not a choice — there is nothing to switch between.
 
-Inputs: `staffing_targets` + `employee_training` + `preferred_assignments` + `shifts` (with lunch times) + `job_functions` (incl. `max_headcount` / `surplus_overflow`) + `pto_days` for the target date.
+**Per-hour `staffing_targets` are a minimum, not a cap** — once targets are met,
+surplus labor is deployed so workers aren't idle, and over-target staffing is
+reported rather than suppressed.
 
-Outputs: `{ schedule, warnings, errors, gaps, overTarget }` — user reviews in a modal before approving, then `replaceScheduleForDate()` writes via a transactional delete+insert.
+Inputs: `staffing_targets` + `employee_training` + `preferred_assignments` +
+`shifts` (with lunch/break times) + `job_functions` (incl. `max_headcount`,
+`surplus_overflow`, `staffing_priority`) + `pto_days` for the target date.
+
+Outputs: `{ schedule, actions, warnings, errors, gaps, overTarget }` — reviewed in a
+modal that leads with `actions` (things a person must fix), then written via a
+transactional delete + insert.
+
+**Full algorithm detail: [docs/SCHEDULE-BUILDER.md](docs/SCHEDULE-BUILDER.md).**
 
 ## Deployment
 
@@ -207,7 +227,7 @@ See [docs/RANCHER-DEPLOYMENT.md](docs/RANCHER-DEPLOYMENT.md) for production depl
 ## Validation Rules
 
 - Employees can only be assigned to functions they're trained for (enforced by DB trigger)
-- Assignment duration must be at least 30 minutes (enforced by DB constraint)
+- Assignment duration must be at least 15 minutes (enforced by DB constraint). The builder itself only generates blocks of 30 minutes or longer; the shorter floor exists so supervisors can make manual quarter-hour tweaks
 - Assignments must fall within shift boundaries
 - Multi-tenant data isolation via `team_id` on all tables
 

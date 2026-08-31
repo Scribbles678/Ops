@@ -40,7 +40,10 @@ export const PREFERRED_MIN_MINUTES = 30
 
 export interface EngineEmployee {
   id: string
+  /** "Last, First" - for lists and the schedule grid, where it sorts correctly. */
   name: string
+  /** "First Last" - for messages that read as a sentence. */
+  displayName: string
   shiftId: string | null
   /** 1 = free to be assigned in this slot. Length SLOTS_PER_DAY. */
   free: Uint8Array
@@ -123,6 +126,13 @@ export interface EngineResult {
   overTarget: { functionName: string; time: string; surplus: number }[]
   /** Produced BEFORE any assignment, so impossible targets are named up front. */
   feasibility: FeasibilityIssue[]
+  /**
+   * Things a PERSON must go and fix in the app - missing training, an unassigned
+   * shift, a stale target cell. Kept separate from `warnings` so the review modal
+   * can lead with them instead of burying them among informational notes.
+   */
+  actions: string[]
+  /** Informational only. Nothing for anyone to do. */
   warnings: string[]
   stats: {
     slotsAvailable: number

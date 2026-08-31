@@ -52,6 +52,11 @@
           No job functions found. Please create job functions first.
         </div>
 
+        <div v-else-if="gridHours.length === 0" class="text-center py-5 text-sm text-gray-600">
+          No active shifts are set up, so there are no hours to set targets for.
+          Add shifts in <NuxtLink to="/details" class="text-blue-600 hover:underline">Details &amp; Settings → Shift Management</NuxtLink>.
+        </div>
+
         <div v-else>
           <div class="overflow-x-auto -mx-1 md:-mx-2">
             <table class="min-w-full text-xs md:text-sm">
@@ -62,6 +67,8 @@
                     v-for="hour in gridHours"
                     :key="hour.value"
                     class="px-2 py-2 text-center min-w-[60px]"
+                    :class="hour.staffed ? '' : 'bg-amber-50 text-amber-700'"
+                    :title="hour.staffed ? '' : 'No shift covers this hour — anything set here can never be staffed'"
                   >
                     {{ hour.label }}
                   </th>
@@ -76,6 +83,7 @@
                     v-for="hour in gridHours"
                     :key="hour.value"
                     class="px-1 py-1 text-center"
+                    :class="hour.staffed ? '' : 'bg-amber-50'"
                   >
                     <input
                       type="number"
@@ -89,6 +97,19 @@
               </tbody>
             </table>
           </div>
+
+          <p v-if="unstaffedHours.length > 0" class="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            <strong>{{ unstaffedHours.map(h => h.label).join(', ') }}</strong>
+            {{ unstaffedHours.length === 1 ? 'is' : 'are' }} shaded because no shift covers
+            {{ unstaffedHours.length === 1 ? 'that hour' : 'those hours' }} — targets set there can never
+            be staffed and the builder ignores them. Set them to 0 to clear them, or add a shift that covers
+            {{ unstaffedHours.length === 1 ? 'it' : 'them' }}.
+          </p>
+
+          <p class="mt-3 text-xs text-gray-500">
+            Columns follow your active shifts, set in
+            <NuxtLink to="/details" class="text-blue-600 hover:underline">Details &amp; Settings → Shift Management</NuxtLink>.
+          </p>
 
           <div class="flex justify-end mt-4">
             <button
@@ -331,17 +352,74 @@ const showSavedIcon = ref(false)
 const gridData = ref<Record<string, number>>({})
 const originalGridData = ref<Record<string, number>>({})
 
-// Hours columns: 6AM through 8PM (covers up to 8:30PM end-of-shift)
+/** "HH:MM[:SS]" -> minutes past midnight, or null. */
+const timeToMinutes = (t: string | null | undefined): number | null => {
+  if (!t) return null
+  const parts = String(t).split(':')
+  const h = Number(parts[0])
+  const m = Number(parts[1] ?? 0)
+  if (Number.isNaN(h) || Number.isNaN(m)) return null
+  return h * 60 + m
+}
+
+/**
+ * Hours covered by at least one ACTIVE shift.
+ *
+ * An hour column is included when any part of it is worked: a 07:00-14:30 shift
+ * covers 7AM through 2PM, because the 2PM column means 14:00-15:00 and half of it
+ * is staffed.
+ */
+const staffedHours = computed<Set<number>>(() => {
+  const set = new Set<number>()
+  for (const sh of shifts.value || []) {
+    if (!sh || sh.is_active === false) continue
+    const start = timeToMinutes(sh.start_time)
+    let end = timeToMinutes(sh.end_time)
+    if (start == null || end == null) continue
+    if (end <= start) end += 24 * 60 // crosses midnight
+    for (let h = Math.floor(start / 60); h <= Math.ceil(end / 60) - 1; h++) {
+      set.add(((h % 24) + 24) % 24)
+    }
+  }
+  return set
+})
+
+/**
+ * Hours that already carry a target, whether or not a shift covers them.
+ *
+ * These have to stay visible even when no shift reaches them. A target left
+ * behind by a retired shift is exactly what the builder warns about ("clear those
+ * cells in the Target Hours grid") — and if the column were hidden, there would
+ * be no way to do that.
+ */
+const hoursWithTargets = computed<Set<number>>(() => {
+  const set = new Set<number>()
+  for (const t of targets.value || []) {
+    if (!((t.headcount ?? 0) > 0)) continue
+    const h = Number(String(t.hour_start).slice(0, 2))
+    if (!Number.isNaN(h)) set.add(h)
+  }
+  return set
+})
+
+/**
+ * Hour columns, derived from the team's shifts rather than hardcoded.
+ *
+ * This grid used to run a fixed 6AM-8PM, so it offered hours nobody works and
+ * would have hidden any hour worked outside that window.
+ */
 const gridHours = computed(() => {
-  const hours = []
-  for (let h = 6; h <= 20; h++) {
-    const value = `${h.toString().padStart(2, '0')}:00`
+  const hours = [...new Set([...staffedHours.value, ...hoursWithTargets.value])].sort((a, b) => a - b)
+  return hours.map((h) => {
+    const value = `${String(h).padStart(2, '0')}:00`
     const period = h >= 12 ? 'PM' : 'AM'
     const display = h > 12 ? h - 12 : h === 0 ? 12 : h
-    hours.push({ value, label: `${display}${period}` })
-  }
-  return hours
+    return { value, label: `${display}${period}`, staffed: staffedHours.value.has(h) }
+  })
 })
+
+/** Columns shown only because a stale target sits there. */
+const unstaffedHours = computed(() => gridHours.value.filter((h) => !h.staffed))
 
 // Job functions for the grid (active, exclude individual Meter N — use parent Meter,
 // and exclude any functions marked as exclude_from_targets)

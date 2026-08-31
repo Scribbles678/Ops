@@ -119,6 +119,28 @@ export function describePto(pto: any): PtoDescription | null {
   return null
 }
 
+/**
+ * Human label for a pto_days.pto_type / request kind: "Full Day", "Call-In", ...
+ *
+ * Lives here rather than in a component because the PTO calendar kept its own
+ * copy of this map and it drifted — `call_in` was missing, so a called-in
+ * employee rendered as the raw string "call_in" on the board.
+ *
+ * The fallback title-cases anything unrecognised, so a type added by a future
+ * migration reads as words rather than a database enum.
+ */
+export function ptoTypeLabel(type: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    full_day: 'Full Day',
+    partial: 'Partial Day',
+    leave_early: 'Leave Early',
+    arrive_late: 'Arrive Late',
+    call_in: 'Call-In',
+  }
+  if (!type) return 'PTO'
+  return labels[type] ?? type.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase())
+}
+
 /** Longer phrasing for tables: "leaves 4:02 PM", "8:00 AM – 10:00 AM". */
 export function ptoTimeLabel(pto: any): string {
   const d = describePto(pto)

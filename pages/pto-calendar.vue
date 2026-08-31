@@ -81,12 +81,13 @@
           <div
             v-for="day in weekDays"
             :key="day.date"
-            class="p-1.5 border-r last:border-r-0 space-y-1 relative"
+            class="p-1.5 border-r last:border-r-0 relative flex flex-col"
             :class="[
               day.isToday ? 'bg-blue-50/30' : '',
               getBlockForDate(day.date) ? 'bg-red-50' : ''
             ]"
           >
+            <div class="space-y-1 flex-1">
             <div
               v-if="getBlockForDate(day.date)"
               class="text-[10px] font-semibold text-red-700 bg-red-100 border border-red-200 rounded px-1.5 py-0.5 mb-1"
@@ -94,18 +95,44 @@
             >
               🚫 Blocked<span v-if="getBlockForDate(day.date)?.reason">: {{ getBlockForDate(day.date)?.reason }}</span>
             </div>
+            <!-- Two lines, not one. On a single line the cell truncated mid-label
+                 ("Leave Earl…") and the TIME — the only part that matters for a
+                 partial absence — was cut off entirely, reachable only by hover. -->
             <div
               v-for="entry in getEntriesForDate(day.date)"
               :key="entry.id"
-              class="text-xs rounded px-1.5 py-1 truncate"
+              class="text-xs rounded px-1.5 py-1 leading-tight"
               :class="entry.status === 'approved'
                 ? 'bg-green-100 text-green-800 border border-green-200'
                 : 'bg-yellow-100 text-yellow-800 border border-yellow-200'"
               :title="`${entry.employee_name} - ${entry.typeLabel}${entry.time ? ' (' + entry.time + ')' : ''}${entry.notes ? ': ' + entry.notes : ''}`"
             >
-              <span class="font-medium">{{ entry.employee_name }}</span>
-              <span class="opacity-70 ml-1">{{ entry.typeLabel }}</span>
-              <span v-if="entry.time" class="opacity-60 ml-1">· {{ entry.time }}</span>
+              <div class="font-medium truncate">{{ entry.employee_name }}</div>
+              <div class="opacity-75 text-[11px]">{{ entryDetail(entry) }}</div>
+            </div>
+            </div>
+
+            <!-- Hours off for the day, itemised by where they came from.
+                 These numbers are computed server-side by the SAME accounting the
+                 approval rule measures against the daily cap (getUsedHoursBreakdown-
+                 ByDate). The component must never total hours itself — the strip and
+                 the rule drifting apart is exactly how this area broke twice. -->
+            <div
+              v-if="hoursFor(day.date).total > 0"
+              class="mt-2 pt-1.5 border-t border-gray-200 text-[10px] leading-snug"
+            >
+              <div v-if="hoursFor(day.date).approved > 0" class="flex justify-between text-gray-500">
+                <span>Approved</span><span>{{ fmtHours(hoursFor(day.date).approved) }}</span>
+              </div>
+              <div v-if="hoursFor(day.date).callIn > 0" class="flex justify-between text-amber-700">
+                <span>Call-ins</span><span>{{ fmtHours(hoursFor(day.date).callIn) }}</span>
+              </div>
+              <div v-if="hoursFor(day.date).manual > 0" class="flex justify-between text-gray-500">
+                <span>Manual</span><span>{{ fmtHours(hoursFor(day.date).manual) }}</span>
+              </div>
+              <div class="flex justify-between font-semibold text-gray-800 mt-0.5 pt-0.5 border-t border-gray-100">
+                <span>Total</span><span>{{ fmtHours(hoursFor(day.date).total) }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -139,23 +166,31 @@
               <span v-if="getBlockForDate(day.date)" class="text-[9px] text-red-600 font-semibold">🚫</span>
             </div>
             <div class="space-y-0.5">
+              <!-- The name alone said nothing: "Lor, Xai" gave no clue whether that
+                   was a full day, a call-in or a 20-minute late start. -->
               <div
-                v-for="entry in getEntriesForDate(day.date).slice(0, 3)"
+                v-for="entry in monthEntriesFor(day.date)"
                 :key="entry.id"
-                class="text-[10px] rounded px-1 py-0.5 truncate"
+                class="text-[10px] rounded px-1 py-0.5 leading-tight"
                 :class="entry.status === 'approved'
                   ? 'bg-green-100 text-green-800'
                   : 'bg-yellow-100 text-yellow-800'"
                 :title="entry.employee_name + ' - ' + entry.typeLabel + (entry.time ? ' (' + entry.time + ')' : '')"
               >
-                {{ entry.employee_name }}
+                <div class="truncate">{{ entry.employee_name }}</div>
+                <div class="opacity-70 truncate">{{ entryDetailShort(entry) }}</div>
               </div>
-              <div
-                v-if="getEntriesForDate(day.date).length > 3"
-                class="text-[10px] text-gray-400 px-1"
+              <!-- "+N more" used to be a dead end — the only way to see the rest was
+                   to switch to week view and navigate to that week. -->
+              <button
+                v-if="getEntriesForDate(day.date).length > MONTH_ENTRY_LIMIT"
+                @click="toggleDayExpanded(day.date)"
+                class="text-[10px] text-blue-600 hover:text-blue-800 hover:underline px-1"
               >
-                +{{ getEntriesForDate(day.date).length - 3 }} more
-              </div>
+                {{ expandedDays.has(day.date)
+                  ? 'Show less'
+                  : `+${getEntriesForDate(day.date).length - MONTH_ENTRY_LIMIT} more` }}
+              </button>
             </div>
           </div>
         </div>
@@ -277,7 +312,7 @@
 </template>
 
 <script setup lang="ts">
-import { formatTimeOfDay, ptoTimeLabel, ptoTimeToMinutes } from '~/utils/ptoDisplay'
+import { formatTimeOfDay, ptoTimeLabel, ptoTimeToMinutes, ptoTypeLabel } from '~/utils/ptoDisplay'
 
 const { user } = useAuth()
 const { fetchRequests, requests, overrideRequest, cancelRequest, loading } = useScheduleRequests()
@@ -298,7 +333,7 @@ const onRequestSubmitted = () => {
 const isAdmin = computed(() => user.value?.is_admin || user.value?.is_super_admin)
 
 // Calendar data from the PTO calendar API
-const calendarData = ref<{ pto_days: any[]; requests: any[] }>({ pto_days: [], requests: [] })
+const calendarData = ref<{ pto_days: any[]; requests: any[]; hours_by_date?: Record<string, DayHours> }>({ pto_days: [], requests: [] })
 
 const todayStr = computed(() => {
   const d = new Date()
@@ -432,6 +467,45 @@ const getEntriesForDate = (date: string): CalendarEntry[] => {
   return entriesByDate.value[date] || []
 }
 
+interface DayHours { approved: number; callIn: number; manual: number; total: number }
+const NO_HOURS: DayHours = { approved: 0, callIn: 0, manual: 0, total: 0 }
+
+/**
+ * Hours off for a date, itemised. Supplied by the API — never derived here, so it
+ * cannot disagree with what the approval rule charges against the daily cap.
+ */
+const hoursFor = (date: string): DayHours => calendarData.value.hours_by_date?.[date] ?? NO_HOURS
+
+/** "8h" / "6.5h" - trailing .0 is noise on a calendar. */
+const fmtHours = (h: number): string => `${Number.isInteger(h) ? h : h.toFixed(2).replace(/0$/, '')}h`
+
+/** Week cell second line: what it is, plus when. */
+const entryDetail = (e: CalendarEntry): string => (e.time ? `${e.typeLabel} · ${e.time}` : e.typeLabel)
+
+/**
+ * Month cell second line. Where there is a time it carries more information than
+ * the type does — "leaves 2:00 PM" already implies Leave Early, and a month cell
+ * has no room for both.
+ */
+const entryDetailShort = (e: CalendarEntry): string => e.time || e.typeLabel
+
+/** Entries a month cell shows before "+N more" is expanded. */
+const MONTH_ENTRY_LIMIT = 3
+const expandedDays = ref<Set<string>>(new Set())
+
+const toggleDayExpanded = (date: string) => {
+  // Replace the Set rather than mutating it — Vue does not track Set mutation.
+  const next = new Set(expandedDays.value)
+  if (next.has(date)) next.delete(date)
+  else next.add(date)
+  expandedDays.value = next
+}
+
+const monthEntriesFor = (date: string): CalendarEntry[] => {
+  const all = getEntriesForDate(date)
+  return expandedDays.value.has(date) ? all : all.slice(0, MONTH_ENTRY_LIMIT)
+}
+
 const blockedByDate = computed(() => {
   const map: Record<string, { reason: string | null }> = {}
   for (const b of blockedDates.value) {
@@ -480,16 +554,6 @@ const formatFullTimestamp = (ts: string | null | undefined) => {
     weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
     hour: 'numeric', minute: '2-digit', second: '2-digit',
   })
-}
-
-const ptoTypeLabel = (type: string | null | undefined) => {
-  const labels: Record<string, string> = {
-    full_day: 'Full Day',
-    partial: 'Partial Day',
-    leave_early: 'Leave Early',
-    arrive_late: 'Arrive Late',
-  }
-  return labels[type || ''] || type || 'PTO'
 }
 
 // Format a stored time ("HH:MM[:SS]") as "h:MM AM/PM".

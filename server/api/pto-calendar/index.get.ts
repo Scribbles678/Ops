@@ -1,9 +1,17 @@
 import { query } from '../../utils/db'
 import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { getUsedHoursBreakdownByDate } from '../../utils/ptoUsage'
 
 /**
  * Aggregated PTO calendar view.
- * Returns approved PTO days + approved/pending schedule requests for a date range.
+ * Returns approved PTO days + approved/pending schedule requests for a date range,
+ * plus the per-day hours those absences cost, itemised by source.
+ *
+ * The hours come from getUsedHoursBreakdownByDate, which is the same accounting the
+ * auto-approval rule measures against the daily cap. The calendar must never total
+ * hours itself: this area has twice been broken by a second implementation drifting
+ * from the first.
+ *
  * Query params: date_from, date_to (required, YYYY-MM-DD)
  */
 export default defineEventHandler(async (event) => {
@@ -50,8 +58,16 @@ export default defineEventHandler(async (event) => {
     values
   )
 
+  const hoursByDate = await getUsedHoursBreakdownByDate(
+    { query },
+    teamId,
+    String(date_from),
+    String(date_to)
+  )
+
   return {
     pto_days: ptoResult.rows,
     requests: requestResult.rows,
+    hours_by_date: hoursByDate,
   }
 })

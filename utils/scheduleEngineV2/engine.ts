@@ -167,6 +167,7 @@ export function runEngine(input: EngineInput): EngineResult {
   const w = input.weights ?? DEFAULT_WEIGHTS
   const { employees, functions, preferred } = input
   const warnings: string[] = []
+  const actions: string[] = []
   const assignments: EngineAssignment[] = []
 
   const fnById = new Map(functions.map((f) => [f.id, f]))
@@ -219,8 +220,8 @@ export function runEngine(input: EngineInput): EngineResult {
     // that cannot be saved at all — one bad pin failed the entire write.
     // Skip it and say so, rather than poisoning the whole day.
     if (!emp.trained.has(fn.id)) {
-      warnings.push(
-        `${emp.name} has a required assignment for "${fn.name}" but is not trained for it — the pin was skipped. Add the training or remove the required assignment.`
+      actions.push(
+        `${emp.displayName} is set to always work ${fn.name} but is not trained for it, so it was skipped. Add the training, or remove the requirement.`
       )
       continue
     }
@@ -313,7 +314,7 @@ export function runEngine(input: EngineInput): EngineResult {
       if (progressed) break
     }
   }
-  if (guard >= GUARD_LIMIT) warnings.push('Coverage fill hit its iteration limit; the schedule may be incomplete.')
+  if (guard >= GUARD_LIMIT) actions.push('The builder stopped early and the schedule may be incomplete. Please check it before using it.')
 
   // ---- Phase E: cliff patching --------------------------------------------
   // The new capability. Whatever unmet runs remain are shorter than the preferred
@@ -441,7 +442,7 @@ export function runEngine(input: EngineInput): EngineResult {
     (a) => slotsToMinutesLength(a.startSlot, a.endSlot) >= ENGINE_MIN_BLOCK_MINUTES
   )
   if (final.length !== merged.length) {
-    warnings.push(`${merged.length - final.length} assignment(s) under ${ENGINE_MIN_BLOCK_MINUTES} minutes were dropped.`)
+    warnings.push(`${merged.length - final.length} assignment(s) shorter than ${ENGINE_MIN_BLOCK_MINUTES} minutes were dropped.`)
   }
 
   // ---- Phase H: gaps, over-target, explanations ---------------------------
@@ -568,7 +569,7 @@ export function runEngine(input: EngineInput): EngineResult {
   ).length
 
   if (cliffPatches > 0) {
-    warnings.push(`${cliffPatches} short coverage block(s) were used to patch break/lunch cliffs.`)
+    warnings.push(`${cliffPatches} short block(s) were used to cover gaps while people were on break or at lunch.`)
   }
 
   return {
@@ -576,6 +577,7 @@ export function runEngine(input: EngineInput): EngineResult {
     gaps,
     overTarget,
     feasibility,
+    actions,
     warnings,
     stats: {
       slotsAvailable,

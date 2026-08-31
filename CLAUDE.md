@@ -5,13 +5,24 @@ alwaysApply: true
 # CLAUDE.md — Operations Scheduling Tool
 
 Guidance for working in this repo. Keep this file tight and high-signal; put depth in `docs/`.
-**When architecture, the data model, or the builder changes, update this file and `docs/CONTEXT.md` in the same change.**
+**When architecture, the data model, or the builder changes, update this file and the matching `docs/` file in the same change.**
 
 ## What this is
 
 A self-hosted, multi-tenant **distribution-center workforce scheduling app** (internal tool, Abbott-branded). Nuxt 4 SPA + Nitro API + PostgreSQL 16, single container + Postgres. Deployed on Rancher/Kubernetes. Treat it as a production app at work — real schedules depend on it.
 
-**Read `docs/CONTEXT.md` first** — canonical technical reference (architecture, data model, auth, the Automated Builder, deployment). Also: `docs/ROLES.md` (permissions), `docs/RANCHER-DEPLOYMENT.md` (deploy).
+**Read `docs/CONTEXT.md` first** — architecture, data model, auth, deployment. Then, by area:
+
+| Doc | When |
+|---|---|
+| `docs/CONTEXT.md` | Architecture, directory map, data model, triggers, migrations ledger, env vars |
+| `docs/SCHEDULE-BUILDER.md` | **Anything touching either builder engine.** Both pipelines, the V2 cost function, `staffing_priority`, how to validate a change |
+| `docs/PTO-AND-REQUESTS.md` | **Anything touching PTO, requests, availability or the Employee Overview.** The hours model and the shared modules |
+| `docs/ROLES.md` | Permissions, team isolation |
+| `docs/TESTING.md` | **How to verify a change.** The four tiers, the engine harness, the browser smoke test, multi-tenancy checks |
+| `docs/RANCHER-DEPLOYMENT.md` | Deploying |
+
+Each topic has exactly one home. If you find yourself restating an algorithm in a second file, link instead — the builder used to be documented in three places and all three drifted.
 
 ---
 
@@ -48,12 +59,18 @@ Run the **smallest verification tier that applies**, then report what ran, what 
 
 | Change | Default check |
 |--------|---------------|
-| Server / TS / composable / type change | `npm run build` (this is the typecheck — there is no test suite) |
-| SQL / new migration | Apply `setup.sql` + every migration against a throwaway Postgres (harness below). A bad migration crashloops the pod on deploy. |
-| UI / page / component | `npm run dev`, exercise the actual screen; don't reflexively run a full build for a copy tweak |
+| Server / TS / composable / type change | `npm run build` (this is the typecheck — there is no unit test suite) |
+| **Either builder engine** | `node scripts/sim-builder.mjs <date>` — replays real DB rows through the real engines. Compare before/after; **zero functions made worse** is the bar |
+| **UI / page / component** | `node scripts/ui-smoke.mjs` — drives the real browser, fails on any JS error, screenshots every screen. **Then look at the screenshots.** A build compiles a page that renders nonsense |
+| SQL / new migration | Apply `setup.sql` + every migration against a throwaway Postgres (below). A bad migration crashloops the pod on deploy |
 | Anything writing rows | Confirm `team_id` is stamped via `getWriteTeamId` and the right team can read it back |
+| Anything touching `team_id` / scoping | Log in as the Site B fixtures and confirm isolation — see `docs/TESTING.md` |
 
-There is **no SSH/PM2 and no automated tests** here. Changes reach prod only via git → GitHub org → ARC runner → Rancher (pipeline still being finalized). Never claim something is "verified in prod" you didn't run.
+**→ `docs/TESTING.md` is the full guide.** Passing `npm run build` proves only that it
+compiles; it says nothing about whether the screen renders correctly or the schedule
+got worse.
+
+There is **no SSH/PM2 and no unit tests** here. Changes reach prod only via git → GitHub org → ARC runner → Rancher (pipeline still being finalized). Never claim something is "verified in prod" you didn't run.
 
 *These guidelines are working if: fewer unrequested changes in diffs, fewer rewrites from overcomplication, and clarifying questions arrive before implementation rather than after a bad deploy.*
 
@@ -62,10 +79,17 @@ There is **no SSH/PM2 and no automated tests** here. Changes reach prod only via
 ## Commands
 
 ```bash
-npm run dev      # local dev server (localhost:3000)
+npm run dev      # local dev server (localhost:3000, falls back to 3001 if taken)
 npm run build    # production build — ALSO your typecheck
 docker compose up -d   # app + Postgres locally; app self-bootstraps schema + admin
+
+node scripts/sim-builder.mjs 2026-08-03   # engine harness: real data, real engines, quality metrics
+node scripts/ui-smoke.mjs                 # browser smoke test (needs: npm i --no-save playwright-core)
 ```
+
+⚠ The `docker compose` **app** service builds from source and is often stale; while it
+runs it holds port 3000 and silently pushes `npm run dev` to 3001. `docker compose stop app`
+unless you are deliberately testing the container.
 
 Throwaway-Postgres harness for validating SQL/migrations before they ship:
 ```bash
@@ -88,10 +112,12 @@ docker exec -i t psql -v ON_ERROR_STOP=1 -U postgres -d scheduling
 
 Every data table has `team_id`. Two helpers, **not interchangeable**:
 
-- **Reads** → `getTeamFilter(user)`: `null` for super admins (see ALL teams), else `user.team_id`. Used in `WHERE team_id = $X`.
+- **Reads** → `getTeamFilter(user)`: **always `user.team_id`, super admins included.** Used in `WHERE team_id = $X`. Super admins no longer read across every team — they move between teams via Settings → Change Team, which re-issues the session token so the switch applies immediately.
+- **Install-wide reads** → `readsAllTeams(user)`: the *explicit* opt-out for the genuinely cross-team screens (user management). Never get an unscoped read another way.
+- **No team = no data.** Both helpers throw 403 for an account with no team — reads fail closed rather than returning an unfiltered query, writes fail rather than creating a `team_id = NULL` orphan. Every account must have a team; create-user enforces it. Only super admins may change a team.
 - **Writes** → `getWriteTeamId(user)`: ALWAYS `user.team_id`, super admins included. Used to STAMP `team_id` on new rows.
 
-**Never stamp an INSERT with `getTeamFilter`** — for a super admin it returns `null`, orphaning the row (only super admins read `NULL` rows). This exact mistake caused a real "team lead can't see what was set up" bug. New write endpoint → `getWriteTeamId`. New read/scope filter → `getTeamFilter`. `team-settings` and `team-blocked-dates` writes require a team and 400 without one.
+**Keep reads and writes on the same helper.** New write endpoint → `getWriteTeamId`. New read/scope filter → `getTeamFilter`. They now return the same team, but the names carry the intent and the split is what stops a future "reads everything, writes to one team" bug — which is exactly what broke the builder before Aug 2026.
 
 ## Database & migrations
 
@@ -99,12 +125,19 @@ Every data table has `team_id`. Two helpers, **not interchangeable**:
 - **Every migration must be idempotent** (`CREATE/ALTER ... IF NOT EXISTS`, `ON CONFLICT`, guarded `DO` blocks) — they re-run on every deploy.
 - **Adding a migration:** create `sql-schema/migrations/NNN-short-name.sql` (next zero-padded number). Ships in the image, auto-applies next deploy — no manual SQL. **Schema-first:** the migration that adds a column must ship in the same image as the code that writes it.
 - **Data-mutating migrations are high-stakes** (they run on every boot and a failure crashloops the pod). Guard one-time data changes with a marker so they can't re-run, and validate on the throwaway Postgres first.
-- **DB triggers enforce invariants** — know they'll reject bad writes: employee must be trained for the assigned function (Meter-parent aware), no overlapping assignments per employee/day, assignment ≥ 30 min, no past-dated shift swaps.
+- **DB triggers enforce invariants** — know they'll reject bad writes: employee must be trained for the assigned function (Meter-parent aware), no overlapping assignments per employee/day, **assignment ≥ 15 min** (migration 017; the V2 *builder* still only emits ≥ 30 min — the gap is deliberate), no past-dated shift swaps.
+- **One bad row fails the whole save.** Builder output is written as a single transaction, so one untrained pin aborts all 200+ assignments. Validate before writing, don't rely on the trigger to sort it out.
 
 ## Domain notes that bite
 
 - **"Meter" job functions:** parent `Meter` fans out to children `Meter 1`, `Meter 2`, …; training on parent `Meter` qualifies for any `Meter N`. Matched by regex `/^Meter [0-9]+$/`, scoped to the function's `team_id`. Implemented in BOTH the builder and the `validate_assignment_training` trigger — keep them in sync.
-- **Automated Schedule Builder** (`composables/useAIScheduleBuilder.ts`): deterministic (not an LLM, no solver). **Per-hour `staffing_targets` are a MINIMUM, not a cap** — after targets are met, surplus labor is deployed (and over-target reported) so workers aren't idle. Pipeline: prep → PTO clip → break carve-out → Meter fan-out → required pins → **PASS 1** scarce-first target fill (respects per-function `max_headcount`) → lunch/break coverage → **PASS 2** surplus fill (under-target first, then `surplus_overflow` sinks; caps always respected; soft 4-functions/person) → **PASS 3** merge touching blocks → gaps + over-target. Output (`{schedule, warnings, errors, gaps, overTarget}`) reviewed in a modal, then written via transactional delete+insert (`/api/schedule/replace`). Validate changes with `scripts/sim-builder.mjs` against real data. **⚠ Super-admin builds read across ALL teams (`getTeamFilter=null`) and pull in orphaned `team_id=NULL` rows — see the builder gotcha + Multi-Tenancy notes in `docs/CONTEXT.md`. Read the full step-by-step there before changing it.**
+- **Automated Schedule Builder — ONE engine.** `utils/scheduleEngineV2/` (pure, DB-free) + `composables/useScheduleBuilderV2.ts`. Deterministic — no LLM, no solver. 96 x 15-minute slots, cost function, `staffing_priority`. **Per-hour `staffing_targets` are a MINIMUM, not a cap**: after targets are met surplus labour is deployed and over-target is *reported*, not suppressed. Writes via `POST /api/schedule/replace` (transactional delete+insert). **Read `docs/SCHEDULE-BUILDER.md` before changing it.**
+  - A second engine ("V1", `composables/useAIScheduleBuilder.ts`) was **deleted Aug 2026** after the team lead confirmed this one schedules better. The `V2` left in the directory and composable names is history, not a choice — there is nothing to compare against. The pre-flight "Build Schedule" checklist went with it; the Coverage Preview supersedes it.
+  - Builds are scoped to the caller's current team (Aug 2026). Previously they read every team and wrote to one, which put another site's people on this site's board.
+  - The engine returns **`actions`** (a person must fix this) separately from **`warnings`** (context). The review modal leads with actions. Never classify by matching message text.
+  - `scripts/sim-builder.mjs` bundles and calls the **real** engine. It holds no scheduling logic — keep it that way. See `docs/TESTING.md`.
+- **PTO hours have exactly one implementation** — `server/utils/ptoHours.ts` (with `ptoUsage.ts` and `requestRules.ts`). The approval rule and the availability strip both route through it. They used to compute hours separately and drifted, which made the displayed "hours left" disagree with what approval allowed. `utils/ptoDisplay.ts` is the same deal for *reading* a `pto_days` row — `leave_early` stores a NULL end and `arrive_late` stores `00:00:00` as its start, so anything reading those columns literally gets two of the four types wrong. See `docs/PTO-AND-REQUESTS.md`.
+- **Duplicate implementations are this repo's recurring failure mode.** The PTO strip, `ptoTimeLabel`, `sim-builder.mjs` and the two builder engines each drifted from their twin; all four have since been collapsed to one implementation. When you find one rule in two places, extract it — don't patch both.
 
 ## Code quality
 

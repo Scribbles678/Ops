@@ -4,7 +4,11 @@
       <div class="p-6">
         <div class="flex justify-between items-center mb-4">
           <h2 class="text-xl font-bold text-gray-900">Time Off / Schedule Change</h2>
-          <button @click="$emit('close')" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+          <button
+            @click="$emit('close')"
+            aria-label="Close"
+            class="flex h-11 w-11 items-center justify-center rounded-lg text-2xl leading-none text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 active:bg-gray-200"
+          >&times;</button>
         </div>
 
         <!-- Inline login (when not authenticated) -->
@@ -86,13 +90,29 @@
           <div v-if="weekAvailability.length > 0" class="rounded-lg border border-gray-200 bg-gray-50 p-3">
             <div class="flex items-center justify-between mb-2">
               <h3 class="text-xs font-semibold text-gray-600 uppercase tracking-wide">Week Availability</h3>
-              <div class="flex items-center gap-2">
-                <button type="button" @click="weekOffset--" class="text-gray-400 hover:text-gray-700 p-0.5">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>
+              <!-- 44x44 tap targets. These were a 16px icon with 2px padding (20x20),
+                   well under the 44x44 that Apple's guidelines and WCAG 2.5.5 both ask
+                   for, and this form is used on the wall-mounted iPad. The visible
+                   button is smaller than the target so the strip does not look clumsy;
+                   the extra area is padding you can still hit. Active states matter
+                   more than hover here — a touchscreen has no hover. -->
+              <div class="flex items-center gap-1">
+                <button
+                  type="button"
+                  @click="weekOffset--"
+                  aria-label="Previous week"
+                  class="flex h-11 w-11 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-200 hover:text-gray-800 active:bg-gray-300 active:text-gray-900"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7" /></svg>
                 </button>
-                <span class="text-[10px] text-gray-400">{{ weekLabel }}</span>
-                <button type="button" @click="weekOffset++" class="text-gray-400 hover:text-gray-700 p-0.5">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                <span class="text-xs font-medium text-gray-500 tabular-nums">{{ weekLabel }}</span>
+                <button
+                  type="button"
+                  @click="weekOffset++"
+                  aria-label="Next week"
+                  class="flex h-11 w-11 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-200 hover:text-gray-800 active:bg-gray-300 active:text-gray-900"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7" /></svg>
                 </button>
               </div>
             </div>

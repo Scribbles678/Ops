@@ -1,18 +1,11 @@
 <template>
   <div class="bg-white shadow rounded-lg overflow-hidden">
     <!-- Header -->
-    <div class="px-5 pt-5 pb-3 flex flex-wrap items-start justify-between gap-3">
+    <div class="px-5 pt-5 pb-1 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h2 class="text-lg font-semibold text-gray-900">Coverage Preview</h2>
+        <h2 class="text-lg font-semibold text-gray-900">Training &amp; Coverage Preview</h2>
         <p class="text-sm text-gray-500 mt-0.5">
-          Staffing targets against the people actually on the clock for
           {{ prettyDate }} — before you build.
-        </p>
-        <p class="text-xs text-gray-500 mt-1.5 max-w-2xl">
-          <span class="font-semibold text-gray-700">Read the top row first.</span>
-          It counts every person once, so it's the real check on whether the day is coverable.
-          The rows below only ask whether enough <em>trained</em> people exist for that one job —
-          they stay grey when training isn't the problem.
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -35,124 +28,63 @@
       </div>
     </div>
 
-    <div v-if="error" class="mx-5 mb-4 bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-700">
+    <div v-if="error" class="mx-5 my-4 bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-700">
       {{ error }}
     </div>
 
-    <div v-else-if="loading && !data" class="px-5 pb-6 text-sm text-gray-500">Loading coverage…</div>
+    <div v-else-if="loading && !data" class="px-5 pb-6 pt-3 text-sm text-gray-500">Loading coverage…</div>
 
     <template v-else-if="data">
-      <!-- Summary tiles -->
-      <div class="px-5 pb-4 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-        <div class="border border-gray-200 rounded-lg p-3">
-          <div class="text-[10px] uppercase tracking-wide text-gray-500 font-medium">Target demand</div>
-          <div class="text-2xl font-bold text-gray-900 leading-tight">
-            {{ data.summary.totalDemandHours.toFixed(0) }}<span class="text-sm font-medium text-gray-500 ml-0.5">h</span>
-          </div>
-          <div class="text-[11px] text-gray-500">headcount-hours</div>
+      <!-- TRAINING band: spare *trained* people. Every job, every hour, colour and
+           number — the same person appears in every row they are trained for, so
+           these rows answer "is training the limit here", not "how many people". -->
+      <div class="px-5 pt-4">
+        <div class="flex items-baseline gap-2 mb-1.5">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-gray-900">Training</span>
         </div>
-        <div class="border border-gray-200 rounded-lg p-3">
-          <div class="text-[10px] uppercase tracking-wide text-gray-500 font-medium">Labour available</div>
-          <div class="text-2xl font-bold leading-tight" :class="labourShort ? 'text-red-600' : 'text-gray-900'">
-            {{ data.summary.totalLabourHours.toFixed(0) }}<span class="text-sm font-medium text-gray-500 ml-0.5">h</span>
-          </div>
-          <div class="text-[11px] text-gray-500">{{ data.summary.schedulableEmployees }} schedulable staff</div>
-        </div>
-        <div class="border border-gray-200 rounded-lg p-3">
-          <div class="text-[10px] uppercase tracking-wide text-gray-500 font-medium">Buffer</div>
-          <div class="text-2xl font-bold leading-tight" :class="bufferHours < 0 ? 'text-red-600' : 'text-gray-900'">
-            {{ bufferHours > 0 ? '+' : '' }}{{ bufferHours.toFixed(0) }}<span class="text-sm font-medium text-gray-500 ml-0.5">h</span>
-          </div>
-          <div class="text-[11px] text-gray-500">labour minus demand</div>
+        <div class="overflow-x-auto">
+          <table class="border-separate" style="border-spacing: 2px">
+            <thead>
+              <tr>
+                <th class="text-left px-2 py-1 min-w-[140px]"></th>
+                <th
+                  v-for="h in data.hours"
+                  :key="'th' + h"
+                  class="text-center text-[10px] font-semibold text-gray-500 px-1 py-1 min-w-[46px]"
+                >{{ hourLabel(h) }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="fn in data.functions" :key="fn.id">
+                <td class="px-2 py-1 text-xs text-gray-800 whitespace-nowrap min-w-[140px]">
+                  <span class="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle" :style="{ backgroundColor: fn.color }"></span>
+                  {{ fn.name }}
+                </td>
+                <td
+                  v-for="c in fn.cells"
+                  :key="fn.id + c.hour"
+                  class="text-center rounded py-1 text-xs tabular-nums"
+                  :class="c.target === 0 ? 'bg-gray-50 text-gray-300' : heatClass(activeSlack(c)) + ' font-semibold'"
+                  :title="cellTitle(fn, c)"
+                >{{ c.target === 0 ? '·' : fmt(activeSlack(c)) }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
-      <!-- Grid -->
-      <div class="px-5 pb-2 overflow-x-auto">
-        <table class="min-w-full border-separate" style="border-spacing: 2px">
-          <thead>
-            <tr>
-              <th class="text-left text-[10px] uppercase tracking-wide text-gray-500 font-medium px-2 py-1 sticky left-0 bg-white z-10">
-                Job Function
-              </th>
-              <th
-                v-for="h in data.hours"
-                :key="h"
-                class="text-center text-[10px] font-semibold text-gray-500 px-1 py-1 min-w-[46px]"
-              >{{ hourLabel(h) }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <!-- Totals first: this is the binding constraint -->
-            <tr>
-              <td class="px-2 py-1 text-xs font-bold text-gray-900 whitespace-nowrap sticky left-0 bg-white z-10 border-b-2 border-gray-300">
-                EVERYONE
-                <div class="text-[9px] font-normal text-gray-500 leading-tight">spare people, all jobs</div>
-              </td>
-              <td
-                v-for="t in data.totals"
-                :key="'tot' + t.hour"
-                class="text-center rounded border-b-2 border-gray-300 py-1"
-                :class="totalCellClass(activeSlack(t))"
-                :title="totalTitle(t)"
-              >
-                <span class="text-xs font-bold tabular-nums">{{ fmt(activeSlack(t)) }}</span>
-              </td>
-            </tr>
-
-            <!-- Per-function rows -->
-            <tr v-for="fn in data.functions" :key="fn.id">
-              <td class="px-2 py-1 text-xs text-gray-800 whitespace-nowrap sticky left-0 bg-white z-10">
-                <span class="inline-block w-2 h-2 rounded-sm mr-1.5 align-middle" :style="{ backgroundColor: fn.color }"></span>
-                {{ fn.name }}
-              </td>
-              <!-- Quiet unless training is genuinely the binding constraint. A big
-                   "+44" here would be meaningless: the same people appear in every
-                   row they're trained for, so plenty-of-cover is not news. -->
-              <td
-                v-for="c in fn.cells"
-                :key="fn.id + c.hour"
-                class="text-center rounded py-1"
-                :class="functionCellClass(c)"
-                :title="cellTitle(fn, c)"
-              >
-                <span v-if="c.target === 0" class="text-[10px] text-gray-300">·</span>
-                <!-- The figure is always shown. Only the COLOUR is held back when
-                     training isn't the constraint, so a row of large spare counts
-                     can't read as "the day is fine". -->
-                <span
-                  v-else
-                  class="text-xs tabular-nums"
-                  :class="isBinding(c) ? 'font-semibold' : 'font-normal'"
-                >{{ fmt(activeSlack(c)) }}</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- Legend -->
-      <div class="px-5 pb-4 space-y-1.5">
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-gray-600">
-          <span class="font-semibold text-gray-700 w-20">Any row:</span>
-          <span class="flex items-center gap-1.5"><span class="w-4 h-4 rounded bg-red-500"></span> not enough people</span>
-          <span class="flex items-center gap-1.5"><span class="w-4 h-4 rounded bg-amber-300"></span> exactly enough — no cover for a call-off</span>
-          <span class="flex items-center gap-1.5"><span class="w-4 h-4 rounded bg-amber-100 border border-amber-200"></span> only 1 spare</span>
-        </div>
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-gray-600">
-          <span class="font-semibold text-gray-700 w-20">Top row:</span>
-          <span class="flex items-center gap-1.5"><span class="w-4 h-4 rounded bg-emerald-200"></span> 1–2 spare</span>
-          <span class="flex items-center gap-1.5"><span class="w-4 h-4 rounded bg-emerald-400"></span> comfortable</span>
-        </div>
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-gray-600">
-          <span class="font-semibold text-gray-700 w-20">Job rows:</span>
-          <span class="flex items-center gap-1.5"><span class="text-gray-400 tabular-nums">+8</span> spare trained people — plenty, not the constraint</span>
-          <span class="flex items-center gap-1.5"><span class="w-4 h-4 rounded bg-gray-50 border border-gray-200"></span> no target this hour</span>
-        </div>
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px] text-gray-600">
-          <span class="font-semibold text-gray-700 w-20">Tip:</span>
-          <span>An hour can read fine and still dip while a shift is on break — switch to <b class="text-gray-700">Worst 15 min</b> to see the low point of every hour.</span>
-        </div>
+      <!-- The ramp, shown as the ramp. Capped at 16+ deliberately — see heatClass. -->
+      <div class="px-5 pt-3 pb-4 flex flex-wrap items-center gap-x-1 gap-y-2 text-[11px] text-gray-500">
+        <span class="mr-1.5">spare people</span>
+        <span
+          v-for="step in RAMP_LEGEND"
+          :key="step.label"
+          class="inline-flex items-center justify-center min-w-[34px] h-5 rounded font-semibold tabular-nums"
+          :class="step.cls"
+        >{{ step.label }}</span>
+        <span class="ml-1.5 mr-4">deeper bench →</span>
+        <span class="inline-flex items-center justify-center min-w-[34px] h-5 rounded bg-gray-50 text-gray-300">·</span>
+        <span class="ml-1.5">no target this hour</span>
       </div>
 
       <div v-if="data.summary.warnings?.length" class="border-t border-gray-100 px-5 py-3">
@@ -177,10 +109,39 @@ const mode = ref<'hour' | 'worst'>('hour')
 
 const activeSlack = (c: any) => (mode.value === 'worst' ? c.worstSlack : c.slack)
 
-const bufferHours = computed(() =>
-  data.value ? data.value.summary.totalLabourHours - data.value.summary.totalDemandHours : 0
-)
-const labourShort = computed(() => bufferHours.value < 0)
+/** Below this many spare trained people, training is the thing running out. */
+const TIGHT_MARGIN = 2
+
+/**
+ * Heatmap step for "spare people". One ramp serves both bands because both count
+ * the same thing.
+ *
+ * Capped at 16+ on purpose. Measured on real data, 46% of cells sit above that and
+ * the range runs to +44 — a linear ramp would spend nearly all its colour on the
+ * difference between +18 and +44, which nobody acts on, and flatten 0–7 where every
+ * decision actually lives.
+ */
+const heatClass = (slack: number): string => {
+  if (slack <= -3) return 'bg-red-600 text-white'
+  if (slack < 0) return 'bg-red-400 text-red-950'
+  if (slack === 0) return 'bg-amber-300 text-amber-950'
+  if (slack === 1) return 'bg-amber-100 text-amber-900'
+  if (slack <= 3) return 'bg-emerald-50 text-emerald-700'
+  if (slack <= 7) return 'bg-emerald-100 text-emerald-800'
+  if (slack <= 15) return 'bg-emerald-200 text-emerald-900'
+  return 'bg-emerald-400 text-emerald-950'
+}
+
+const RAMP_LEGEND = [
+  { label: '<-2', cls: 'bg-red-600 text-white' },
+  { label: '-1', cls: 'bg-red-400 text-red-950' },
+  { label: '0', cls: 'bg-amber-300 text-amber-950' },
+  { label: '1', cls: 'bg-amber-100 text-amber-900' },
+  { label: '2-3', cls: 'bg-emerald-50 text-emerald-700' },
+  { label: '4-7', cls: 'bg-emerald-100 text-emerald-800' },
+  { label: '8-15', cls: 'bg-emerald-200 text-emerald-900' },
+  { label: '16+', cls: 'bg-emerald-400 text-emerald-950' },
+]
 
 const prettyDate = computed(() => {
   if (!props.date) return ''
@@ -199,62 +160,17 @@ const hourLabel = (h: number) => {
 
 const fmt = (n: number) => (n > 0 ? `+${n}` : String(n))
 
-/**
- * The EVERYONE row counts each person once, so its number always means something
- * and always gets a colour. Status colouring, not a categorical palette — and the
- * number is always shown, so meaning never rests on colour alone.
- */
-const totalCellClass = (slack: number) => {
-  if (slack < -2) return 'bg-red-500 text-white'
-  if (slack < 0) return 'bg-red-300 text-red-950'
-  if (slack === 0) return 'bg-amber-300 text-amber-950'
-  if (slack <= 2) return 'bg-emerald-200 text-emerald-900'
-  return 'bg-emerald-400 text-emerald-950'
-}
-
-/**
- * A function row only matters when TRAINING is the thing running out. With 2 or
- * more trained people spare it isn't the constraint, so the cell goes quiet and
- * the eye is left free for the cells that are.
- */
-const TIGHT_MARGIN = 2
-const isBinding = (c: any) => c.target > 0 && activeSlack(c) < TIGHT_MARGIN
-
-const functionCellClass = (c: any) => {
-  if (c.target === 0) return 'bg-gray-50'
-  const slack = activeSlack(c)
-  if (slack < 0) return 'bg-red-400 text-white'
-  if (slack === 0) return 'bg-amber-300 text-amber-950'
-  if (slack < TIGHT_MARGIN) return 'bg-amber-100 text-amber-900'
-  // Plenty of trained cover: the count is still readable, just not shouting.
-  return 'bg-gray-50 text-gray-400'
-}
-
-// Tooltips always carry the real figures, including for the quiet ✓ cells.
+// Tooltips carry the real figures behind every cell, including the quiet ones.
 const cellTitle = (fn: any, c: any) => {
   if (c.target === 0) return `${fn.name} at ${hourLabel(c.hour)} — no target set for this hour`
   const base =
     `${fn.name} at ${hourLabel(c.hour)}\n` +
     `Needs ${c.target}. ${c.trainedFree} trained ${c.trainedFree === 1 ? 'person is' : 'people are'} free.\n` +
-    (isBinding(c)
+    (activeSlack(c) < TIGHT_MARGIN
       ? 'Training is the limit here.'
       : 'Plenty of trained cover — not the constraint.')
   return c.dip
     ? `${base}\nDips to ${c.worstTrainedFree} free for part of the hour (break or lunch).`
-    : base
-}
-
-const totalTitle = (t: any) => {
-  const base =
-    `${hourLabel(t.hour)} — everyone\n` +
-    `${t.demand} needed across all jobs. ${t.onClock} on the clock.\n` +
-    (t.slack < 0
-      ? `Short by ${Math.abs(t.slack)}.`
-      : t.slack === 0
-        ? 'Exactly enough — no cover for a call-off.'
-        : `${t.slack} spare.`)
-  return t.dip
-    ? `${base}\nDrops to ${t.worstOnClock} for part of the hour (break or lunch).`
     : base
 }
 

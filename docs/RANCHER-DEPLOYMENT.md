@@ -99,7 +99,7 @@ Watch the pod logs — you should see lines like:
 ```
 [bootstrap] no schema detected — applying setup.sql
 [bootstrap]   ✓ base schema created
-[bootstrap] applying 8 migration(s)
+[bootstrap] applying 17 migration(s)
 [bootstrap]   ✓ 001-add-staffing-targets.sql
 ...
 [bootstrap]   ✓ 008-add-missing-columns.sql

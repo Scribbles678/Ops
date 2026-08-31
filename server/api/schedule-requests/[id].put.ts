@@ -2,6 +2,23 @@ import { query, transaction } from '../../utils/db'
 import { requireAdmin, getTeamFilter } from '../../utils/authorize'
 
 /**
+ * How a request type materializes into pto_days.pto_type.
+ *
+ * This MUST match what POST /api/schedule-requests writes — they are two paths to
+ * the same state. It previously wrote `request.request_type` verbatim for anything
+ * that wasn't a full day, so an admin-approved partial landed as `pto_partial`
+ * where the submit path writes `partial`. Nothing crashed because describePto()
+ * and hoursForPtoDay() both have a catch-all branch, so the row simply read as an
+ * untyped legacy record everywhere.
+ */
+const PTO_TYPE_FOR_REQUEST: Record<string, string> = {
+  pto_full_day: 'full_day',
+  pto_partial: 'partial',
+  leave_early: 'leave_early',
+  arrive_late: 'arrive_late',
+}
+
+/**
  * Admin override: approve or reject a request, regardless of rules.
  * If approving a previously rejected request, creates the downstream record.
  * If rejecting a previously approved request, deletes the downstream record.
@@ -53,7 +70,7 @@ export default defineEventHandler(async (event) => {
           [
             request.employee_id, request.request_date,
             request.start_time || null, request.end_time || null,
-            request.request_type === 'pto_full_day' ? 'full_day' : request.request_type,
+            PTO_TYPE_FOR_REQUEST[request.request_type] ?? request.request_type,
             request.notes || 'Admin-approved request',
             request.team_id,
           ]

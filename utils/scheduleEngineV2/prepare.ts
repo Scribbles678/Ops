@@ -93,6 +93,12 @@ export interface PrepareInput {
   preferredAssignments: Record<string, Record<string, any>>
   /** employeeId -> pto_days row */
   ptoByEmployee: Record<string, any>
+  /**
+   * employeeId -> the shift they are actually working today, when it differs from
+   * their default. Without this the builder schedules a swapped employee against
+   * the shift they did NOT work, and stamps the assignment with the wrong shift.
+   */
+  swappedShiftByEmployee?: Record<string, string | null>
 }
 
 export interface PreparedInput {
@@ -100,11 +106,15 @@ export interface PreparedInput {
   functions: EngineFunction[]
   preferred: Map<string, Set<string>>
   requiredPins: { employeeId: string; functionId: string; startSlot: number; endSlot: number }[]
+  /** Someone must fix these in the app. See EngineResult.actions. */
+  actions: string[]
+  /** Informational only. */
   warnings: string[]
 }
 
 export function prepare(input: PrepareInput): PreparedInput {
   const warnings: string[] = []
+  const actions: string[] = []
   const shiftById = new Map(input.shifts.map((s: any) => [s.id, s]))
   const activeFunctions = input.jobFunctions.filter((j: any) => j.is_active !== false)
 
@@ -163,8 +173,8 @@ export function prepare(input: PrepareInput): PreparedInput {
     }
     for (const [fnId, units] of staleHours) {
       const name = input.jobFunctions.find((j: any) => j.id === fnId)?.name ?? 'a job function'
-      warnings.push(
-        `${name} has staffing targets set for hours no shift covers — ${units / 4} person-hour(s) were ignored because nobody is on the clock then. Clear those cells in the Target Hours grid.`
+      actions.push(
+        `${name} has staffing targets set for hours nobody works. Clear those cells in the Target Hours grid.`
       )
     }
   }
@@ -192,7 +202,12 @@ export function prepare(input: PrepareInput): PreparedInput {
 
   for (const e of input.employees) {
     if (e.is_active === false) continue
-    const shift = e.shift_id ? shiftById.get(e.shift_id) : null
+    // A shift swap replaces the employee's shift for this date only. PTO hour
+    // accounting has always honoured it (see getEffectiveShift in ptoUsage.ts);
+    // the builder did not, so a swapped person was scheduled against the hours
+    // they were not working and their assignment carried the wrong shift_id.
+    const effectiveShiftId = input.swappedShiftByEmployee?.[e.id] ?? e.shift_id
+    const shift = effectiveShiftId ? shiftById.get(effectiveShiftId) : null
     if (!shift) { noShift++; continue }
 
     const trainedIds = input.training[e.id] ?? []
@@ -240,16 +255,18 @@ export function prepare(input: PrepareInput): PreparedInput {
     employees.push({
       id: e.id,
       name: `${e.last_name}, ${e.first_name}`,
-      shiftId: e.shift_id,
+      displayName: `${e.first_name} ${e.last_name}`.trim(),
+      // The shift actually worked today — swapped where a swap exists.
+      shiftId: effectiveShiftId,
       free,
       trained,
       onClockSlots: onClock,
     })
   }
 
-  if (noShift) warnings.push(`${noShift} active employee(s) have no shift assigned and were not scheduled.`)
-  if (noTraining) warnings.push(`${noTraining} active employee(s) have no training records and were not scheduled.`)
-  if (fullDayPto) warnings.push(`${fullDayPto} employee(s) are off for the full day.`)
+  if (noShift) actions.push(`${noShift} ${noShift === 1 ? 'person has' : 'people have'} no shift assigned, so ${noShift === 1 ? 'they were' : 'they were'} left out. Set a shift on the Employees page.`)
+  if (noTraining) actions.push(`${noTraining} ${noTraining === 1 ? 'person has' : 'people have'} no training recorded, so ${noTraining === 1 ? 'they were' : 'they were'} left out. Add training on the Training page.`)
+  if (fullDayPto) warnings.push(`${fullDayPto} ${fullDayPto === 1 ? 'person is' : 'people are'} off for the whole day.`)
 
   // ---- scarcity: trained supply ÷ total demand ------------------------------
   for (const fn of functions) {
@@ -289,5 +306,5 @@ export function prepare(input: PrepareInput): PreparedInput {
     preferred.set(empId, set)
   }
 
-  return { employees, functions, preferred, requiredPins, warnings }
+  return { employees, functions, preferred, requiredPins, actions, warnings }
 }

@@ -25,6 +25,17 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'Password must be at least 8 characters' })
   }
 
+  // Every account must belong to a team. A team-less account can neither read
+  // nor write any data (see getTeamFilter), so creating one just produces a
+  // login that errors on every screen.
+  if (!team_id) {
+    throw createError({ statusCode: 400, message: 'A team is required' })
+  }
+  const team = await query('SELECT id FROM teams WHERE id = $1', [team_id])
+  if (!team.rows.length) {
+    throw createError({ statusCode: 400, message: 'Team not found' })
+  }
+
   const normalizedEmail = email.trim().toLowerCase()
 
   // Check for duplicate email
@@ -49,7 +60,7 @@ export default defineEventHandler(async (event) => {
       normalizedEmail,
       password_hash,
       full_name ?? null,
-      team_id ?? null,
+      team_id,
       is_admin ?? false,
       is_super_admin ?? false,
       is_display_user ?? false,

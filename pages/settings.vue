@@ -116,7 +116,7 @@
                 No Team
               </span>
               <button
-                v-if="userProfile?.is_super_admin || userProfile?.is_admin"
+                v-if="userProfile?.is_super_admin"
                 @click="showEditOwnTeamModal = true"
                 class="ml-2 text-xs text-blue-600 hover:text-blue-800 underline"
               >
@@ -578,12 +578,13 @@
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Team</label>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Team *</label>
           <select
             v-model="newUser.team_id"
+            required
             class="w-full px-3 py-2 border border-gray-300 rounded-md"
           >
-            <option value="">No Team</option>
+            <option value="" disabled>Select a team…</option>
             <option v-for="team in teams" :key="team.id" :value="team.id">
               {{ team.name }}
             </option>
@@ -667,12 +668,13 @@
         </div>
         
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Team</label>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Team *</label>
           <select
             v-model="editUserData.team_id"
+            required
             class="w-full px-3 py-2 border border-gray-300 rounded-md"
           >
-            <option value="">No Team</option>
+            <option value="" disabled>Select a team…</option>
             <option v-for="team in teams" :key="team.id" :value="team.id">
               {{ team.name }}
             </option>
@@ -856,12 +858,13 @@
       
       <form @submit.prevent="saveOwnTeam" class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Team</label>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Team *</label>
           <select
             v-model="ownTeamData.team_id"
+            required
             class="w-full px-3 py-2 border border-gray-300 rounded-md"
           >
-            <option value="">No Team</option>
+            <option value="" disabled>Select a team…</option>
             <option v-for="team in teams" :key="team.id" :value="team.id">
               {{ team.name }}
             </option>
@@ -1244,6 +1247,10 @@ const saveOwnTeam = async () => {
       method: 'PUT',
       body: { team_id: ownTeamData.value.team_id || null }
     })
+    // The team is carried in the session token, which the endpoint just
+    // re-issued. Re-read it before rendering, or the page keeps showing the
+    // previous team until the next login.
+    await fetchCurrentUser()
     await fetchUserProfile()
     await checkIsSuperAdmin()
     showEditOwnTeamModal.value = false

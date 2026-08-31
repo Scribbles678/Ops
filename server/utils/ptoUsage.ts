@@ -65,10 +65,51 @@ export async function getUsedHoursByDate(
   dateFrom: string,
   dateTo: string
 ): Promise<Record<string, number>> {
+  const breakdown = await getUsedHoursBreakdownByDate(db, teamId, dateFrom, dateTo)
   const used: Record<string, number> = {}
-  const add = (date: string, hours: number) => {
+  for (const [date, b] of Object.entries(breakdown)) used[date] = b.total
+  return used
+}
+
+/** How a date's committed hours split by where they came from. */
+export interface UsedHoursBreakdown {
+  /** Approved schedule_requests - time off that went through the request workflow. */
+  approved: number
+  /** Unplanned call-ins: pto_days with pto_type 'call_in' and no originating request. */
+  callIn: number
+  /** Any other pto_days entered by hand, with no originating request. */
+  manual: number
+  /** approved + callIn + manual. */
+  total: number
+}
+
+/**
+ * The same accounting as getUsedHoursByDate, itemised by source.
+ *
+ * getUsedHoursByDate is a thin wrapper over this, so the total a supervisor reads
+ * on the calendar is by construction the same number the approval rule measures
+ * against the cap - they cannot drift apart, which is the failure this whole area
+ * has already suffered twice.
+ *
+ * The `manual` bucket exists because "approved + call-ins" does NOT add up: an
+ * admin can enter a pto_days row directly, and rows with no pto_type at all exist
+ * in real data. Dropping them would quietly understate the day.
+ */
+export async function getUsedHoursBreakdownByDate(
+  db: Queryable,
+  teamId: string | null,
+  dateFrom: string,
+  dateTo: string
+): Promise<Record<string, UsedHoursBreakdown>> {
+  const used: Record<string, UsedHoursBreakdown> = {}
+  const round2 = (n: number) => Math.round(n * 100) / 100
+  const bucket = (date: string): UsedHoursBreakdown =>
+    (used[date] ??= { approved: 0, callIn: 0, manual: 0, total: 0 })
+  const add = (date: string, hours: number, kind: 'approved' | 'callIn' | 'manual' = 'approved') => {
     if (!hours) return
-    used[date] = Math.round(((used[date] ?? 0) + hours) * 100) / 100
+    const b = bucket(date)
+    b[kind] = round2(b[kind] + hours)
+    b.total = round2(b.approved + b.callIn + b.manual)
   }
 
   // ---- 1. Approved schedule_requests -------------------------------------------
@@ -129,7 +170,11 @@ export async function getUsedHoursByDate(
   )
 
   for (const r of ptoDays.rows) {
-    add(r.date, hoursForPtoDay(r.pto_type, r.start_time, r.end_time, shiftFrom(r)))
+    add(
+      r.date,
+      hoursForPtoDay(r.pto_type, r.start_time, r.end_time, shiftFrom(r)),
+      r.pto_type === 'call_in' ? 'callIn' : 'manual'
+    )
   }
 
   return used

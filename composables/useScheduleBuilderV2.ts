@@ -19,6 +19,8 @@ export interface V2ScheduleAssignment {
   job_function: string
   start_time: string
   end_time: string
+  /** The shift actually worked that day — the swapped one where a swap exists. */
+  shift_id?: string | null
 }
 
 export const useScheduleBuilderV2 = () => {
@@ -59,7 +61,7 @@ export const useScheduleBuilderV2 = () => {
         errors.push('No staffing targets configured. Please set up staffing targets in the admin page.')
       }
       if (errors.length) {
-        return { schedule: [], warnings, errors, gaps: [], overTarget: [], feasibility: [], stats: null }
+        return { schedule: [], warnings, actions: [], errors, gaps: [], overTarget: [], feasibility: [], stats: null }
       }
 
       let training: Record<string, string[]> = {}
@@ -67,7 +69,27 @@ export const useScheduleBuilderV2 = () => {
         training = (await getAllEmployeeTraining(activeEmployees.map((e: any) => e.id))) || {}
       } catch (e: any) {
         errors.push(`Error loading employee training: ${e?.message || 'Unknown error'}`)
-        return { schedule: [], warnings, errors, gaps: [], overTarget: [], feasibility: [], stats: null }
+        return { schedule: [], warnings, actions: [], errors, gaps: [], overTarget: [], feasibility: [], stats: null }
+      }
+
+      // Shift swaps for the date. A swap replaces the employee's shift for that
+      // day only, and the builder must both SCHEDULE against it and STAMP it —
+      // the display groups swapped people by the swapped shift, so an assignment
+      // carrying the original shift is dropped from the board.
+      const swappedShiftByEmployee: Record<string, string | null> = {}
+      if (scheduleDate) {
+        try {
+          const swaps = await $fetch<any[]>(`/api/shift-swaps/${scheduleDate}`)
+          if (Array.isArray(swaps)) {
+            for (const sw of swaps) {
+              if (sw?.employee_id && sw?.swapped_shift_id) {
+                swappedShiftByEmployee[sw.employee_id] = sw.swapped_shift_id
+              }
+            }
+          }
+        } catch (e: any) {
+          warnings.push(`Could not load shift swaps: ${e?.message || 'Unknown error'}`)
+        }
       }
 
       let ptoByEmployee: Record<string, any> = {}
@@ -82,6 +104,8 @@ export const useScheduleBuilderV2 = () => {
         }
       }
 
+      const actions: string[] = []
+
       const prepared = prepare({
         employees: activeEmployees,
         jobFunctions: jobFunctionsList,
@@ -90,8 +114,10 @@ export const useScheduleBuilderV2 = () => {
         staffingTargets,
         preferredAssignments: getPreferredAssignmentsMap(),
         ptoByEmployee,
+        swappedShiftByEmployee,
       })
       warnings.push(...prepared.warnings)
+      actions.push(...prepared.actions)
 
       const result = runEngine({
         employees: prepared.employees,
@@ -101,8 +127,10 @@ export const useScheduleBuilderV2 = () => {
       })
       lastResult.value = result
       warnings.push(...result.warnings)
+      actions.push(...result.actions)
 
       const nameById = new Map(prepared.employees.map((e) => [e.id, e.name]))
+      const shiftById = new Map(prepared.employees.map((e) => [e.id, e.shiftId]))
       const fnNameById = new Map(prepared.functions.map((f) => [f.id, f.name]))
 
       const schedule: V2ScheduleAssignment[] = result.assignments.map((a) => ({
@@ -111,6 +139,8 @@ export const useScheduleBuilderV2 = () => {
         job_function: fnNameById.get(a.functionId) || '',
         start_time: slotToTime(a.startSlot),
         end_time: slotToTime(a.endSlot),
+        // The shift the engine actually built against, swap included.
+        shift_id: shiftById.get(a.employeeId) || null,
       }))
 
       if (!schedule.length) errors.push('No schedule assignments could be created.')
@@ -138,16 +168,19 @@ export const useScheduleBuilderV2 = () => {
       }))
 
       // Summarise the structural ones rather than listing every window.
+      // Plain language on purpose. This line is read by supervisors at sites that
+      // did not build the app, so "headcount-hours" and "shortfalls" are out.
       const structuralHours = Math.round((structural.reduce((s, g) => s + g.shortfall, 0) / 4) * 10) / 10
       const structuralSummary = structural.length
         ? [
-            `${structural.length} further shortfalls (${structuralHours} headcount-hours) fall in windows nobody can cover — a whole shift on break or at lunch, or hours after the last shift ends. No schedule can fill these; staggering a break or trimming a target can.`,
+            `About ${structuralHours} hours of your targets could not be covered by anyone — the people were on break or at lunch, or the hours fall outside every shift. Rebuilding will not change this; staggering a break or trimming a target will.`,
           ]
         : []
 
       return {
         schedule,
         warnings,
+        actions,
         errors,
         gaps,
         overTarget,
@@ -158,7 +191,7 @@ export const useScheduleBuilderV2 = () => {
       }
     } catch (e: any) {
       errors.push(`Error occurred: ${e?.message || 'Unknown error'}`)
-      return { schedule: [], warnings, errors, gaps: [], overTarget: [], feasibility: [], stats: null }
+      return { schedule: [], warnings, actions: [], errors, gaps: [], overTarget: [], feasibility: [], stats: null }
     }
   }
 
@@ -177,7 +210,8 @@ export const useScheduleBuilderV2 = () => {
       .map((a) => {
         const jf = jfList.find((j: any) => j.name === a.job_function) as any
         if (!jf) { dropped.push(`Unknown job function "${a.job_function}"`); return null }
-        const shiftId = employeeShiftMap.get(a.employee_id)
+        // The engine's shift wins: it already resolved any swap for this date.
+        const shiftId = a.shift_id || employeeShiftMap.get(a.employee_id)
         const shift = shiftId ? (shiftsData || []).find((s: any) => s.id === shiftId) : null
         if (!shift) { dropped.push(`Employee ${a.employee_id} has no valid shift assigned`); return null }
         return {

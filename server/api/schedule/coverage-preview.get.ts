@@ -30,7 +30,7 @@ export default defineEventHandler(async (event) => {
   const teamClause = teamId ? 'AND team_id = $1' : ''
   const teamArgs = teamId ? [teamId] : []
 
-  const [employees, jobFunctions, shifts, targets, training, pto] = await Promise.all([
+  const [employees, jobFunctions, shifts, targets, training, pto, swaps] = await Promise.all([
     query(`SELECT * FROM employees WHERE is_active = true ${teamClause}`, teamArgs),
     query(`SELECT * FROM job_functions WHERE 1=1 ${teamClause}`, teamArgs),
     query(`SELECT * FROM shifts WHERE 1=1 ${teamClause}`, teamArgs),
@@ -49,6 +49,13 @@ export default defineEventHandler(async (event) => {
        ${teamId ? 'AND team_id = $1' : ''}`,
       teamId ? [teamId, date] : [date]
     ),
+    // Swaps change who is on the clock and when, so the preview has to see them
+    // or it reports availability for shifts nobody is working.
+    query(
+      `SELECT employee_id, swapped_shift_id FROM shift_swaps WHERE swap_date = $${teamId ? 2 : 1}
+       ${teamId ? 'AND team_id = $1' : ''}`,
+      teamId ? [teamId, date] : [date]
+    ),
   ])
 
   const trainingMap: Record<string, string[]> = {}
@@ -58,6 +65,11 @@ export default defineEventHandler(async (event) => {
   const ptoByEmployee: Record<string, any> = {}
   for (const p of pto.rows as any[]) ptoByEmployee[p.employee_id] = p
 
+  const swappedShiftByEmployee: Record<string, string | null> = {}
+  for (const sw of swaps.rows as any[]) {
+    if (sw?.employee_id && sw?.swapped_shift_id) swappedShiftByEmployee[sw.employee_id] = sw.swapped_shift_id
+  }
+
   const prepared = prepare({
     employees: employees.rows,
     jobFunctions: jobFunctions.rows,
@@ -66,6 +78,7 @@ export default defineEventHandler(async (event) => {
     staffingTargets: targets.rows,
     preferredAssignments: {},
     ptoByEmployee,
+    swappedShiftByEmployee,
   })
 
   // Which hours to show: those with any demand or anybody on the clock.
