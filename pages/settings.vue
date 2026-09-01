@@ -176,6 +176,17 @@
               <p class="mt-1 text-xs text-gray-400">Total shift swaps allowed per day across the team</p>
             </div>
             <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Leave-On-Time / Day (whole team)</label>
+              <input
+                v-model="ruleFields.max_leave_on_time_per_day"
+                type="number"
+                min="0"
+                placeholder="No limit"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p class="mt-1 text-xs text-gray-400">Total &ldquo;leave on time&rdquo; requests allowed per day across the team. Leave blank for no limit.</p>
+            </div>
+            <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Shift Changes Allowed per Week per Employee</label>
               <input
                 v-model.number="ruleFields.max_shift_change_per_employee_per_week"
@@ -184,6 +195,17 @@
                 class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
               <p class="mt-1 text-xs text-gray-400">How many shift changes one employee can have approved within a week (Mon–Sun)</p>
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Leave-Early Requests per Week per Employee</label>
+              <input
+                v-model="ruleFields.max_leave_early_per_employee_per_week"
+                type="number"
+                min="0"
+                placeholder="No limit"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <p class="mt-1 text-xs text-gray-400">How many times one employee can leave early within a week (Mon–Sun). Leave blank for no limit.</p>
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Leave-On-Time Requests per Week per Employee</label>
@@ -904,11 +926,23 @@ const { isSuperAdmin, checkIsSuperAdmin, fetchAllTeams, createTeam: createTeamFn
 const { fetchSettings, saveSetting, getSetting, loading: teamSettingsLoading, error: teamSettingsError } = useTeamSettings()
 
 // Request rules state (scalar settings)
-const ruleFields = ref({
+const ruleFields = ref<{
+  max_shift_swaps_per_day: number
+  max_shift_change_per_employee_per_week: number
+  max_leave_on_time_per_employee_per_week: number
+  min_business_days_notice: number
+  // Blank = no limit. Deliberately not defaulted to a number: this rule was added
+  // after teams were already live, and a default would start refusing requests
+  // that used to be approved without anyone changing a setting.
+  max_leave_on_time_per_day: number | ''
+  max_leave_early_per_employee_per_week: number | ''
+}>({
   max_shift_swaps_per_day: 3,
   max_shift_change_per_employee_per_week: 1,
   max_leave_on_time_per_employee_per_week: 5,
   min_business_days_notice: 1,
+  max_leave_on_time_per_day: '',
+  max_leave_early_per_employee_per_week: '',
 })
 
 // Per-weekday team-wide PTO-hours limit. Stored as the JSON setting
@@ -1405,6 +1439,13 @@ const saveRequestRules = async () => {
   }
 }
 
+/** Opt-in limits: absent or blank stays blank, which the rule engine reads as no limit. */
+const optionalSetting = (key: string): number | '' => {
+  const raw = getSetting(key, '')
+  const n = parseInt(raw, 10)
+  return String(raw).trim() === '' || isNaN(n) ? '' : n
+}
+
 // Load request rules from team settings
 const loadRequestRules = async () => {
   await fetchSettings()
@@ -1413,6 +1454,9 @@ const loadRequestRules = async () => {
     max_shift_change_per_employee_per_week: parseInt(getSetting('max_shift_change_per_employee_per_week', '1'), 10),
     max_leave_on_time_per_employee_per_week: parseInt(getSetting('max_leave_on_time_per_employee_per_week', '5'), 10),
     min_business_days_notice: parseInt(getSetting('min_business_days_notice', '1'), 10),
+    // Absent or blank stays blank, so an unconfigured team keeps "no limit".
+    max_leave_on_time_per_day: optionalSetting('max_leave_on_time_per_day'),
+    max_leave_early_per_employee_per_week: optionalSetting('max_leave_early_per_employee_per_week'),
   }
   // Per-weekday PTO limits: use saved JSON, else fall back to the legacy single value.
   const fallback = parseInt(getSetting('max_pto_hours_per_day', '8'), 10)

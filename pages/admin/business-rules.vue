@@ -95,6 +95,38 @@
                   </td>
                 </tr>
               </tbody>
+              <!-- Per-hour summary. Targeted is live against the inputs above, so the
+                   effect of an edit is visible before saving. -->
+              <tfoot>
+                <tr class="border-t-2 border-gray-300">
+                  <td class="px-3 md:px-4 py-1.5 whitespace-nowrap text-xs font-semibold text-gray-700 sticky left-0 bg-white z-10">
+                    Targeted
+                  </td>
+                  <td v-for="hour in gridHours" :key="'t' + hour.value"
+                      class="px-1 py-1.5 text-center text-xs font-semibold text-gray-900 tabular-nums">
+                    {{ targetedByHour[hour.value] }}
+                  </td>
+                </tr>
+                <tr>
+                  <td class="px-3 md:px-4 py-1.5 whitespace-nowrap text-xs text-gray-600 sticky left-0 bg-white z-10">
+                    On shift
+                  </td>
+                  <td v-for="hour in gridHours" :key="'a' + hour.value"
+                      class="px-1 py-1.5 text-center text-xs text-gray-600 tabular-nums">
+                    {{ staffOnShiftByHour[hour.value] }}
+                  </td>
+                </tr>
+                <tr>
+                  <td class="px-3 md:px-4 py-1.5 whitespace-nowrap text-xs text-gray-600 sticky left-0 bg-white z-10">
+                    Spare
+                  </td>
+                  <td v-for="hour in gridHours" :key="'s' + hour.value"
+                      class="px-1 py-1.5 text-center text-xs tabular-nums"
+                      :class="spareClass(spareByHour[hour.value])">
+                    {{ spareByHour[hour.value] > 0 ? '+' : '' }}{{ spareByHour[hour.value] }}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
           </div>
 
@@ -107,6 +139,11 @@
           </p>
 
           <p class="mt-3 text-xs text-gray-500">
+            <span class="font-medium text-gray-600">On shift</span> counts everyone whose shift covers
+            that hour. It ignores time off, breaks and lunch — for the real picture on a specific day,
+            use the Training &amp; Coverage Preview on the Create Schedule page.
+          </p>
+          <p class="mt-1.5 text-xs text-gray-500">
             Columns follow your active shifts, set in
             <NuxtLink to="/details" class="text-blue-600 hover:underline">Details &amp; Settings → Shift Management</NuxtLink>.
           </p>
@@ -417,6 +454,61 @@ const gridHours = computed(() => {
     return { value, label: `${display}${period}`, staffed: staffedHours.value.has(h) }
   })
 })
+
+/**
+ * People whose shift covers any part of each hour — the labour you have to spend.
+ *
+ * Counts a person once per hour their shift overlaps, matching how the grid treats
+ * an hourly target. Deliberately ignores time off: this is a planning template, not
+ * a specific date, so there is no PTO to apply. It also ignores breaks and lunch —
+ * for the real, dated picture (breaks, lunch, PTO and the worst 15 minutes) use the
+ * Training & Coverage Preview on the Create Schedule page.
+ */
+const staffOnShiftByHour = computed<Record<string, number>>(() => {
+  const out: Record<string, number> = {}
+  const activeShifts = new Map(
+    (shifts.value || []).filter((sh: any) => sh && sh.is_active !== false).map((sh: any) => [sh.id, sh])
+  )
+  for (const h of gridHours.value) {
+    const hourStart = Number(h.value.slice(0, 2)) * 60
+    const hourEnd = hourStart + 60
+    let n = 0
+    for (const e of employees.value || []) {
+      if (!e || e.is_active === false || !e.shift_id) continue
+      const sh: any = activeShifts.get(e.shift_id)
+      if (!sh) continue
+      const start = timeToMinutes(sh.start_time)
+      let end = timeToMinutes(sh.end_time)
+      if (start == null || end == null) continue
+      if (end <= start) end += 24 * 60 // crosses midnight
+      if (start < hourEnd && end > hourStart) n++
+    }
+    out[h.value] = n
+  }
+  return out
+})
+
+/** Column total, live against what is typed rather than what is saved. */
+const targetedByHour = computed<Record<string, number>>(() => {
+  const out: Record<string, number> = {}
+  for (const h of gridHours.value) {
+    let n = 0
+    for (const jf of gridJobFunctions.value) n += getGridValue(jf.id, h.value)
+    out[h.value] = n
+  }
+  return out
+})
+
+const spareByHour = computed<Record<string, number>>(() => {
+  const out: Record<string, number> = {}
+  for (const h of gridHours.value) {
+    out[h.value] = (staffOnShiftByHour.value[h.value] ?? 0) - (targetedByHour.value[h.value] ?? 0)
+  }
+  return out
+})
+
+const spareClass = (n: number) =>
+  n < 0 ? 'text-red-600 font-semibold' : n === 0 ? 'text-amber-600 font-semibold' : 'text-gray-500'
 
 /** Columns shown only because a stale target sits there. */
 const unstaffedHours = computed(() => gridHours.value.filter((h) => !h.staffed))

@@ -206,6 +206,25 @@ Write messages for a supervisor at a site that did not build this app: no
 `EngineEmployee.displayName` ("First Last") in a sentence; `name` is "Last, First"
 and is for lists and the grid.
 
+## Staffing Targets grid (Rules & Targets)
+
+`pages/admin/business-rules.vue`. Hour columns come from the team's **active
+shifts** (never hardcode the range — see the note in `CONTEXT.md`), and the table
+foots with a per-hour summary:
+
+- **Targeted** — the column total, computed from the *inputs* rather than the saved
+  rows, so the effect of an edit shows before you save.
+- **On shift** — people whose shift covers any part of that hour.
+- **Spare** — the difference; red when negative, amber at zero.
+
+**On shift ignores time off, breaks and lunch, on purpose.** This grid is a
+planning template with no date attached, so there is no PTO to apply. That means
+it will disagree with the Training & Coverage Preview, which *is* dated and does
+model breaks and lunch — on 2026-09-01 this grid showed +14 spare at 4PM where the
+preview showed -3, because the 12pm shift takes lunch at 16:00. Both are right for
+the question they answer. Send anyone asking "can we actually cover Tuesday?" to
+the preview.
+
 ## Training & Coverage Preview
 
 The panel on Create Schedule, fed by `GET /api/schedule/coverage-preview`

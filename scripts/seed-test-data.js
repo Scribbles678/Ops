@@ -9,15 +9,47 @@
  *
  * Usage:
  *   node scripts/seed-test-data.js           # Add test data (skips if already exists)
- *   node scripts/seed-test-data.js --reset   # Clear test data and re-seed
+ *   node scripts/seed-test-data.js --reset --yes-delete-everything
  *
- * Requires: DATABASE_URL (default: postgresql://postgres:postgres@localhost:5432/scheduling)
+ * LOCAL DEV ONLY — enforced, not merely advised. See the guard below.
+ *
+ * Requires: DATABASE_URL (default: postgresql://postgres:postgres@localhost:5433/scheduling)
  */
 
 import pg from 'pg'
 
 const DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/scheduling'
+  process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5433/scheduling'
+
+/**
+ * Refuse to touch anything that is not obviously a local database.
+ *
+ * This script does not just add rows — `--reset` DELETES every employee, shift,
+ * job function, training record, target and schedule row belonging to the team
+ * called "Default Team". It finds that team by name, so pointed at production it
+ * would go looking for a real team to erase, and the person most likely to have
+ * production credentials in their shell is the person mid-deploy.
+ *
+ * This used to be "protected" only by the file being named seed-test-data1.js
+ * while package.json called seed-test-data.js. That worked, but it looked exactly
+ * like a typo, so the guard was one helpful cleanup away from vanishing. It is now
+ * an explicit check that says what it is.
+ */
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1', '@db:', '@postgres:']
+const isLocal = LOCAL_HOSTS.some((h) => DATABASE_URL.includes(h))
+if (!isLocal && !process.argv.includes('--i-understand-this-is-not-local')) {
+  const safe = DATABASE_URL.replace(/\/\/[^@]*@/, '//***@')
+  console.error(
+    [
+      'Refusing to run: DATABASE_URL does not look local.',
+      '  ' + safe,
+      '',
+      'This script seeds (and with --reset, DELETES) an entire team. If you really',
+      'mean to run it against that database, re-run with --i-understand-this-is-not-local.',
+    ].join('\n')
+  )
+  process.exit(1)
+}
 
 // Job functions - Locus, Pick, X4, EM9, Meter (parent for training), Meter 1-20 (for scheduling)
 const JOB_FUNCTIONS = [
@@ -71,6 +103,18 @@ const EMPLOYEES = generateEmployees(50)
 async function main() {
   const reset = process.argv.includes('--reset')
 
+  // "Reset" reads far milder than what it does, so it needs saying out loud.
+  if (reset && !process.argv.includes('--yes-delete-everything')) {
+    console.error(
+      [
+        '--reset DELETES the entire "Default Team": every employee, shift, job',
+        'function, training record, staffing target and schedule row - not just',
+        'test data. Re-run with --yes-delete-everything if that is what you want.',
+      ].join('\n')
+    )
+    process.exit(1)
+  }
+
   const client = new pg.Client({
     connectionString: DATABASE_URL,
     ssl: process.env.DATABASE_SSL === 'false' || DATABASE_URL.includes('localhost') ? false : { rejectUnauthorized: false },
@@ -87,7 +131,7 @@ async function main() {
     }
 
     if (reset) {
-      console.log('Resetting test data...')
+      console.log(`Deleting all data for "Default Team" on ${DATABASE_URL.replace(/\/\/[^@]*@/, '//***@')} …`)
       await client.query('DELETE FROM schedule_assignments WHERE team_id = $1', [teamId])
       await client.query('DELETE FROM daily_targets WHERE team_id = $1', [teamId])
       await client.query('DELETE FROM employee_training WHERE team_id = $1', [teamId])

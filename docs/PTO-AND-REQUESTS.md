@@ -112,7 +112,13 @@ shows a state the app cannot produce.
 | Max leave-on-time per employee per week | `max_leave_on_time_per_employee_per_week` | 5 |
 | Max PTO hours per day, team-wide | `max_pto_hours_by_dow` (JSON `mon`..`fri`), falling back to `max_pto_hours_per_day` | 8 |
 | Max shift swaps per day, team-wide | `max_shift_swaps_per_day` | 3 |
+| Max leave-on-time per day, team-wide | `max_leave_on_time_per_day` | *unset = no limit* |
+| Max leave-early per employee per week | `max_leave_early_per_employee_per_week` | *unset = no limit* |
 | Date not blocked | `team_blocked_dates` | — |
+
+⚠ `max_leave_early_per_employee_per_day` sits in `team_settings` on some installs
+and **nothing reads it** — a leftover from when the limit was daily. Do not mistake
+it for the weekly rule above; it has no effect.
 
 **Advance notice counts full working days strictly between today and the requested
 date**, weekends excluded. A Friday request for Monday is 0 business days and is
@@ -123,9 +129,17 @@ Weekends and any unset weekday fall back to the legacy single
 
 ### Per-type behaviour
 
-- **`leave_on_time`** (decline overtime) is informational: only the advance-notice
-  and date-not-blocked rules run, it charges 0 hours, and it creates **no**
-  downstream record.
+- **`leave_on_time`** (decline overtime) is informational: it charges 0 hours and
+  creates **no** downstream record. Four rules apply — advance notice,
+  date-not-blocked, the per-employee weekly cap, and the team-wide daily cap.
+
+**Opt-in limits.** `max_leave_on_time_per_day` and
+`max_leave_early_per_employee_per_week` are skipped entirely when the setting is
+absent or blank, via `getOptionalSetting()` rather than `getSetting(key,
+default)`. It was added after teams were already live, so a numeric default would
+have started refusing requests that used to be approved on installs where nobody
+changed a setting. **Any limit added from here on should follow that pattern** —
+blank means no limit, and the Settings field says so.
 - **`arrive_late`** runs the full rule set and, on approval, materializes a
   `pto_days` row (`start='00:00:00'`, `end=arrival`, `pto_type='arrive_late'`) so
   the builder clips the employee's morning.

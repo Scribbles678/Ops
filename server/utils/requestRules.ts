@@ -83,6 +83,21 @@ export async function evaluateRequest(
     return isNaN(val) ? defaultValue : val
   }
 
+  /**
+   * A limit that only applies once someone sets it. Returns null when the setting
+   * is absent or blank.
+   *
+   * Needed for limits added AFTER teams were already using the app: giving one a
+   * numeric default would start refusing requests that used to be approved, on
+   * installs where nobody touched a setting. Blank means no limit.
+   */
+  const getOptionalSetting = (key: string): number | null => {
+    const raw = settings[key]
+    if (raw === undefined || raw === null || String(raw).trim() === '') return null
+    const val = parseInt(String(raw), 10)
+    return isNaN(val) ? null : val
+  }
+
   const ruleResults: RuleResults = {}
   const reqDate = new Date(request_date + 'T00:00:00')
 
@@ -120,6 +135,41 @@ export async function evaluateRequest(
   if (request_type === 'leave_on_time') {
     const maxLeaveOnTime = getSetting('max_leave_on_time_per_employee_per_week', 5)
     ruleResults['max_leave_on_time_per_week'] = (await countEmployeeWeek('leave_on_time')) < maxLeaveOnTime
+  }
+
+  // Rule 2b2: Leave early — max per employee per WEEK.
+  //
+  // Opt-in, like the daily leave-on-time cap below: skipped until a team sets it,
+  // so adding this rule cannot start refusing requests that used to be approved.
+  let leaveEarlyWeekCap: number | null = null
+  let leaveEarlyWeekUsed = 0
+  if (request_type === 'leave_early') {
+    leaveEarlyWeekCap = getOptionalSetting('max_leave_early_per_employee_per_week')
+    if (leaveEarlyWeekCap !== null) {
+      leaveEarlyWeekUsed = await countEmployeeWeek('leave_early')
+      ruleResults['max_leave_early_per_week'] = leaveEarlyWeekUsed < leaveEarlyWeekCap
+    }
+  }
+
+  // Rule 2c: Leave on time — max per DAY across the whole team.
+  //
+  // Opt-in: skipped entirely until a team sets it, because there was no daily cap
+  // before this rule existed and a default would silently start refusing requests
+  // that used to be approved.
+  let leaveOnTimeDayCap: number | null = null
+  let leaveOnTimeDayUsed = 0
+  if (request_type === 'leave_on_time') {
+    leaveOnTimeDayCap = getOptionalSetting('max_leave_on_time_per_day')
+    if (leaveOnTimeDayCap !== null) {
+      const r = await db.query(
+        `SELECT COUNT(*)::int as cnt FROM schedule_requests
+         WHERE team_id = $1 AND request_type = 'leave_on_time' AND status = 'approved'
+           AND request_date = $2`,
+        [teamId, request_date]
+      )
+      leaveOnTimeDayUsed = (r.rows[0] as any).cnt
+      ruleResults['max_leave_on_time_per_day'] = leaveOnTimeDayUsed < leaveOnTimeDayCap
+    }
   }
 
   // Rule 4: Max PTO hours per day (team-wide). Counts hour-reducing requests only —
@@ -175,6 +225,8 @@ export async function evaluateRequest(
       advance_notice: `Requests must be made at least ${minBusinessDaysNotice} business day(s) in advance`,
       max_shift_change_per_week: 'Max shift changes for this employee this week reached',
       max_leave_on_time_per_week: 'Max leave-on-time requests for this employee this week reached',
+      max_leave_on_time_per_day: `Max leave-on-time requests for the day reached (${leaveOnTimeDayUsed} of ${leaveOnTimeDayCap} used)`,
+      max_leave_early_per_week: `Max leave-early requests for this employee this week reached (${leaveEarlyWeekUsed} of ${leaveEarlyWeekCap} used)`,
       max_pto_hours_per_day: `Team PTO hours limit for the day exceeded (${usedHours}h of ${cap}h used, this needs ${requestedHours}h)`,
       max_shift_swaps_per_day: 'Max shift swaps for the day exceeded',
       date_not_blocked: blockedReason

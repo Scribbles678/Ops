@@ -5,20 +5,19 @@ A web-based scheduling application for distribution center operations. Built wit
 ## Features
 
 - **Daily Schedule Management** - Visual grid editor for employee assignments with 15-minute granularity
-- **Automated Schedule Builder** - Generates schedules from staffing targets, training, and required assignments. Deterministic (no LLM, no solver): scarce-first fill that treats targets as a minimum, deploys surplus labor (with per-function caps and overflow sinks), and integrates PTO + a lunch/break coverage pass
-- **Schedule Builder V2 (Beta)** - Parallel 15-minute-resolution engine with a cost function, per-gap explanations, pre-flight feasibility, and a business-priority matrix (`staffing_priority`) that decides which functions go short first
-- **Coverage Preview** - Read-at-a-glance grid on Create Schedule showing trained headcount vs demand before you build
+- **Automated Schedule Builder** - Generates the day from staffing targets, training, shifts, required assignments, approved PTO and shift swaps. Deterministic (no LLM, no solver): 96 x 15-minute slots, a cost function over every candidate, pre-flight feasibility, per-gap explanations, and a business-priority matrix (`staffing_priority`) deciding which functions go short first. Targets are a minimum, so surplus labour is deployed (with per-function caps and overflow sinks) rather than parked
+- **Training & Coverage Preview** - Heatmap on Create Schedule: spare trained people for every job, every hour, before you build
 - **Employee Overview** - Per-employee dashboard: hours by function, PTO usage, rolling picking-error trend, and performance notes for reviews
 - **Staffing Targets** - Set target headcount per job function per hour in a grid UI
 - **Coverage Requirements** - Flag job functions that need lunch/break coverage so the builder keeps the station continuously staffed
 - **Employee Training Matrix** - Track which employees are trained for which job functions, with auto-save
-- **Required Assignments** - Lock specific employees to specific functions daily (AM/PM-specific supported)
-- **PTO Calendar** - Week/month calendar combining approved PTO and pending requests; admin approval workflow
-- **Schedule Requests** - Unified request pipeline for PTO (full/partial), leave-early, and shift swaps with an auto-approval rule engine (per-day limits, team PTO-hour caps, blocked dates)
+- **Required Assignments** - Pin specific employees to specific functions for explicit time blocks (legacy AM/PM split still honoured)
+- **PTO Calendar** - Week/month calendar of approved time off, with per-day hours itemised by source (approved / call-in / manual) and an admin override workflow
+- **Schedule Requests** - Unified pipeline for PTO (full/partial), leave-early, leave-on-time, arrive-late and shift swaps, decided instantly by a rule engine (business-day notice, per-week limits, team PTO-hour caps by weekday, blocked dates)
 - **Shift Swap Tracking** - Record and manage shift swaps between employees
 - **Copy Schedule** - Duplicate a previous day's schedule to a new date
-- **Display Mode** - Full-screen TV view with auto-refresh (every 2 min)
-- **Multi-Tenant Teams** - Data isolation by team enforced at the API layer via JWT `team_id`
+- **Display Mode** - Wall-mounted iPad/TV board of today's schedule, auto-refreshing every 2 min, sized for reading at a distance
+- **Multi-Tenant Teams** - Data isolation by team enforced on every request via the signed `team_id`; an account with no team is refused all data
 - **Authentication** - JWT-based auth with HttpOnly cookies, role hierarchy (Super Admin, Admin, User, Display)
 
 ## Tech Stack
@@ -152,8 +151,9 @@ scheduling-app-v2/
 │   └── ...                   # Individual table schemas for reference
 ├── scripts/
 │   ├── seed-first-user.js    # Create initial admin account
-│   ├── seed-test-data1.js    # Optional test data
-│   ├── sim-builder.mjs       # Engine harness (real engines, real data, quality metrics)
+│   ├── seed-test-data.js     # 50-person demo team (local only; --reset is destructive)
+│   ├── sim-builder.mjs       # Engine harness (real engine, real data, quality metrics)
+│   ├── seed-pto-mock.mjs     # Mock PTO data for the calendar (local dev; --clear removes it)
 │   └── ui-smoke.mjs          # Browser smoke test (screenshots + JS-error check)
 ├── docker-compose.yml        # Local development stack
 ├── Dockerfile                # Multi-stage production build
@@ -212,7 +212,8 @@ reported rather than suppressed.
 
 Inputs: `staffing_targets` + `employee_training` + `preferred_assignments` +
 `shifts` (with lunch/break times) + `job_functions` (incl. `max_headcount`,
-`surplus_overflow`, `staffing_priority`) + `pto_days` for the target date.
+`surplus_overflow`, `staffing_priority`) + `pto_days` and `shift_swaps` for the
+target date.
 
 Outputs: `{ schedule, actions, warnings, errors, gaps, overTarget }` — reviewed in a
 modal that leads with `actions` (things a person must fix), then written via a

@@ -43,7 +43,7 @@ scheduling-app-v2/
 │   ├── schedule/
 │   │   ├── [date].vue         # Schedule editor with 15-min grid, dashboards, KPI strip
 │   │   └── tomorrow.vue       # Create schedule: 4 cards (copy previous day, Automated
-│   │                          #   Builder, manual, Rules & Targets) + Coverage Preview
+│   │                          #   Builder, manual, Rules & Targets) + Training & Coverage Preview
 │   └── admin/
 │       └── business-rules.vue # Staffing targets grid (headcount per job function per hour).
 │                          #   Hour columns are derived from the team's ACTIVE SHIFTS,
@@ -152,15 +152,24 @@ scheduling-app-v2/
 │   └── migrations/            # 001–018 incremental migrations (idempotent; no 009 — deleted)
 ├── scripts/
 │   ├── seed-first-user.js     # Creates initial admin user
-│   ├── seed-test-data1.js     # Seeds sample data
-│   ├── sim-builder.mjs        # Engine harness — bundles the REAL engines with esbuild
+│   ├── seed-test-data.js      # Seeds a 50-person demo team. LOCAL ONLY — refuses a
+│   │                          #   non-local DATABASE_URL; --reset needs a second flag
+│   ├── sim-builder.mjs        # Engine harness — bundles the REAL engine with esbuild
 │   │                          #   and replays real DB rows. Read-only. See TESTING.md
+│   ├── seed-pto-mock.mjs      # Mock PTO/requests for the calendar. Local dev only;
+│   │                          #   every row tagged [mock], --clear removes exactly those
 │   └── ui-smoke.mjs           # Browser smoke test — drives Edge/Chrome, fails on any
 │                              #   JS error, screenshots every screen to scripts/.smoke/
 └── docs/                      # Project documentation
 ```
 
-> Note: schema/admin bootstrap is automatic on container boot (`server/plugins/bootstrap.ts`); the `scripts/seed-*` files are for local/manual setup only. The `npm run seed:test-data` script in `package.json` points at `seed-test-data.js`, but the file on disk is `seed-test-data1.js` — adjust the path or filename if you use it.
+> Note: schema/admin bootstrap is automatic on container boot (`server/plugins/bootstrap.ts`); the `scripts/seed-*` files are for local/manual setup only.
+>
+> **`seed-test-data.js` is guarded, and the guard is load-bearing.** `--reset` does not clear "test data" — it DELETES every employee, shift, job function, training record, staffing target and schedule row belonging to the team named *Default Team*, which it looks up by name. The script therefore refuses any `DATABASE_URL` that is not obviously local, and `--reset` additionally requires `--yes-delete-everything`. Overriding the first needs `--i-understand-this-is-not-local`.
+>
+> All three dev scripts (`seed-test-data.js`, `sim-builder.mjs`, `seed-pto-mock.mjs`) default to `localhost:5433`, which is the port `docker-compose.yml` exposes. `seed-first-user.js` still defaults to 5432.
+>
+> For years this was "protected" only by the file being named `seed-test-data1.js` while `package.json` called `seed-test-data.js`. That worked, but it looked exactly like a typo and was one helpful cleanup away from disappearing. Do not replace the explicit guard with an implicit one.
 
 ---
 
@@ -396,7 +405,7 @@ npm install          # Install dependencies
 npm run dev          # Start dev server (localhost:3000)
 npm run build        # Production build
 npm run seed:first-user    # Create initial admin user (local/manual)
-npm run seed:test-data     # Seed sample data (see note: file is seed-test-data1.js)
+npm run seed:test-data     # Seed a 50-person demo team (local DBs only — see the guard note above)
 ```
 
 ### Docker
