@@ -38,6 +38,17 @@ export const DB_MIN_BLOCK_MINUTES = 15
  */
 export const PREFERRED_MIN_MINUTES = 30
 
+/**
+ * Period engine only (`periodEngine.ts`): the shortest stint a person may be given
+ * when a stretch between breaks is split in two. `null` means never split — one
+ * function per stretch, no exceptions.
+ *
+ * 45, not 60, because the 7AM shift's first stretch is 07:00-08:45 and startup is
+ * a one-hour job: at 60 that stretch cannot be cut at all and startup goes
+ * unstaffed every day. At 45 the only splits that survive are that case.
+ */
+export const PERIOD_MIN_STINT_MINUTES: number | null = 45
+
 export interface EngineEmployee {
   id: string
   /** "Last, First" - for lists and the schedule grid, where it sorts correctly. */
@@ -66,6 +77,23 @@ export interface EngineFunction {
   isOverflow: boolean
   /** Functions excluded from targets are not gap-reported. */
   excludeFromTargets: boolean
+  /**
+   * 1 where a shortfall COUNTS. 0 inside a break window (or lunch window) when the
+   * function is not flagged to stay covered through it. The floor does not expect
+   * the builder to staff every function through a 15-minute break, so those
+   * shortfalls are neither scored, chased nor reported. Demand itself is left
+   * intact so placement still spans the window.
+   */
+  mustCover: Uint8Array
+  /**
+   * 1 inside a break/lunch window this function IS flagged to stay covered
+   * through. Closing one of these slots earns an extra reward, and a shortfall
+   * here is reported as something a person must fix.
+   */
+  keepCovered: Uint8Array
+  /** job_functions.break_coverage_required / lunch_coverage_required */
+  coverBreaks: boolean
+  coverLunch: boolean
   /** trainedSupply / totalDemand — lower means harder to staff. */
   scarcity: number
   /**
@@ -180,6 +208,13 @@ export interface EngineWeights {
    * hole appears next — the single biggest lever in a tight day.
    */
   flexibility: number
+  /**
+   * Extra reward per break/lunch slot closed on a function flagged to stay
+   * covered through it (`keepCovered`). Stacks on `unmet`, so such a slot is worth
+   * double — enough to pull a cross-shift person onto that function across the
+   * window instead of onto something that merely has more open slots.
+   */
+  breakCover: number
 }
 
 export const DEFAULT_WEIGHTS: EngineWeights = {
@@ -194,6 +229,7 @@ export const DEFAULT_WEIGHTS: EngineWeights = {
   waste: 25,
   flexibility: 3,
   priority: 45,
+  breakCover: 100,
 }
 
 /** Lowest (worst) priority value; used to convert priority into a reward. */

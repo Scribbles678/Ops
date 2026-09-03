@@ -408,6 +408,33 @@
             </select>
             <span class="block text-xs text-gray-500 mt-1">When there aren't enough people to cover everything, the V2 builder fills higher-priority functions first and lets the lowest ones go short.</span>
           </div>
+          <!-- Break / lunch coverage. The builder does not normally treat a hole
+               during a 15-minute break or lunch as a gap; these say "this one
+               matters enough to keep staffed through it". -->
+          <div class="flex items-center space-x-2.5">
+            <input
+              id="jobFunction_break_coverage_required"
+              v-model="jobFunctionFormData.break_coverage_required"
+              type="checkbox"
+              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label for="jobFunction_break_coverage_required" class="block text-sm font-medium text-gray-700">
+              Keep covered during 15-minute breaks
+              <span class="block text-xs font-normal text-gray-500">The builder will try to keep someone from another shift on this function while a shift is on break, and flag it if nobody can.</span>
+            </label>
+          </div>
+          <div class="flex items-center space-x-2.5">
+            <input
+              id="jobFunction_lunch_coverage_required"
+              v-model="jobFunctionFormData.lunch_coverage_required"
+              type="checkbox"
+              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <label for="jobFunction_lunch_coverage_required" class="block text-sm font-medium text-gray-700">
+              Keep covered through lunch
+              <span class="block text-xs font-normal text-gray-500">Same, for the 30-minute lunch window.</span>
+            </label>
+          </div>
           <div class="flex items-center space-x-2.5">
             <input
               id="jobFunction_surplus_overflow"
@@ -636,7 +663,9 @@ const jobFunctionFormData = ref({
   exclude_from_targets: false,
   max_headcount: null,
   surplus_overflow: false,
-  staffing_priority: 3
+  staffing_priority: 3,
+  break_coverage_required: false,
+  lunch_coverage_required: false
 })
 
 const PRIORITY_LABELS = {
@@ -691,7 +720,9 @@ const openAddJobFunctionModal = () => {
     exclude_from_targets: false,
     max_headcount: null,
     surplus_overflow: false,
-    staffing_priority: 3
+    staffing_priority: 3,
+    break_coverage_required: false,
+    lunch_coverage_required: false
   }
   showJobFunctionModal.value = true
 }
@@ -709,7 +740,9 @@ const openEditJobFunctionModal = (jobFunction) => {
     exclude_from_targets: jobFunction.exclude_from_targets ?? false,
     max_headcount: jobFunction.max_headcount ?? null,
     surplus_overflow: jobFunction.surplus_overflow ?? false,
-    staffing_priority: jobFunction.staffing_priority ?? 3
+    staffing_priority: jobFunction.staffing_priority ?? 3,
+    break_coverage_required: jobFunction.break_coverage_required ?? false,
+    lunch_coverage_required: jobFunction.lunch_coverage_required ?? false
   }
   showJobFunctionModal.value = true
 }

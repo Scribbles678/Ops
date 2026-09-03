@@ -154,12 +154,12 @@
 </template>
 
 <script setup lang="ts">
+import { toLocalISO } from '~/utils/localDate'
+
 const { logout } = useAuth()
 
-const today = computed(() => {
-  const date = new Date()
-  return date.toISOString().split('T')[0]
-})
+// Local calendar date, not UTC — from 7pm Central toISOString() already says tomorrow.
+const today = computed(() => toLocalISO(new Date()))
 
 const handleLogout = async () => {
   if (confirm('Are you sure you want to logout?')) {

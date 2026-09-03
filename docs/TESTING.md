@@ -23,12 +23,13 @@ Replays **real database rows** through the **real engine** and prints quality
 metrics. Read-only; it never writes a schedule.
 
 ```bash
-node scripts/sim-builder.mjs 2026-08-03                  # first team
-node scripts/sim-builder.mjs 2026-08-03 --team "Site B"  # a specific team
+node scripts/sim-builder.mjs 2026-08-03                    # first team, both engines A/B'd
+node scripts/sim-builder.mjs 2026-08-03 --engine period    # slot | period | both
+node scripts/sim-builder.mjs 2026-08-03 --team "Site B"    # a specific team
 ```
 
-It bundles `utils/scheduleEngineV2/` with esbuild and calls it directly. **It
-contains no scheduling logic of its own** — that is the entire point of its
+It bundles `utils/scheduleEngineV2/` with esbuild and calls both engines directly.
+**It contains no scheduling logic of its own** — that is the entire point of its
 current shape.
 
 > Until Aug 2026 this file held a hand-written *copy* of the algorithm. It
@@ -48,12 +49,20 @@ assignments: 203 | on-clock 356.0h | assigned 356.0h | IDLE 0.0h
 distinct functions/person: {"1":33,"2":16} | employees with no work: 0
 UNMET 30.5h  |  OVER-target 62.8h
 FIXABLE unmet (a trained person was free and idle): 0.0h  <-- the engine's own misses
+BOUNCING: 21 of 164 stretches between breaks carry more than one function | people who switch mid-stretch: 15
+    e.g. Smith, Barbara 07:00-08:45: startup 07:00-08:00 > Pick 08:00-08:45
   gaps: 40 | feasibility issues: 14 | things to fix: 0 | notes: 0
 ```
 
+With both engines selected (the default) it ends with a per-function A/B,
+`slot -> period`, listing only the functions whose unmet differs.
+
 - **IDLE** — on-clock hours nobody was given work for. Should be at or near zero.
-- **UNMET** — target headcount-hours not covered. Mostly *not* the engine's fault:
-  break cliffs, targets outside shift hours, or simply too few bodies.
+- **UNMET** — target headcount-hours not covered, counting only shortfalls the
+  floor cares about: a hole during a break/lunch window on a function not flagged
+  to stay covered through it is reported separately as **not counted**. What is
+  left is mostly *not* the engine's fault: targets outside shift hours, or simply
+  too few bodies.
 - **FIXABLE** — the number that matters. Unmet demand at a moment when a trained
   person was free and unassigned. That is the engine genuinely missing something.
   **Non-zero fixable is a bug; a large UNMET with zero fixable is a short floor.**
@@ -61,6 +70,9 @@ FIXABLE unmet (a trained person was free and idle): 0.0h  <-- the engine's own m
   labour is deployed rather than parked.
 - **distinct functions/person** — the readability of someone's day. Drifting
   toward 3-4 for everyone means the schedule got choppier.
+- **BOUNCING** — stretches between breaks (the free grid straight out of
+  `prepare()`) that carry more than one function. The period engine exists to keep
+  this small; on the slot engine it runs 13-14%.
 
 ### Judging an engine change
 
@@ -111,6 +123,75 @@ an already-installed Edge or Chrome, so no browser download happens either.
 
 If `npm run dev` reports a port other than 3000 (it falls back when something else
 holds the port — a stale `docker compose` app, for instance), pass `--base`.
+
+### Test against a preview server, not the user's dev server
+
+**Do not point browser tests at `npm run dev`.** It is the user's own process, it
+may be on a fallback port, and it breaks in ways that look like your bug:
+
+- The `docker compose` **app** container is usually stale and holds port 3000, so
+  `npm run dev` silently lands on **3001**. A `200` from 3000 may be a months-old
+  build answering you.
+- **Deleting a composable leaves Vite serving a stale module graph** — the dev
+  server starts returning 500s on assets until it is restarted. Seen for real when
+  `useAIScheduleBuilder.ts` was removed.
+
+Instead, build and run the production output on a spare port. It is closer to what
+ships, it is yours to restart, and it cannot disturb the user:
+
+```bash
+npm run build
+DATABASE_URL="postgresql://postgres:postgres@localhost:5433/scheduling" DATABASE_SSL=false JWT_SECRET="local-smoke-test-secret-at-least-32-chars-long" NODE_ENV=development PORT=3005 node .output/server/index.mjs &
+sleep 14                      # it applies migrations on boot; wait before hitting it
+curl -s http://localhost:3005/api/health
+
+node scripts/ui-smoke.mjs --base http://localhost:3005
+```
+
+Stop it when you are done (Windows):
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+  Where-Object { $_.CommandLine -like '*server/index.mjs*' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
+
+Rebuild and restart it after every code change — it serves the built output, so it
+will not hot-reload.
+
+### One-off browser scripts for things the smoke test cannot answer
+
+`ui-smoke.mjs` proves screens render. For anything measurable, write a throwaway
+Playwright script in the scratchpad and read real values out of the DOM. This is
+how several real bugs in this repo were found rather than guessed at:
+
+- **Tap targets** — `boundingBox()` on the week arrows showed 20x20 against the
+  44x44 that Apple's guidance and WCAG 2.5.5 both require.
+- **Colour contrast** — reading `getComputedStyle` for every schedule chip and
+  computing WCAG ratios showed X4 at **3.68:1**, below the 4.5:1 floor.
+- **Real interaction** — `page.tap()` with `hasTouch: true` proved the arrows
+  actually paged the week, not just that they existed.
+
+Pattern:
+
+```js
+import { chromium } from 'playwright-core'
+const browser = await chromium.launch({
+  executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  headless: true,
+})
+const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } })
+page.on('pageerror', (e) => console.log('PAGEERROR:', e.message))
+page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE:', m.text()) })
+// log in, navigate, then measure whatever the change was supposed to affect
+```
+
+Always attach the `pageerror` / `console` listeners — a silent JS error is exactly
+what a build will not catch.
+
+**Screenshot, then actually open the image.** A pass/fail line does not tell you the
+banner is red on a successful build, or that the time is clipped off a chip. Both
+were found by looking.
 
 ### What to check by hand afterwards
 

@@ -1,8 +1,13 @@
 # Schedule Builder
 
-The most-used feature. **One engine**, deterministic — no LLM, no constraint
-solver. Launched from the Automated Schedule Builder card on
-`pages/schedule/tomorrow.vue`.
+The most-used feature. **One pipeline, two placement engines**, deterministic —
+no LLM, no constraint solver. Launched from two cards on
+`pages/schedule/tomorrow.vue`:
+
+| Card | Engine | Places |
+|---|---|---|
+| Automated Schedule Builder | `engine.ts` (slot engine) | 15-minute runs, wherever a run closes the most unmet demand |
+| Automated Schedule Builder V2 | `periodEngine.ts` (period engine) | one function per **stretch between breaks** — see [Period engine](#period-engine-builder-v2) |
 
 | | |
 |---|---|
@@ -11,6 +16,11 @@ solver. Launched from the Automated Schedule Builder card on
 | Placement | cost function scored over every candidate |
 | Business priority | `job_functions.staffing_priority` |
 | Explains gaps | per-gap cause + pre-flight feasibility |
+
+Both engines share `prepare()`, required pins, the cost weights, block merging,
+gap explanation and stats. Those live **once**, exported from `engine.ts`, and
+the period engine imports them. Two copies of any of them is the drift this repo
+keeps paying for — extend the shared function, don't fork it.
 
 It writes through `POST /api/schedule/replace` (transactional delete + insert for
 the date) and surfaces a review modal before anything is written.
@@ -101,6 +111,14 @@ scheduling side now agrees with it.
 with a warning**, not committed — the DB trigger would reject it and fail the entire
 save. (This actually happened: one bad pin failed a 204-row save at row 113.)
 
+A row with **no blocks** uses the legacy AM/PM columns, by the same rule the Rules &
+Targets page applies when it converts one on edit: AM = shift start to lunch, PM =
+lunch end to shift end, both NULL = base function all day, one NULL = that half
+unpinned. Until Sep 2026 `prepare()` pinned the base function all day and never
+read the PM column — "X4 mornings, EM9 afternoons" ran X4 all day, and 4 of the 7
+live pins on the dev data were of that shape. Pins are resolved in `prepare()` for
+both engines; only `prepare()` may read those columns.
+
 **Phase C — feasibility, before anything is assigned.** For every slot with demand,
 compare against trained people actually free. Produces "19:00 needs 19, only 2
 trained people are available" up front. This is the diagnostic that would have
@@ -147,11 +165,98 @@ is better; `-Infinity` is inadmissible. Default weights:
 | `waste` | 25 | cost per slot consumed that was ALREADY covered |
 | `shortBlock` | 4 | per minute below `PREFERRED_MIN_MINUTES` (inert today) |
 | `flexibility` | 3 | per function the employee is trained on |
+| `breakCover` | 100 | extra per break/lunch slot closed on a function flagged to stay covered through it |
+
+Both engines score with these weights — `scoreCandidate()` in the slot engine and
+`score()` in the period engine apply the same terms to a run or a whole period.
+
+## Keeping a function covered through breaks and lunch
+
+**The builder does not, by default, treat a hole during a 15-minute break or the
+lunch window as a gap.** The team lead's rule: when a whole shift goes on break,
+the floor does not expect Pick to be staffed for those fifteen minutes, and listing
+34 such holes on every build buried the two or three a supervisor could act on.
+
+Two checkboxes per job function (Details → Job Functions → Edit) say "this one
+matters enough to keep staffed through it": **Keep covered during 15-minute
+breaks** (`break_coverage_required`) and **Keep covered through lunch**
+(`lunch_coverage_required`). These columns existed from migration 006 but were
+never read by any engine and had no live editor until Sep 2026.
+
+How it works, in `prepare()`: every function gets a `mustCover` mask (0 inside a
+break/lunch window it is *not* flagged for) and a `keepCovered` mask (1 inside a
+window it *is* flagged for). Demand itself is untouched, so blocks still span the
+window rather than fragmenting around it. Then:
+
+- **Not flagged (default):** shortfalls inside the window are not scored, not
+  chased by either engine, not reported as gaps, not counted by the feasibility
+  check or the harness. Placement is otherwise unchanged.
+- **Flagged:** those shortfalls count, and closing one earns `breakCover` on top of
+  `unmet` — enough to pull a person from another shift onto that function across
+  the window instead of onto something with more open slots. A shortfall that
+  remains becomes a **thing to fix**, by name and time: "Help desk is set to stay
+  covered during breaks, but nobody trained for it is free 09:45–10:00. Train
+  someone on a different shift, or stagger that break."
+- **No 15-minute blocks are created either way.** Coverage comes from someone on a
+  different shift holding the function through the window.
+
+Reality check the builder states rather than hides: at 19:00 the only people not on
+break are the two on the 4pm shift, so a flagged function is coverable then only if
+one of those two is trained on it.
 
 `flexibility` is the biggest lever on a tight day: it spends specialists first and
 keeps multi-skilled people free for whichever hole appears next.
 
 ---
+
+## Period engine (Builder V2)
+
+`utils/scheduleEngineV2/periodEngine.ts`, added Sep 2026. The team lead's
+complaint about the slot engine: people are moved between job functions inside a
+couple of hours. **Measured on three real days: 21 of 164 stretches between breaks
+carried two functions and 15-18 people bounced**, nearly always at an hour
+boundary where a target changed — the engine chasing hourly targets inside a
+two-hour stretch.
+
+**The unit of assignment is the period**: a maximal on-clock stretch between
+breaks, lunch, PTO and required pins — exactly the unit a supervisor thinks in.
+Each step picks the single best (person, period, function) across the whole floor
+and commits the whole period.
+
+- **Period-first, not function-first.** A first prototype walked functions in
+  priority order and handed each the best period. It cost +29h unmet, because a
+  priority-2 function took a 7AM person's whole first period for 45 minutes of
+  need and startup, which exists only in that hour, got nobody. Choosing the best
+  pair globally is within 1-3h of the slot engine.
+- **One split per period, at an hour boundary, both pieces at least
+  `PERIOD_MIN_STINT_MINUTES` (45).** Strict "never split" leaves startup empty
+  every day: the 7AM stretch is 07:00-08:45 and startup is one hour, and a
+  60-minute floor cannot cut that stretch either. At 45 the only splits left are
+  that case. Set the constant to `null` for strict.
+- **Phases E (cliff patching) and the surplus loop are gone.** Leftover periods
+  get one function each: under-target first, then continuation of what the person
+  already does, then an overflow sink, then anything they are trained on.
+
+**Measured, 2026-09-03 (same inputs):**
+
+| | slot engine | period engine |
+|---|---|---|
+| unmet | 45.0h | 46.3h |
+| stretches with 2+ functions | 21 of 164 | 4 of 164 |
+| people who switch mid-stretch | 15 | 4 |
+| people on a single function all day | 22 | 32 |
+
+**The trade to know about: coverage moves between functions.** Pick improves by
+~5h and Runner by ~3h; **Locus goes from 1.25h short to 7.75h short.** Locus needs
+one extra person for 11:00-12:00 only, and a person on Pick for the whole
+10:00-12:30 stretch no longer hops over for that hour. Raising the priority weight
+or scaling it per unmet slot recovered at most 1.5h of that, doubled the
+switching and hurt EM9, so **no priority knob was added**. If a one-hour target
+blip matters, the fix is in the Rules & Targets grid (smooth the blip to the
+period), not in the engine.
+
+The harness prints a **BOUNCING** line for both engines; that number and the
+per-function A/B are what to read when touching this engine.
 
 ## Business priority (`staffing_priority`, migration 018)
 
@@ -321,13 +426,15 @@ belongs in the engine.
 **→ Full guide: [TESTING.md](./TESTING.md).** The short version:
 
 ```bash
-node scripts/sim-builder.mjs 2026-08-03
-node scripts/sim-builder.mjs 2026-08-03 --team "Site B"  # a specific team
+node scripts/sim-builder.mjs 2026-08-03                   # both engines, A/B'd
+node scripts/sim-builder.mjs 2026-08-03 --engine period   # one engine
+node scripts/sim-builder.mjs 2026-08-03 --team "Site B"   # a specific team
 ```
 
-The harness replays real DB rows through the **real** engine and prints idle hours,
-functions/person, unmet and over-target per function, and **fixable unmet** — unmet
-demand at a moment when a trained person was free and idle. Fixable is the engine's
+The harness replays real DB rows through the **real** engines and prints idle hours,
+functions/person, unmet and over-target per function, **fixable unmet** — unmet
+demand at a moment when a trained person was free and idle — and **bouncing**, the
+stretches between breaks that carry more than one function. Fixable is the engine's
 own miss; a large unmet with zero fixable is simply a short floor.
 
 A/B the same date with one variable changed and confirm **zero functions made

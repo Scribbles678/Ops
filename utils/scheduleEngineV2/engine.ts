@@ -14,6 +14,10 @@
  *
  * This module is pure and fully exported — every function here is unit-testable
  * without a database, a browser or Nuxt.
+ *
+ * The pieces that are not specific to this engine's placement strategy — pins,
+ * committing an assignment, merging, gap explanation, stats — are exported and
+ * shared with `periodEngine.ts`, so the two engines cannot drift on them.
  */
 import {
   DEFAULT_WEIGHTS,
@@ -40,6 +44,276 @@ export interface EngineInput {
   /** Pre-resolved required pins (phase B input). */
   requiredPins: { employeeId: string; functionId: string; startSlot: number; endSlot: number }[]
   weights?: EngineWeights
+}
+
+// ---------------------------------------------------------------------------
+// Shared building blocks (used by both engines)
+// ---------------------------------------------------------------------------
+
+/** Mutable state every placement touches: what has been assigned, and to whom. */
+export interface Board {
+  assignments: EngineAssignment[]
+  /** employeeId -> distinct functionIds they are already on. */
+  distinctByEmp: Map<string, Set<string>>
+}
+
+export const newBoard = (employees: EngineEmployee[]): Board => ({
+  assignments: [],
+  distinctByEmp: new Map(employees.map((e) => [e.id, new Set<string>()])),
+})
+
+/**
+ * Snapshot availability BEFORE anything is assigned. Without this the gap
+ * explanations can't tell "everyone was on break" from "everyone was busy" —
+ * both look identical once `free` has been consumed by assignment.
+ */
+export const snapshotFree = (employees: EngineEmployee[]): Map<string, Uint8Array> =>
+  new Map(employees.map((e) => [e.id, Uint8Array.from(e.free)]))
+
+export const capRoom = (fn: EngineFunction, start: number, end: number): boolean => {
+  if (fn.maxHeadcount == null) return true
+  for (let s = start; s < end; s++) if ((fn.covered[s] ?? 0) >= fn.maxHeadcount) return false
+  return true
+}
+
+/** Is there a shortfall in [start,end) that actually counts (see EngineFunction.mustCover)? */
+export const hasCountedUnmet = (fn: EngineFunction, start: number, end: number): boolean => {
+  for (let s = start; s < end; s++) {
+    if (fn.mustCover[s] === 1 && (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0)) return true
+  }
+  return false
+}
+
+export const commitAssignment = (
+  board: Board,
+  emp: EngineEmployee,
+  fn: EngineFunction,
+  start: number,
+  end: number,
+  reason: EngineAssignment['reason']
+): void => {
+  for (let s = start; s < end; s++) {
+    emp.free[s] = 0
+    fn.covered[s] = (fn.covered[s] ?? 0) + 1
+  }
+  board.assignments.push({ employeeId: emp.id, functionId: fn.id, startSlot: start, endSlot: end, reason })
+  board.distinctByEmp.get(emp.id)!.add(fn.id)
+}
+
+/**
+ * Phase B — required pins.
+ *
+ * A required assignment does NOT override training. The database enforces
+ * training with a trigger, so honouring such a pin would build a schedule that
+ * cannot be saved at all — one bad pin failed the entire write. Skip it and say
+ * so, rather than poisoning the whole day.
+ */
+export function applyRequiredPins(
+  board: Board,
+  pins: EngineInput['requiredPins'],
+  employees: EngineEmployee[],
+  functions: EngineFunction[],
+  actions: string[]
+): void {
+  const fnById = new Map(functions.map((f) => [f.id, f]))
+  const empById = new Map(employees.map((e) => [e.id, e]))
+  for (const pin of pins) {
+    const emp = empById.get(pin.employeeId)
+    const fn = fnById.get(pin.functionId)
+    if (!emp || !fn) continue
+    if (!emp.trained.has(fn.id)) {
+      actions.push(
+        `${emp.displayName} is set to always work ${fn.name} but is not trained for it, so it was skipped. Add the training, or remove the requirement.`
+      )
+      continue
+    }
+    // Only the parts of the pin the employee is actually free for.
+    for (const run of runsWhere(SLOTS_PER_DAY, (s) => s >= pin.startSlot && s < pin.endSlot && emp.free[s] === 1)) {
+      if (slotsToMinutesLength(run.start, run.end) < ENGINE_MIN_BLOCK_MINUTES) continue
+      commitAssignment(board, emp, fn, run.start, run.end, 'required-pin')
+    }
+  }
+}
+
+/** Phase G — merge touching same-employee/same-function blocks. */
+export function mergeAssignments(assignments: EngineAssignment[]): EngineAssignment[] {
+  const sorted = [...assignments].sort((a, b) =>
+    a.employeeId === b.employeeId
+      ? a.functionId === b.functionId
+        ? a.startSlot - b.startSlot
+        : a.functionId.localeCompare(b.functionId)
+      : a.employeeId.localeCompare(b.employeeId)
+  )
+  const merged: EngineAssignment[] = []
+  for (const a of sorted) {
+    const prev = merged[merged.length - 1]
+    if (prev && prev.employeeId === a.employeeId && prev.functionId === a.functionId && prev.endSlot === a.startSlot) {
+      prev.endSlot = a.endSlot
+    } else {
+      merged.push({ ...a })
+    }
+  }
+  return merged
+}
+
+/**
+ * Phase H — gaps, over-target, explanations.
+ *
+ * Was the whole floor short at this moment? Total demand across every function
+ * versus every person actually available. When that is negative, the shortfall
+ * is arithmetic, not allocation — no schedule can fix it, and it should not be
+ * presented to a supervisor as something to act on. This is the same test the
+ * Coverage Preview uses for its "impossible" figure.
+ */
+export function explainGaps(
+  employees: EngineEmployee[],
+  functions: EngineFunction[],
+  originallyFree: Map<string, Uint8Array>
+): { gaps: EngineGap[]; overTarget: EngineResult['overTarget']; actions: string[] } {
+  const actions: string[] = []
+  const totalDemandAt = new Int16Array(SLOTS_PER_DAY)
+  const totalFreeAt = new Int16Array(SLOTS_PER_DAY)
+  for (const fn of functions) {
+    for (let s = 0; s < SLOTS_PER_DAY; s++) totalDemandAt[s] += fn.demand[s] ?? 0
+  }
+  for (const e of employees) {
+    const base = originallyFree.get(e.id)!
+    for (let s = 0; s < SLOTS_PER_DAY; s++) if (base[s] === 1) totalFreeAt[s]++
+  }
+  const floorWasShort = (start: number, end: number): boolean => {
+    for (let s = start; s < end; s++) {
+      if ((totalDemandAt[s] ?? 0) > (totalFreeAt[s] ?? 0)) return true
+    }
+    return false
+  }
+
+  const gaps: EngineGap[] = []
+  const overTarget: EngineResult['overTarget'] = []
+
+  for (const fn of functions) {
+    // Only shortfalls that count: a hole during a break on a function nobody asked
+    // to keep covered through breaks is not a gap.
+    for (const run of runsWhere(SLOTS_PER_DAY, (s) => fn.mustCover[s] === 1 && (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0))) {
+      let shortfall = 0
+      for (let s = run.start; s < run.end; s++) {
+        shortfall = Math.max(shortfall, (fn.demand[s] ?? 0) - (fn.covered[s] ?? 0))
+      }
+      // Explain it, using the pre-assignment snapshot so "on break" is not
+      // mistaken for "busy".
+      let trainedAnyone = 0        // trained for this function at all
+      let trainedOnFloor = 0       // trained AND rostered-and-free at some point in the run
+      let trainedStillFree = 0     // trained AND still unassigned now
+      for (const e of employees) {
+        if (!e.trained.has(fn.id)) continue
+        trainedAnyone++
+        const base = originallyFree.get(e.id)!
+        let onFloor = false
+        let stillFree = false
+        for (let s = run.start; s < run.end; s++) {
+          if (base[s] === 1) onFloor = true
+          if (e.free[s] === 1) stillFree = true
+        }
+        if (onFloor) trainedOnFloor++
+        if (stillFree) trainedStillFree++
+      }
+
+      let cause: EngineGap['cause']
+      let detail: string
+      if (trainedAnyone === 0) {
+        cause = 'no-one-trained-on-shift'
+        detail = `nobody is trained for ${fn.name}`
+      } else if (floorWasShort(run.start, run.end)) {
+        // Arithmetic, not allocation: more work is being asked for than there are
+        // people present. Usually a whole shift on break, or a target set for an
+        // hour nobody is rostered.
+        cause = 'no-one-trained-on-shift'
+        detail = `the whole floor is short at this time — more staffing is being asked for than there are people available`
+      } else if (trainedOnFloor === 0) {
+        // The decisive case: they exist, but not one of them is on the floor for
+        // any part of this window — a break, a lunch, or outside shift hours.
+        cause = 'no-one-trained-on-shift'
+        detail = `nobody trained for ${fn.name} is on the floor then — break, lunch, or outside shift hours`
+      } else if (fn.maxHeadcount != null && !capRoom(fn, run.start, run.end)) {
+        cause = 'capped'
+        detail = `${fn.name} is at its max headcount of ${fn.maxHeadcount}`
+      } else if (trainedStillFree > 0) {
+        cause = 'no-availability'
+        detail = `${trainedStillFree} trained staff free but the remaining window is too short to assign`
+      } else {
+        cause = 'all-trained-busy'
+        detail = `all ${trainedOnFloor} trained staff on the floor are already on other work`
+      }
+
+      const time = `${slotToTime(run.start)}–${slotToTime(run.end)}`
+      gaps.push({
+        functionId: fn.id,
+        functionName: fn.name,
+        time,
+        startSlot: run.start,
+        endSlot: run.end,
+        shortfall,
+        cause,
+        detail,
+      })
+
+      // A function someone asked to keep covered through breaks/lunch, short
+      // inside exactly such a window: that is a decision for a person, not a note.
+      // Name only the window, not the whole shortfall run it sits in — a function
+      // short all morning would otherwise read "nobody is free 08:00–12:00".
+      const through = fn.coverBreaks && fn.coverLunch ? 'breaks and lunch' : fn.coverBreaks ? 'breaks' : 'lunch'
+      for (const win of runsWhere(SLOTS_PER_DAY, (s) => s >= run.start && s < run.end && fn.keepCovered[s] === 1)) {
+        const winTime = `${slotToTime(win.start)}–${slotToTime(win.end)}`
+        actions.push(
+          cause === 'all-trained-busy'
+            ? `${fn.name} is set to stay covered during ${through}, but everyone trained for it is on other work ${winTime}. Pin someone to it for that window, or accept the gap.`
+            : `${fn.name} is set to stay covered during ${through}, but nobody trained for it is free ${winTime}. Train someone on a different shift, or stagger that break.`
+        )
+      }
+    }
+
+    if (!fn.excludeFromTargets) {
+      for (const run of runsWhere(SLOTS_PER_DAY, (s) => (fn.covered[s] ?? 0) > (fn.demand[s] ?? 0) && (fn.demand[s] ?? 0) > 0)) {
+        let surplus = 0
+        for (let s = run.start; s < run.end; s++) {
+          surplus = Math.max(surplus, (fn.covered[s] ?? 0) - (fn.demand[s] ?? 0))
+        }
+        overTarget.push({ functionName: fn.name, time: `${slotToTime(run.start)}–${slotToTime(run.end)}`, surplus })
+      }
+    }
+  }
+
+  return { gaps, overTarget, actions }
+}
+
+export function buildStats(employees: EngineEmployee[], final: EngineAssignment[]): EngineResult['stats'] {
+  const assignedByEmp = new Map<string, number>()
+  const fnsByEmp = new Map<string, Set<string>>()
+  for (const a of final) {
+    assignedByEmp.set(a.employeeId, (assignedByEmp.get(a.employeeId) ?? 0) + (a.endSlot - a.startSlot))
+    if (!fnsByEmp.has(a.employeeId)) fnsByEmp.set(a.employeeId, new Set())
+    fnsByEmp.get(a.employeeId)!.add(a.functionId)
+  }
+  let slotsAvailable = 0
+  let employeesWithNoWork = 0
+  const functionsPerPerson: Record<number, number> = {}
+  for (const e of employees) {
+    slotsAvailable += e.onClockSlots
+    const n = fnsByEmp.get(e.id)?.size ?? 0
+    functionsPerPerson[n] = (functionsPerPerson[n] ?? 0) + 1
+    if (n === 0 && e.onClockSlots > 0) employeesWithNoWork++
+  }
+  const slotsAssigned = [...assignedByEmp.values()].reduce((s, n) => s + n, 0)
+  const shortBlocks = final.filter(
+    (a) => slotsToMinutesLength(a.startSlot, a.endSlot) < PREFERRED_MIN_MINUTES
+  ).length
+  return {
+    slotsAvailable,
+    slotsAssigned,
+    idleSlots: Math.max(0, slotsAvailable - slotsAssigned),
+    employeesWithNoWork,
+    functionsPerPerson,
+    shortBlocks,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -79,7 +353,7 @@ export function analyseFeasibility(
     }
 
     for (let s = 0; s < SLOTS_PER_DAY; s++) {
-      const need = fn.demand[s] ?? 0
+      const need = fn.mustCover[s] === 1 ? fn.demand[s] ?? 0 : 0
       if (need <= 0) { flush(s); continue }
       let avail = 0
       for (const e of employees) if (e.trained.has(fn.id) && e.free[s] === 1) avail++
@@ -113,13 +387,19 @@ export function scoreCandidate(ctx: CandidateContext, w: EngineWeights): number 
   const minutes = slotsToMinutesLength(startSlot, endSlot)
   if (minutes < ENGINE_MIN_BLOCK_MINUTES) return -Infinity
 
-  // How much genuine unmet demand this run closes.
+  // How much genuine unmet demand this run closes. A shortfall during a break on
+  // a function not flagged to stay covered through breaks does not count; one on
+  // a function that IS flagged counts extra.
   let unmetClosed = 0
+  let keepClosed = 0
   for (let s = startSlot; s < endSlot; s++) {
-    if ((fn.covered[s] ?? 0) < (fn.demand[s] ?? 0)) unmetClosed++
+    if (fn.mustCover[s] === 1 && (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0)) {
+      unmetClosed++
+      if (fn.keepCovered[s] === 1) keepClosed++
+    }
   }
 
-  let score = unmetClosed * w.unmet
+  let score = unmetClosed * w.unmet + keepClosed * w.breakCover
 
   // Slots consumed that were already covered. Penalising these stops the engine
   // spending a whole shift on a function that only needed its first hour.
@@ -168,41 +448,17 @@ export function runEngine(input: EngineInput): EngineResult {
   const { employees, functions, preferred } = input
   const warnings: string[] = []
   const actions: string[] = []
-  const assignments: EngineAssignment[] = []
 
-  const fnById = new Map(functions.map((f) => [f.id, f]))
-  const empById = new Map(employees.map((e) => [e.id, e]))
-  const distinctByEmp = new Map<string, Set<string>>(employees.map((e) => [e.id, new Set<string>()]))
-
-  // Snapshot availability BEFORE anything is assigned. Without this the gap
-  // explanations can't tell "everyone was on break" from "everyone was busy" —
-  // both look identical once `free` has been consumed by assignment.
-  const originallyFree = new Map(employees.map((e) => [e.id, Uint8Array.from(e.free)]))
+  const board = newBoard(employees)
+  const { assignments, distinctByEmp } = board
+  const originallyFree = snapshotFree(employees)
 
   // ---- Phase C: feasibility, before anything is decided --------------------
   const feasibility = analyseFeasibility(employees, functions)
 
   // ---- helpers -------------------------------------------------------------
-  const capRoom = (fn: EngineFunction, start: number, end: number): boolean => {
-    if (fn.maxHeadcount == null) return true
-    for (let s = start; s < end; s++) if ((fn.covered[s] ?? 0) >= fn.maxHeadcount) return false
-    return true
-  }
-
-  const commit = (
-    emp: EngineEmployee,
-    fn: EngineFunction,
-    start: number,
-    end: number,
-    reason: EngineAssignment['reason']
-  ) => {
-    for (let s = start; s < end; s++) {
-      emp.free[s] = 0
-      fn.covered[s] = (fn.covered[s] ?? 0) + 1
-    }
-    assignments.push({ employeeId: emp.id, functionId: fn.id, startSlot: start, endSlot: end, reason })
-    distinctByEmp.get(emp.id)!.add(fn.id)
-  }
+  const commit = (emp: EngineEmployee, fn: EngineFunction, start: number, end: number, reason: EngineAssignment['reason']) =>
+    commitAssignment(board, emp, fn, start, end, reason)
 
   const hasAdjacent = (empId: string, fnId: string, start: number, end: number): boolean =>
     assignments.some(
@@ -210,27 +466,7 @@ export function runEngine(input: EngineInput): EngineResult {
     )
 
   // ---- Phase B: required pins ---------------------------------------------
-  for (const pin of input.requiredPins) {
-    const emp = empById.get(pin.employeeId)
-    const fn = fnById.get(pin.functionId)
-    if (!emp || !fn) continue
-
-    // A required assignment does NOT override training. The database enforces
-    // training with a trigger, so honouring such a pin would build a schedule
-    // that cannot be saved at all — one bad pin failed the entire write.
-    // Skip it and say so, rather than poisoning the whole day.
-    if (!emp.trained.has(fn.id)) {
-      actions.push(
-        `${emp.displayName} is set to always work ${fn.name} but is not trained for it, so it was skipped. Add the training, or remove the requirement.`
-      )
-      continue
-    }
-    // Only the parts of the pin the employee is actually free for.
-    for (const run of runsWhere(SLOTS_PER_DAY, (s) => s >= pin.startSlot && s < pin.endSlot && emp.free[s] === 1)) {
-      if (slotsToMinutesLength(run.start, run.end) < ENGINE_MIN_BLOCK_MINUTES) continue
-      commit(emp, fn, run.start, run.end, 'required-pin')
-    }
-  }
+  applyRequiredPins(board, input.requiredPins, employees, functions, actions)
 
   // ---- Phase D: coverage fill, scarcest function first ---------------------
   // Repeat until no positive-value move exists. Each round re-sorts, because
@@ -248,7 +484,10 @@ export function runEngine(input: EngineInput): EngineResult {
       .sort((a, b) => a.priority - b.priority || a.scarcity - b.scarcity)
 
     for (const fn of ordered) {
+      // Runs are cut from raw demand so a block still spans a break slot rather
+      // than fragmenting around it; a run with nothing that COUNTS is skipped.
       const unmetRuns = runsWhere(SLOTS_PER_DAY, (s) => (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0))
+        .filter((r) => hasCountedUnmet(fn, r.start, r.end))
       if (!unmetRuns.length) continue
 
       // HARDEST run first, not longest.
@@ -327,6 +566,7 @@ export function runEngine(input: EngineInput): EngineResult {
   for (const fn of cliffOrder) {
     if (!fn.demand.some((d) => d > 0)) continue
     for (const gapRun of runsWhere(SLOTS_PER_DAY, (s) => (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0))) {
+      if (!hasCountedUnmet(fn, gapRun.start, gapRun.end)) continue
       let filled = true
       while (filled) {
         filled = false
@@ -381,10 +621,7 @@ export function runEngine(input: EngineInput): EngineResult {
       )
       if (!eligible.length) { for (let s = run.start; s < run.end; s++) emp.free[s] = 0; continue }
 
-      const underTarget = eligible.filter((f) => {
-        for (let s = run.start; s < run.end; s++) if ((f.covered[s] ?? 0) < (f.demand[s] ?? 0)) return true
-        return false
-      })
+      const underTarget = eligible.filter((f) => hasCountedUnmet(f, run.start, run.end))
       const overflow = eligible.filter((f) => f.isOverflow)
       const continuation = eligible.filter((f) => distinct.has(f.id))
 
@@ -420,22 +657,7 @@ export function runEngine(input: EngineInput): EngineResult {
   }
 
   // ---- Phase G: merge touching blocks --------------------------------------
-  assignments.sort((a, b) =>
-    a.employeeId === b.employeeId
-      ? a.functionId === b.functionId
-        ? a.startSlot - b.startSlot
-        : a.functionId.localeCompare(b.functionId)
-      : a.employeeId.localeCompare(b.employeeId)
-  )
-  const merged: EngineAssignment[] = []
-  for (const a of assignments) {
-    const prev = merged[merged.length - 1]
-    if (prev && prev.employeeId === a.employeeId && prev.functionId === a.functionId && prev.endSlot === a.startSlot) {
-      prev.endSlot = a.endSlot
-    } else {
-      merged.push({ ...a })
-    }
-  }
+  const merged = mergeAssignments(assignments)
 
   // Drop anything still under the hard minimum (defensive — the DB enforces it too).
   const final = merged.filter(
@@ -446,127 +668,8 @@ export function runEngine(input: EngineInput): EngineResult {
   }
 
   // ---- Phase H: gaps, over-target, explanations ---------------------------
-  //
-  // Was the whole floor short at this moment? Total demand across every function
-  // versus every person actually available. When that is negative, the shortfall
-  // is arithmetic, not allocation — no schedule can fix it, and it should not be
-  // presented to a supervisor as something to act on. This is the same test the
-  // Coverage Preview uses for its "impossible" figure.
-  const totalDemandAt = new Int16Array(SLOTS_PER_DAY)
-  const totalFreeAt = new Int16Array(SLOTS_PER_DAY)
-  for (const fn of functions) {
-    for (let s = 0; s < SLOTS_PER_DAY; s++) totalDemandAt[s] += fn.demand[s] ?? 0
-  }
-  for (const e of employees) {
-    const base = originallyFree.get(e.id)!
-    for (let s = 0; s < SLOTS_PER_DAY; s++) if (base[s] === 1) totalFreeAt[s]++
-  }
-  const floorWasShort = (start: number, end: number): boolean => {
-    for (let s = start; s < end; s++) {
-      if ((totalDemandAt[s] ?? 0) > (totalFreeAt[s] ?? 0)) return true
-    }
-    return false
-  }
-
-  const gaps: EngineGap[] = []
-  const overTarget: { functionName: string; time: string; surplus: number }[] = []
-
-  for (const fn of functions) {
-    for (const run of runsWhere(SLOTS_PER_DAY, (s) => (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0))) {
-      let shortfall = 0
-      for (let s = run.start; s < run.end; s++) {
-        shortfall = Math.max(shortfall, (fn.demand[s] ?? 0) - (fn.covered[s] ?? 0))
-      }
-      // Explain it, using the pre-assignment snapshot so "on break" is not
-      // mistaken for "busy".
-      let trainedAnyone = 0        // trained for this function at all
-      let trainedOnFloor = 0       // trained AND rostered-and-free at some point in the run
-      let trainedStillFree = 0     // trained AND still unassigned now
-      for (const e of employees) {
-        if (!e.trained.has(fn.id)) continue
-        trainedAnyone++
-        const base = originallyFree.get(e.id)!
-        let onFloor = false
-        let stillFree = false
-        for (let s = run.start; s < run.end; s++) {
-          if (base[s] === 1) onFloor = true
-          if (e.free[s] === 1) stillFree = true
-        }
-        if (onFloor) trainedOnFloor++
-        if (stillFree) trainedStillFree++
-      }
-
-      let cause: EngineGap['cause']
-      let detail: string
-      if (trainedAnyone === 0) {
-        cause = 'no-one-trained-on-shift'
-        detail = `nobody is trained for ${fn.name}`
-      } else if (floorWasShort(run.start, run.end)) {
-        // Arithmetic, not allocation: more work is being asked for than there are
-        // people present. Usually a whole shift on break, or a target set for an
-        // hour nobody is rostered.
-        cause = 'no-one-trained-on-shift'
-        detail = `the whole floor is short at this time — more staffing is being asked for than there are people available`
-      } else if (trainedOnFloor === 0) {
-        // The decisive case: they exist, but not one of them is on the floor for
-        // any part of this window — a break, a lunch, or outside shift hours.
-        cause = 'no-one-trained-on-shift'
-        detail = `nobody trained for ${fn.name} is on the floor then — break, lunch, or outside shift hours`
-      } else if (fn.maxHeadcount != null && !capRoom(fn, run.start, run.end)) {
-        cause = 'capped'
-        detail = `${fn.name} is at its max headcount of ${fn.maxHeadcount}`
-      } else if (trainedStillFree > 0) {
-        cause = 'no-availability'
-        detail = `${trainedStillFree} trained staff free but the remaining window is too short to assign`
-      } else {
-        cause = 'all-trained-busy'
-        detail = `all ${trainedOnFloor} trained staff on the floor are already on other work`
-      }
-
-      gaps.push({
-        functionId: fn.id,
-        functionName: fn.name,
-        time: `${slotToTime(run.start)}–${slotToTime(run.end)}`,
-        startSlot: run.start,
-        endSlot: run.end,
-        shortfall,
-        cause,
-        detail,
-      })
-    }
-
-    if (!fn.excludeFromTargets) {
-      for (const run of runsWhere(SLOTS_PER_DAY, (s) => (fn.covered[s] ?? 0) > (fn.demand[s] ?? 0) && (fn.demand[s] ?? 0) > 0)) {
-        let surplus = 0
-        for (let s = run.start; s < run.end; s++) {
-          surplus = Math.max(surplus, (fn.covered[s] ?? 0) - (fn.demand[s] ?? 0))
-        }
-        overTarget.push({ functionName: fn.name, time: `${slotToTime(run.start)}–${slotToTime(run.end)}`, surplus })
-      }
-    }
-  }
-
-  // ---- stats ---------------------------------------------------------------
-  const assignedByEmp = new Map<string, number>()
-  const fnsByEmp = new Map<string, Set<string>>()
-  for (const a of final) {
-    assignedByEmp.set(a.employeeId, (assignedByEmp.get(a.employeeId) ?? 0) + (a.endSlot - a.startSlot))
-    if (!fnsByEmp.has(a.employeeId)) fnsByEmp.set(a.employeeId, new Set())
-    fnsByEmp.get(a.employeeId)!.add(a.functionId)
-  }
-  let slotsAvailable = 0
-  let employeesWithNoWork = 0
-  const functionsPerPerson: Record<number, number> = {}
-  for (const e of employees) {
-    slotsAvailable += e.onClockSlots
-    const n = fnsByEmp.get(e.id)?.size ?? 0
-    functionsPerPerson[n] = (functionsPerPerson[n] ?? 0) + 1
-    if (n === 0 && e.onClockSlots > 0) employeesWithNoWork++
-  }
-  const slotsAssigned = [...assignedByEmp.values()].reduce((s, n) => s + n, 0)
-  const shortBlocks = final.filter(
-    (a) => slotsToMinutesLength(a.startSlot, a.endSlot) < PREFERRED_MIN_MINUTES
-  ).length
+  const { gaps, overTarget, actions: gapActions } = explainGaps(employees, functions, originallyFree)
+  actions.push(...gapActions)
 
   if (cliffPatches > 0) {
     warnings.push(`${cliffPatches} short block(s) were used to cover gaps while people were on break or at lunch.`)
@@ -579,13 +682,6 @@ export function runEngine(input: EngineInput): EngineResult {
     feasibility,
     actions,
     warnings,
-    stats: {
-      slotsAvailable,
-      slotsAssigned,
-      idleSlots: Math.max(0, slotsAvailable - slotsAssigned),
-      employeesWithNoWork,
-      functionsPerPerson,
-      shortBlocks,
-    },
+    stats: buildStats(employees, final),
   }
 }

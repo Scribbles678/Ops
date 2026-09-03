@@ -10,8 +10,17 @@
  */
 import { prepare } from '~/utils/scheduleEngineV2/prepare'
 import { runEngine } from '~/utils/scheduleEngineV2/engine'
+import { runPeriodEngine } from '~/utils/scheduleEngineV2/periodEngine'
 import { slotToTime } from '~/utils/scheduleEngineV2/slots'
 import type { EngineResult } from '~/utils/scheduleEngineV2/types'
+
+/**
+ * Which placement strategy to run. Both share prepare(), pins, weights, gap
+ * explanations and the write path; they differ only in how they place people.
+ *  - 'slot'   — the original 15-minute-run engine (the "Automated Schedule Builder" card)
+ *  - 'period' — one function per stretch between breaks (the "... Builder V2" card)
+ */
+export type BuilderEngine = 'slot' | 'period'
 
 export interface V2ScheduleAssignment {
   employee_id: string
@@ -35,7 +44,7 @@ export const useScheduleBuilderV2 = () => {
   /** Last engine result, so the UI can show V2-only diagnostics. */
   const lastResult = ref<EngineResult | null>(null)
 
-  const generateV2Schedule = async (scheduleDate: string = '') => {
+  const generateV2Schedule = async (scheduleDate: string = '', engine: BuilderEngine = 'slot') => {
     const warnings: string[] = []
     const errors: string[] = []
 
@@ -119,12 +128,13 @@ export const useScheduleBuilderV2 = () => {
       warnings.push(...prepared.warnings)
       actions.push(...prepared.actions)
 
-      const result = runEngine({
+      const engineInput = {
         employees: prepared.employees,
         functions: prepared.functions,
         preferred: prepared.preferred,
         requiredPins: prepared.requiredPins,
-      })
+      }
+      const result = engine === 'period' ? runPeriodEngine(engineInput) : runEngine(engineInput)
       lastResult.value = result
       warnings.push(...result.warnings)
       actions.push(...result.actions)

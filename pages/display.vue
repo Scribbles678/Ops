@@ -159,15 +159,7 @@ const refreshInterval = ref<NodeJS.Timeout | null>(null)
 const rolloverInterval = ref<NodeJS.Timeout | null>(null)
 
 // Timezone-aware date helper (America/Chicago) to avoid UTC off-by-one
-const getTZISODate = (tz: string): string => {
-  // en-CA yields YYYY-MM-DD format
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(new Date())
-}
+import { getTZISODate } from '~/utils/localDate'
 
 // Today as a reactive ref in America/Chicago timezone
 const TIMEZONE = 'America/Chicago'

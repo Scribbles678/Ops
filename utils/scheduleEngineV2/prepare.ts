@@ -179,20 +179,55 @@ export function prepare(input: PrepareInput): PreparedInput {
     }
   }
 
-  const functions: EngineFunction[] = activeFunctions.map((j: any) => ({
-    id: j.id,
-    name: j.name,
-    demand: demandByFn.get(j.id) ?? new Int16Array(SLOTS_PER_DAY),
-    covered: new Int16Array(SLOTS_PER_DAY),
-    maxHeadcount: j.max_headcount == null ? null : Number(j.max_headcount),
-    isOverflow: !!j.surplus_overflow,
-    excludeFromTargets: !!j.exclude_from_targets,
-    scarcity: 1,
-    // 3 = normal, so a function with no explicit priority behaves as before.
-    priority: Number(j.staffing_priority) >= 1 && Number(j.staffing_priority) <= 5
-      ? Number(j.staffing_priority)
-      : 3,
-  }))
+  // Break and lunch windows across all active shifts. A shortfall inside one only
+  // counts for functions flagged to stay covered through it — the floor does not
+  // expect the builder to staff everything through a 15-minute break, and listing
+  // every such hole buried the two or three gaps a supervisor could act on.
+  const breakSlots = new Uint8Array(SLOTS_PER_DAY)
+  const lunchSlots = new Uint8Array(SLOTS_PER_DAY)
+  for (const sh of input.shifts) {
+    if (sh?.is_active === false) continue
+    for (const [a, b, arr] of [
+      [sh.break_1_start, sh.break_1_end, breakSlots],
+      [sh.break_2_start, sh.break_2_end, breakSlots],
+      [sh.lunch_start, sh.lunch_end, lunchSlots],
+    ] as [any, any, Uint8Array][]) {
+      const s = toMinutes(a)
+      const t = toMinutes(b)
+      if (s != null && t != null && t > s) fillSlots(arr, s, t, 1)
+    }
+  }
+
+  const functions: EngineFunction[] = activeFunctions.map((j: any) => {
+    const coverBreaks = !!j.break_coverage_required
+    const coverLunch = !!j.lunch_coverage_required
+    const mustCover = new Uint8Array(SLOTS_PER_DAY)
+    const keepCovered = new Uint8Array(SLOTS_PER_DAY)
+    for (let s = 0; s < SLOTS_PER_DAY; s++) {
+      const inBreak = breakSlots[s] === 1
+      const inLunch = lunchSlots[s] === 1
+      mustCover[s] = (inBreak && !coverBreaks) || (inLunch && !coverLunch) ? 0 : 1
+      keepCovered[s] = (inBreak && coverBreaks) || (inLunch && coverLunch) ? 1 : 0
+    }
+    return {
+      id: j.id,
+      name: j.name,
+      demand: demandByFn.get(j.id) ?? new Int16Array(SLOTS_PER_DAY),
+      covered: new Int16Array(SLOTS_PER_DAY),
+      maxHeadcount: j.max_headcount == null ? null : Number(j.max_headcount),
+      isOverflow: !!j.surplus_overflow,
+      excludeFromTargets: !!j.exclude_from_targets,
+      mustCover,
+      keepCovered,
+      coverBreaks,
+      coverLunch,
+      scarcity: 1,
+      // 3 = normal, so a function with no explicit priority behaves as before.
+      priority: Number(j.staffing_priority) >= 1 && Number(j.staffing_priority) <= 5
+        ? Number(j.staffing_priority)
+        : 3,
+    }
+  })
 
   // ---- employees + availability grid ---------------------------------------
   const employees: EngineEmployee[] = []
@@ -299,8 +334,38 @@ export function prepare(input: PrepareInput): PreparedInput {
           requiredPins.push({ employeeId: empId, functionId: fnId, startSlot: slotOf(bs), endSlot: slotCeil(be) })
         }
       } else {
-        // Legacy whole-day pin.
-        requiredPins.push({ employeeId: empId, functionId: fnId, startSlot: 0, endSlot: SLOTS_PER_DAY })
+        // Legacy row with no time blocks: the AM/PM columns decide. Same rule the
+        // Rules & Targets page applies when it converts such a row on edit —
+        // AM = shift start to lunch, PM = lunch end to shift end; both columns
+        // NULL means the base function all day (pre-migration-012 rows); one NULL
+        // means that half is simply not pinned.
+        //
+        // Until Sep 2026 this pinned the BASE function for the whole day and never
+        // read the PM column, so "X4 mornings, EM9 afternoons" ran X4 all day. On
+        // the dev data 4 of 7 live pins were affected.
+        const emp = employees.find((x) => x.id === empId)
+        const shift = emp?.shiftId ? shiftById.get(emp.shiftId) : null
+        const sStart = toMinutes(shift?.start_time)
+        let sEnd = toMinutes(shift?.end_time)
+        if (sStart != null && sEnd != null && sEnd <= sStart) sEnd += 1440
+        const lunchStart = toMinutes(shift?.lunch_start)
+        const lunchEnd = toMinutes(shift?.lunch_end)
+        const bothNull = !pa.am_job_function_id && !pa.pm_job_function_id
+        const amFn: string | null = pa.am_job_function_id ?? (bothNull ? fnId : null)
+        const pmFn: string | null = pa.pm_job_function_id ?? (bothNull ? fnId : null)
+
+        if (sStart == null || sEnd == null) {
+          // No usable shift times: fall back to the base function all day.
+          requiredPins.push({ employeeId: empId, functionId: fnId, startSlot: 0, endSlot: SLOTS_PER_DAY })
+        } else {
+          const amEnd = lunchStart ?? sEnd
+          if (amFn && amEnd > sStart) {
+            requiredPins.push({ employeeId: empId, functionId: amFn, startSlot: slotOf(sStart), endSlot: slotCeil(amEnd) })
+          }
+          if (pmFn && lunchEnd != null && sEnd > lunchEnd) {
+            requiredPins.push({ employeeId: empId, functionId: pmFn, startSlot: slotOf(lunchEnd), endSlot: slotCeil(sEnd) })
+          }
+        }
       }
     }
     preferred.set(empId, set)

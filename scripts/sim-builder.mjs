@@ -2,7 +2,8 @@
  * Headless harness: replay REAL database inputs through the REAL builder engines
  * and print quality metrics. Read-only - it never writes to the database.
  *
- *   node scripts/sim-builder.mjs 2026-08-03
+ *   node scripts/sim-builder.mjs 2026-08-03                    # both engines, A/B
+ *   node scripts/sim-builder.mjs 2026-08-03 --engine period    # just one
  *   node scripts/sim-builder.mjs 2026-08-03 --team "Site B"
  *
  * WHY IT LOOKS LIKE THIS: this file used to contain a hand-written second copy of
@@ -33,6 +34,7 @@ const flag = (name, fallback = null) => {
 }
 const DATE = argv.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a)) || new Date().toISOString().slice(0, 10)
 const TEAM_NAME = flag('team')
+const ENGINE = flag('engine', 'both')
 const CONN = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5433/scheduling'
 
 /** Bundle the real engine sources and import them. No copies, no drift. */
@@ -42,6 +44,7 @@ async function loadEngines() {
       contents: [
         "export { prepare } from './utils/scheduleEngineV2/prepare'",
         "export { runEngine } from './utils/scheduleEngineV2/engine'",
+        "export { runPeriodEngine } from './utils/scheduleEngineV2/periodEngine'",
       ].join('\n'),
       resolveDir: ROOT,
       loader: 'ts',
@@ -104,10 +107,8 @@ async function loadInputs() {
   return { team, employees, shifts, jobFunctions, targets, training, prefMap, ptoByEmployee, pto, swappedShiftByEmployee, swaps }
 }
 
-const t2slot = (t) => {
-  const parts = String(t).split(':').map(Number)
-  return Math.floor(((parts[0] || 0) * 60 + (parts[1] || 0)) / SLOT_MIN)
-}
+const hrs = (slots) => (slots / 4).toFixed(1)
+const slotT = (s) => `${String(Math.floor(s / 4)).padStart(2, '0')}:${String((s % 4) * SLOT_MIN).padStart(2, '0')}`
 
 /**
  * The harness's only real job: turn a set of assignments into quality numbers.
@@ -117,6 +118,7 @@ function score(label, assignments, prepared) {
   const covered = new Map(prepared.functions.map((f) => [f.id, new Int16Array(SLOTS)]))
   const busy = new Map(prepared.employees.map((e) => [e.id, new Uint8Array(SLOTS)]))
   const fnsByEmp = new Map()
+  const byEmp = new Map()
   let assignedSlots = 0
 
   for (const a of assignments) {
@@ -132,21 +134,52 @@ function score(label, assignments, prepared) {
     }
     if (!fnsByEmp.has(a.employeeId)) fnsByEmp.set(a.employeeId, new Set())
     fnsByEmp.get(a.employeeId).add(a.functionId)
+    if (!byEmp.has(a.employeeId)) byEmp.set(a.employeeId, [])
+    byEmp.get(a.employeeId).push(a)
   }
 
   let onClock = 0
   let noWork = 0
   const fnDist = {}
+  // Bouncing: a PERIOD is a maximal on-clock run between breaks/lunch/PTO (the
+  // free grid straight out of prepare()). Count the periods that carry more than
+  // one function - the thing the period engine exists to keep small.
+  let periods = 0
+  let switchedPeriods = 0
+  let peopleWhoSwitch = 0
+  const examples = []
   for (const e of prepared.employees) {
     onClock += e.onClockSlots
     const n = fnsByEmp.get(e.id) ? fnsByEmp.get(e.id).size : 0
     fnDist[n] = (fnDist[n] ?? 0) + 1
     if (n === 0 && e.onClockSlots > 0) noWork++
+
+    let runStart = -1
+    let switched = false
+    for (let s = 0; s <= SLOTS; s++) {
+      const free = s < SLOTS && e.free[s] === 1
+      if (free && runStart < 0) runStart = s
+      if (!free && runStart >= 0) {
+        periods++
+        const inRun = (byEmp.get(e.id) ?? []).filter((a) => a.startSlot < s && a.endSlot > runStart).sort((x, y) => x.startSlot - y.startSlot)
+        if (new Set(inRun.map((a) => a.functionId)).size > 1) {
+          switchedPeriods++
+          switched = true
+          if (examples.length < 5) {
+            const fnName = (id) => prepared.functions.find((f) => f.id === id)?.name ?? '?'
+            examples.push(`${e.name} ${slotT(runStart)}-${slotT(s)}: ${inRun.map((a) => `${fnName(a.functionId)} ${slotT(a.startSlot)}-${slotT(a.endSlot)}`).join(' > ')}`)
+          }
+        }
+        runStart = -1
+      }
+    }
+    if (switched) peopleWhoSwitch++
   }
 
   let unmet = 0
   let over = 0
   let fixable = 0
+  let notCounted = 0
   const unmetByFn = {}
   const overByFn = {}
   for (const fn of prepared.functions) {
@@ -156,6 +189,9 @@ function score(label, assignments, prepared) {
       const have = cov[s] ?? 0
       if (have < need) {
         const short = need - have
+        // A hole during a break/lunch on a function not flagged to stay covered
+        // through it is not a gap, by the floor's own rule (EngineFunction.mustCover).
+        if (fn.mustCover[s] !== 1) { notCounted += short; continue }
         unmet += short
         unmetByFn[fn.name] = (unmetByFn[fn.name] ?? 0) + short
         // Fixable: somebody trained for this function was free and unassigned at
@@ -174,7 +210,6 @@ function score(label, assignments, prepared) {
     }
   }
 
-  const hrs = (slots) => (slots / 4).toFixed(1)
   const top = (obj) =>
     Object.entries(obj)
       .sort((a, b) => b[1] - a[1])
@@ -190,14 +225,16 @@ function score(label, assignments, prepared) {
     ' | IDLE ' + hrs(onClock - assignedSlots) + 'h'
   )
   console.log('distinct functions/person: ' + JSON.stringify(fnDist) + ' | employees with no work: ' + noWork)
-  console.log('UNMET ' + hrs(unmet) + 'h  |  OVER-target ' + hrs(over) + 'h')
+  console.log('UNMET ' + hrs(unmet) + 'h  |  OVER-target ' + hrs(over) + 'h  |  break/lunch holes not counted (function not flagged to stay covered): ' + hrs(notCounted) + 'h')
   console.log('  unmet by function: ' + top(unmetByFn))
   console.log('  over by function:  ' + top(overByFn))
   console.log("FIXABLE unmet (a trained person was free and idle): " + hrs(fixable) + "h  <-- the engine's own misses")
-  return { unmet, over, idle: onClock - assignedSlots, fixable }
+  console.log('BOUNCING: ' + switchedPeriods + ' of ' + periods + ' stretches between breaks carry more than one function | people who switch mid-stretch: ' + peopleWhoSwitch)
+  for (const x of examples) console.log('    e.g. ' + x)
+  return { unmet, over, idle: onClock - assignedSlots, fixable, unmetByFn, switchedPeriods }
 }
 
-const { prepare, runEngine } = await loadEngines()
+const { prepare, runEngine, runPeriodEngine } = await loadEngines()
 const input = await loadInputs()
 
 const prepArgs = () => ({
@@ -220,20 +257,43 @@ console.log(
   input.swaps.length + ' shift swap(s)'
 )
 
-const prepared = prepare(prepArgs())
-const result = runEngine({
-  employees: prepared.employees,
-  functions: prepared.functions,
-  preferred: prepared.preferred,
-  requiredPins: prepared.requiredPins,
-})
+const engines = {
+  slot: ['Automated Schedule Builder (slot engine)', runEngine],
+  period: ['Automated Schedule Builder V2 (period engine)', runPeriodEngine],
+}
+const selected = ENGINE === 'both' ? Object.keys(engines) : [ENGINE]
+if (selected.some((k) => !engines[k])) throw new Error('--engine must be slot, period or both')
 
-score('Schedule Builder', result.assignments, prepare(prepArgs()))
+const scored = {}
+for (const key of selected) {
+  const [label, run] = engines[key]
+  const prepared = prepare(prepArgs())
+  const result = run({
+    employees: prepared.employees,
+    functions: prepared.functions,
+    preferred: prepared.preferred,
+    requiredPins: prepared.requiredPins,
+  })
+  scored[key] = score(label, result.assignments, prepare(prepArgs()))
+  console.log(
+    '  gaps: ' + result.gaps.length +
+    ' | feasibility issues: ' + result.feasibility.length +
+    ' | things to fix: ' + result.actions.length +
+    ' | notes: ' + result.warnings.length
+  )
+  for (const a of result.actions) console.log('    FIX: ' + a)
+}
 
-console.log(
-  '  gaps: ' + result.gaps.length +
-  ' | feasibility issues: ' + result.feasibility.length +
-  ' | things to fix: ' + result.actions.length +
-  ' | notes: ' + result.warnings.length
-)
-for (const a of result.actions) console.log('    FIX: ' + a)
+// A/B: which functions each engine leaves shorter. "Zero functions made worse"
+// is the bar for an engine change - read this, not the headline.
+if (selected.length === 2) {
+  const [a, b] = selected.map((k) => scored[k])
+  const names = new Set([...Object.keys(a.unmetByFn), ...Object.keys(b.unmetByFn)])
+  console.log('\n===== slot -> period, unmet by function (only where they differ) =====')
+  for (const n of [...names].sort()) {
+    const ua = (a.unmetByFn[n] ?? 0) / 4
+    const ub = (b.unmetByFn[n] ?? 0) / 4
+    if (ua === ub) continue
+    console.log('  ' + n.padEnd(14) + ua.toFixed(2).padStart(6) + 'h -> ' + ub.toFixed(2).padStart(6) + 'h  ' + (ub > ua ? 'worse +' : 'better -') + Math.abs(ub - ua).toFixed(2))
+  }
+}

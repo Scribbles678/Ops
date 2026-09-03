@@ -116,9 +116,21 @@ shows a state the app cannot produce.
 | Max leave-early per employee per week | `max_leave_early_per_employee_per_week` | *unset = no limit* |
 | Date not blocked | `team_blocked_dates` | — |
 
-⚠ `max_leave_early_per_employee_per_day` sits in `team_settings` on some installs
-and **nothing reads it** — a leftover from when the limit was daily. Do not mistake
-it for the weekly rule above; it has no effect.
+⚠ Two dead keys, `max_leave_early_per_employee_per_day` and
+`max_shift_change_per_employee_per_day`, survived from when those limits were daily
+rather than weekly. **Nothing reads them**, and their names sit one word away from
+the real weekly rules — set one and it silently does nothing. Deleted from the dev
+database Sep 2026; **still present on any install that has not had them removed.**
+
+```sql
+DELETE FROM team_settings
+WHERE setting_key IN ('max_leave_early_per_employee_per_day',
+                      'max_shift_change_per_employee_per_day');
+```
+
+Safe by construction: no code path reads them, so removing them cannot change
+behaviour. If you add a settings key, and later replace it, delete the old one in
+the same change.
 
 **Advance notice counts full working days strictly between today and the requested
 date**, weekends excluded. A Friday request for Monday is 0 business days and is
@@ -230,6 +242,13 @@ ever disagree again, that is the signal something bypassed the shared module.
 
 **Builder integration:** the builder reads `/api/pto/[date]` (`pto_days` only, not
 pending requests), so only approved PTO affects schedule generation.
+
+**Copy Today's Schedule** (`POST /api/schedule/copy`) trims each copied block
+against the target date's absences with `describePto` + `subtractPto`, collecting
+every row for an employee (arrive late *and* leave early on one day is two rows).
+It kept its own reading of `start_time`/`end_time` until Sep 2026, which ignored
+leave-early rows (NULL end), copied a mid-shift absence unchanged, and could emit a
+sliver under the 15-minute CHECK — the same drift as the strip and the calendar.
 
 **Cell layout.** Entries render on two lines — name, then type and time. They were
 one truncated line, which clipped mid-label ("Leave Earl…") and dropped the time

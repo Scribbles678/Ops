@@ -60,11 +60,17 @@ Run the **smallest verification tier that applies**, then report what ran, what 
 | Change | Default check |
 |--------|---------------|
 | Server / TS / composable / type change | `npm run build` (this is the typecheck — there is no unit test suite) |
-| **Either builder engine** | `node scripts/sim-builder.mjs <date>` — replays real DB rows through the real engines. Compare before/after; **zero functions made worse** is the bar |
+| **Either builder engine** | `node scripts/sim-builder.mjs <date>` — replays real DB rows through BOTH real engines and A/Bs them. Compare before/after; **zero functions made worse** is the bar, and for the period engine also the BOUNCING line |
 | **UI / page / component** | `node scripts/ui-smoke.mjs` — drives the real browser, fails on any JS error, screenshots every screen. **Then look at the screenshots.** A build compiles a page that renders nonsense |
 | SQL / new migration | Apply `setup.sql` + every migration against a throwaway Postgres (below). A bad migration crashloops the pod on deploy |
 | Anything writing rows | Confirm `team_id` is stamped via `getWriteTeamId` and the right team can read it back |
 | Anything touching `team_id` / scoping | Log in as the Site B fixtures and confirm isolation — see `docs/TESTING.md` |
+
+**Point browser tests at a preview server you start (`node .output/server/index.mjs`
+on a spare port), never at the user's `npm run dev`** — a stale `docker compose` app
+usually holds port 3000 and pushes their dev server to 3001, and removing a
+composable leaves Vite serving 500s until it restarts. Exact commands in
+`docs/TESTING.md`.
 
 **→ `docs/TESTING.md` is the full guide.** Passing `npm run build` proves only that it
 compiles; it says nothing about whether the screen renders correctly or the schedule
@@ -131,8 +137,9 @@ Every data table has `team_id`. Two helpers, **not interchangeable**:
 ## Domain notes that bite
 
 - **"Meter" job functions:** parent `Meter` fans out to children `Meter 1`, `Meter 2`, …; training on parent `Meter` qualifies for any `Meter N`. Matched by regex `/^Meter [0-9]+$/`, scoped to the function's `team_id`. Implemented in BOTH the builder and the `validate_assignment_training` trigger — keep them in sync.
-- **Automated Schedule Builder — ONE engine.** `utils/scheduleEngineV2/` (pure, DB-free) + `composables/useScheduleBuilderV2.ts`. Deterministic — no LLM, no solver. 96 x 15-minute slots, cost function, `staffing_priority`. **Per-hour `staffing_targets` are a MINIMUM, not a cap**: after targets are met surplus labour is deployed and over-target is *reported*, not suppressed. Writes via `POST /api/schedule/replace` (transactional delete+insert). **Read `docs/SCHEDULE-BUILDER.md` before changing it.**
-  - A second engine ("V1", `composables/useAIScheduleBuilder.ts`) was **deleted Aug 2026** after the team lead confirmed this one schedules better. The `V2` left in the directory and composable names is history, not a choice — there is nothing to compare against. The pre-flight "Build Schedule" checklist went with it; the Coverage Preview supersedes it.
+- **Automated Schedule Builder — ONE pipeline, TWO placement engines.** `utils/scheduleEngineV2/` (pure, DB-free) + `composables/useScheduleBuilderV2.ts`. Deterministic — no LLM, no solver. 96 x 15-minute slots, cost function, `staffing_priority`. **Per-hour `staffing_targets` are a MINIMUM, not a cap**: after targets are met surplus labour is deployed and over-target is *reported*, not suppressed. Writes via `POST /api/schedule/replace` (transactional delete+insert). **Read `docs/SCHEDULE-BUILDER.md` before changing it.**
+  - `engine.ts` (slot engine, the "Automated Schedule Builder" card) places 15-minute runs; `periodEngine.ts` (the "... Builder V2" card, Sep 2026) gives each person one function per stretch between breaks. They share `prepare()`, pins, the weights, merge, gap explanation and stats — those live once in `engine.ts` and are imported by the period engine. **Do not copy them.**
+  - A much older engine ("V1", `composables/useAIScheduleBuilder.ts`) was **deleted Aug 2026**. The `V2` in the directory and composable names is that history; the UI's "V2" card is the period engine. The pre-flight "Build Schedule" checklist went with V1; the Coverage Preview supersedes it.
   - Builds are scoped to the caller's current team (Aug 2026). Previously they read every team and wrote to one, which put another site's people on this site's board.
   - The engine returns **`actions`** (a person must fix this) separately from **`warnings`** (context). The review modal leads with actions. Never classify by matching message text.
   - `scripts/sim-builder.mjs` bundles and calls the **real** engine. It holds no scheduling logic — keep it that way. See `docs/TESTING.md`.

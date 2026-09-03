@@ -42,8 +42,9 @@ scheduling-app-v2/
 │   ├── pto-calendar.vue       # PTO calendar (week/month views) + request approval workflow
 │   ├── schedule/
 │   │   ├── [date].vue         # Schedule editor with 15-min grid, dashboards, KPI strip
-│   │   └── tomorrow.vue       # Create schedule: 4 cards (copy previous day, Automated
-│   │                          #   Builder, manual, Rules & Targets) + Training & Coverage Preview
+│   │   └── tomorrow.vue       # Create schedule: 5 cards (copy today, Automated Builder,
+│   │                          #   Automated Builder V2, manual, Rules & Targets)
+│   │                          #   + Training & Coverage Preview
 │   └── admin/
 │       └── business-rules.vue # Staffing targets grid (headcount per job function per hour).
 │                          #   Hour columns are derived from the team's ACTIVE SHIFTS,
@@ -93,8 +94,10 @@ scheduling-app-v2/
 │   ├── useTeamSettings.ts         # Per-team settings (request-rule limits)
 │   ├── useTeamBlockedDates.ts     # Per-team blocked dates for request auto-rejection
 │   └── useScheduleBuilderV2.ts    # THE schedule builder — drives utils/scheduleEngineV2/
+│                                 #   with an engine choice: 'slot' or 'period'.
 │                                 #   (a V1 engine was deleted Aug 2026; the "V2"
-│                                 #    in the name is history, not a choice)
+│                                 #    in the FILE name is history — the UI's "V2"
+│                                 #    card is the period engine)
 ├── server/
 │   ├── plugins/
 │   │   └── bootstrap.ts          # On-boot self-setup: schema + migrations + first admin
@@ -102,6 +105,11 @@ scheduling-app-v2/
 │   │   ├── auth/              # login, logout, me (get/put), change-password, forgot/reset-password
 │   │   ├── schedule/          # [date].get/delete, assignments CRUD, batch, copy, replace,
 │   │   │                      #   export, coverage-preview
+│   │   │                      #   copy = transactional REPLACE of the target day (like
+│   │   │                      #   replace.post.ts). It used to append, so it failed on any
+│   │   │                      #   day that already had a schedule and left a half-copied day.
+│   │   │                      #   Trims via ptoDisplay.subtractPto; leaves swapped people
+│   │   │                      #   off by name; reports source_empty instead of success.
 │   │   ├── employees/         # CRUD + training endpoints + [id]/overview
 │   │   ├── job-functions/     # CRUD
 │   │   ├── shifts/            # CRUD
@@ -140,11 +148,18 @@ scheduling-app-v2/
 │   ├── timeSlots.ts           # 15-min slot generation, break detection
 │   ├── validationRules.ts     # Assignment validation (training, overlap, duration)
 │   ├── ptoDisplay.ts          # SINGLE SOURCE for reading/displaying a pto_days row
+│   ├── localDate.ts           # SINGLE SOURCE for "today" as YYYY-MM-DD (local / named TZ).
+│   │                          #   Never toISOString().slice(0,10): that is UTC and names
+│   │                          #   tomorrow from 7pm Central — Create Schedule did this
 │   └── scheduleEngineV2/      # THE schedule engine — pure, DB-free, unit-testable
-│       ├── types.ts           #   constants + weights (ENGINE_MIN 30 vs DB_MIN 15)
+│       ├── types.ts           #   constants + weights (ENGINE_MIN 30 vs DB_MIN 15,
+│       │                      #   PERIOD_MIN_STINT 45)
 │       ├── slots.ts           #   96-slot time helpers
 │       ├── prepare.ts         #   Phase A — DB rows -> slot model
-│       └── engine.ts          #   Phases B-H — pins, feasibility, fill, surplus, gaps
+│       ├── engine.ts          #   Slot engine (Builder card) + the SHARED phases:
+│       │                      #   pins, commit, merge, gap explanation, stats
+│       └── periodEngine.ts    #   Period engine (Builder V2 card): one function per
+│                              #   stretch between breaks; imports the shared phases
 ├── types/
 │   └── database.types.ts      # TypeScript DB types (skeleton)
 ├── sql-schema/                # PostgreSQL table definitions + triggers + migrations
@@ -296,17 +311,20 @@ See `ROLES.md` for the full permission matrix.
 "Meter" is a special job function category. Individual meters are named "Meter 1", "Meter 2", etc. Training on the parent "Meter" function qualifies an employee for any "Meter N" assignment. The Automated Builder and the `validate_assignment_training` DB trigger both support this parent-child relationship via name pattern matching (`/^Meter [0-9]+$/`), scoped to the function's `team_id`.
 
 ### Coverage Requirements
-Job functions can be flagged `lunch_coverage_required` and/or `break_coverage_required` (set in the Details → Job Functions tab). When set, the Automated Builder runs a coverage pass that finds another trained, available employee to cover the primary employee's lunch/break window so the station stays continuously staffed.
+Job functions can be flagged `lunch_coverage_required` and/or `break_coverage_required` (Details → Job Functions → Edit: "Keep covered during 15-minute breaks" / "Keep covered through lunch"). **By default the builder does not treat a hole during a break or lunch window as a gap** — the floor does not expect every function staffed through a 15-minute break. For a flagged function those shortfalls count, closing one earns an extra reward, and one that remains is reported as a thing to fix. Wired up Sep 2026; the columns existed since migration 006 but nothing read them. Detail in [SCHEDULE-BUILDER.md](./SCHEDULE-BUILDER.md).
 
 ### Exclude From Targets
 Job functions flagged `exclude_from_targets` are hidden from the staffing-targets grid (used for functions that shouldn't be driven by per-hour headcount demand).
 
 ### Automated Schedule Builder
 
-One engine: `utils/scheduleEngineV2/` (pure, DB-free) driven by
-`composables/useScheduleBuilderV2.ts`. Deterministic — no LLM, no solver. Treats
-per-hour `staffing_targets` as a **MINIMUM, not a cap**, and writes via
-`POST /api/schedule/replace`.
+One pipeline in `utils/scheduleEngineV2/` (pure, DB-free) driven by
+`composables/useScheduleBuilderV2.ts`, with two placement engines the Create
+Schedule page offers as two cards: the **slot engine** (15-minute runs) and the
+**period engine** ("Builder V2": one function per stretch between breaks, added
+Sep 2026 because the floor was being bounced between jobs). Deterministic — no
+LLM, no solver. Treats per-hour `staffing_targets` as a **MINIMUM, not a cap**,
+and writes via `POST /api/schedule/replace`.
 
 A second engine ("V1", `composables/useAIScheduleBuilder.ts`) was **deleted in
 Aug 2026** after the team lead confirmed this one schedules better.

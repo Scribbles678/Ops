@@ -63,7 +63,7 @@
       </div>
 
       <!-- Schedule Generation Options -->
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 mb-8">
         <!-- Copy Today's Schedule -->
         <div class="card hover:shadow-lg transition-all cursor-pointer" @click="copyTodaySchedule">
           <div class="text-center py-8">
@@ -82,7 +82,7 @@
              (Aug 2026) after the team lead confirmed this one schedules better. -->
         <div
           class="card hover:shadow-lg transition-all cursor-pointer"
-          @click="generateSchedule"
+          @click="generateSchedule('slot')"
           :class="{ 'opacity-50 cursor-not-allowed': generating }"
         >
           <div class="text-center py-8">
@@ -104,6 +104,36 @@
               {{ generating
                 ? 'Please wait while we create your optimized schedule…'
                 : 'Generate an optimized schedule based on staffing targets, training, and required assignments' }}
+            </p>
+          </div>
+        </div>
+
+        <!-- Automated Schedule Builder V2 — the period engine. Same inputs, but
+             each person keeps one job for each stretch between breaks. -->
+        <div
+          class="card hover:shadow-lg transition-all cursor-pointer"
+          @click="generateSchedule('period')"
+          :class="{ 'opacity-50 cursor-not-allowed': generating }"
+        >
+          <div class="text-center py-8">
+            <div class="bg-indigo-100 rounded-full p-6 mb-4 mx-auto w-20 h-20 flex items-center justify-center">
+              <svg v-if="!generating" class="w-10 h-10 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h10" />
+              </svg>
+              <div v-else class="w-10 h-10 text-indigo-600">
+                <svg class="animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+            </div>
+            <h3 class="text-xl font-bold text-gray-800 mb-2">
+              {{ generating ? '⏳ Generating Schedule…' : 'Automated Schedule Builder V2' }}
+            </h3>
+            <p class="text-gray-600">
+              {{ generating
+                ? 'Please wait while we create your optimized schedule…'
+                : 'Same targets and training, but each person keeps one job for each stretch between breaks' }}
             </p>
           </div>
         </div>
@@ -343,21 +373,19 @@
 </template>
 
 <script setup lang="ts">
-const { copySchedule } = useSchedule()
+import { toLocalISO, addDays } from '~/utils/localDate'
+import type { BuilderEngine } from '~/composables/useScheduleBuilderV2'
+
+// `error` carries the copy endpoint's real message (which row, which rule).
+const { copySchedule, error: scheduleError } = useSchedule()
 const { fetchJobFunctions } = useJobFunctions()
 const { generateV2Schedule, applyV2Schedule } = useScheduleBuilderV2()
 
-// Tomorrow's date
-const tomorrowDate = computed(() => {
-  const tomorrow = new Date()
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  return tomorrow.toISOString().split('T')[0]
-})
-
-// Today's date
-const today = computed(() => {
-  return new Date().toISOString().split('T')[0]
-})
+// Local calendar dates. These used toISOString(), which is UTC — from 7pm
+// Central it already names tomorrow, so an evening "Copy Today" read the wrong
+// source day and every default on this page landed one day late.
+const tomorrowDate = computed(() => toLocalISO(addDays(new Date(), 1)))
+const today = computed(() => toLocalISO(new Date()))
 
 // Selected date for schedule creation
 const selectedDate = ref(tomorrowDate.value)
@@ -430,9 +458,18 @@ const showNotification = (message: string, type: 'success' | 'error' = 'success'
   showNotificationModal.value = true
 }
 
+// Set by a successful copy so the counts stay readable until the user dismisses
+// them; the page used to navigate away under the modal immediately.
+const navigateAfterNotification = ref<string | null>(null)
+
 const closeNotificationModal = () => {
   showNotificationModal.value = false
   notificationMessage.value = ''
+  const to = navigateAfterNotification.value
+  if (to) {
+    navigateAfterNotification.value = null
+    navigateTo(to)
+  }
 }
 
 // Functions
@@ -456,28 +493,52 @@ const formatDate = (dateString: string) => {
   })
 }
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
 const copyTodaySchedule = async () => {
-  try {
-    const today = new Date().toISOString().split('T')[0]
-    
-    // Copy today's schedule to selected date
-    const success = await copySchedule(today, selectedDate.value || '')
-    
-    if (success) {
-      showNotification(`Today's schedule copied to ${formatDate(selectedDate.value || '')} successfully!`, 'success')
-      // Navigate to the selected date's schedule page to see/edit the copied schedule
-      navigateTo(`/schedule/${selectedDate.value || ''}`)
-    } else {
-      showNotification('Error copying schedule. Please try again.', 'error')
-    }
-  } catch (error) {
-    console.error('Error copying schedule:', error)
-    showNotification('Error copying schedule. Please try again.', 'error')
+  const target = selectedDate.value || ''
+  if (!target) return
+  if (target === today.value) {
+    showNotification('Pick a different date — this would copy today onto itself.', 'error')
+    return
   }
+
+  const result = await copySchedule(today.value, target)
+
+  if (!result) {
+    showNotification(
+      `Could not copy the schedule.\n${scheduleError.value || 'The server rejected the request without a reason.'}`,
+      'error'
+    )
+    return
+  }
+
+  // Nothing was written. Say so instead of announcing success and opening an
+  // empty day.
+  if (result.source_empty) {
+    showNotification(
+      `There is no schedule for today (${formatDate(today.value)}) to copy.\nBuild today's schedule first, or use the Automated Schedule Builder for ${formatDate(target)}.`,
+      'error'
+    )
+    return
+  }
+
+  const lines = [`Copied ${plural(result.copied, 'assignment')} from today to ${formatDate(target)}.`]
+  if (result.replaced) lines.push(`Replaced the ${plural(result.replaced, 'assignment')} already on that day.`)
+  if (result.excluded) lines.push(`${plural(result.excluded, 'assignment')} left off for people who are off that day.`)
+  if (result.adjusted) lines.push(`${plural(result.adjusted, 'assignment')} trimmed around a partial absence.`)
+  if (result.inactive) lines.push(`${plural(result.inactive, 'assignment')} skipped for people who are no longer active.`)
+  if (result.swapped?.length) {
+    lines.push(`Not copied because of a shift swap that day — add by hand: ${result.swapped.join(', ')}.`)
+  }
+
+  navigateAfterNotification.value = `/schedule/${target}`
+  showNotification(lines.join('\n'), 'success')
 }
 
-// The schedule builder. V1 was deleted in Aug 2026; this is the only engine.
-const generateSchedule = async () => {
+// The schedule builder. Two placement engines share everything else; the card
+// chooses. See composables/useScheduleBuilderV2.ts for what each means.
+const generateSchedule = async (engine: BuilderEngine) => {
   if (generating.value) return
   try {
     generating.value = true
@@ -490,7 +551,7 @@ const generateSchedule = async () => {
     scheduleOverTarget.value = []
 
     const { schedule, warnings, actions, errors, gaps, overTarget, structuralSummary, stats } =
-      await generateV2Schedule(selectedDate.value || '')
+      await generateV2Schedule(selectedDate.value || '', engine)
 
     if (schedule.length > 0) {
       await applyV2Schedule(schedule, selectedDate.value || '')
@@ -543,9 +604,7 @@ const setToTomorrow = () => {
 const setToNextMonday = () => {
   const today = new Date()
   const daysUntilMonday = (1 - today.getDay() + 7) % 7
-  const nextMonday = new Date(today)
-  nextMonday.setDate(today.getDate() + (daysUntilMonday === 0 ? 7 : daysUntilMonday))
-  selectedDate.value = nextMonday.toISOString().split('T')[0]
+  selectedDate.value = toLocalISO(addDays(today, daysUntilMonday === 0 ? 7 : daysUntilMonday))
 }
 
 // Load job functions on mount

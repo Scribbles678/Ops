@@ -155,15 +155,37 @@ export const useSchedule = () => {
     }
   }
 
-  const copySchedule = async (fromDate: string, toDate: string) => {
+  /** What POST /api/schedule/copy reports back. Counts are assignments. */
+  interface ScheduleCopyResult {
+    success: boolean
+    /** The source day had nothing to copy; nothing was changed. */
+    source_empty: boolean
+    copied: number
+    /** Assignments already on the target day that were cleared first. */
+    replaced: number
+    /** Left off because the person is off that day. */
+    excluded: number
+    /** Trimmed around a partial absence. */
+    adjusted: number
+    /** Skipped because the person is no longer active. */
+    inactive: number
+    /** People with a shift swap on the target day, left off by name. */
+    swapped: string[]
+  }
+
+  const copySchedule = async (fromDate: string, toDate: string): Promise<ScheduleCopyResult | null> => {
     loading.value = true
     error.value = null
     try {
-      await $fetch('/api/schedule/copy', { method: 'POST', body: { from_date: fromDate, to_date: toDate } })
-      return true
+      return await $fetch<ScheduleCopyResult>('/api/schedule/copy', {
+        method: 'POST',
+        body: { from_date: fromDate, to_date: toDate },
+      })
     } catch (e: any) {
-      error.value = e.message
-      return false
+      // Keep the server's own message — it names the row and the rule that
+      // rejected it. The generic fetch message is just the status code.
+      error.value = e?.data?.message ?? e?.data?.data?.message ?? e?.message ?? 'Failed to copy schedule'
+      return null
     } finally {
       loading.value = false
     }

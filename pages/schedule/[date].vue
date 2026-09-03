@@ -621,6 +621,7 @@
 // Import the component explicitly
 import { onBeforeRouteLeave } from 'vue-router'
 import ShiftGroupedSchedule from '~/components/schedule/ShiftGroupedSchedule.vue'
+import { toLocalISO, getTZISODate } from '~/utils/localDate'
 
 // Use real composables instead of mock data
 const { 
@@ -865,23 +866,6 @@ onMounted(async () => {
     await fetchShiftSwapsForDate(scheduleDate.value)
   }
 })
-
-// Helpers for local/TZ-safe ISO dates
-const toLocalISO = (d: Date): string => {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
-const getTZISODate = (tz: string): string => {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(new Date())
-}
 
 // Date navigation functions
 const goToToday = () => {
