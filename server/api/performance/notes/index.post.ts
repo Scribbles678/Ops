@@ -1,5 +1,6 @@
-import { query } from '../../../utils/db'
-import { requireAdmin } from '../../../utils/authorize'
+import { query, transaction } from '../../../utils/db'
+import { requireTeamLead } from '../../../utils/authorize'
+import { logChange, employeeDisplayName, describeNote } from '../../../utils/auditLog'
 
 const CATEGORIES = ['positive', 'coaching', 'concern', 'general']
 
@@ -10,7 +11,7 @@ const CATEGORIES = ['positive', 'coaching', 'concern', 'general']
  * used in a review has to carry a trustworthy author.
  */
 export default defineEventHandler(async (event) => {
-  const user = requireAdmin(event)
+  const user = requireTeamLead(event)
   const body = await readBody(event)
 
   const { employee_id, note_date, category, body: noteBody, tag } = body ?? {}
@@ -46,11 +47,26 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'tag is too long (60 characters max)' })
   }
 
-  const result = await query(
-    `INSERT INTO performance_notes (employee_id, note_date, category, body, tag, team_id, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING id, employee_id, note_date::text AS note_date, category, body, tag, created_at`,
-    [employee_id, date, cat, String(noteBody).trim(), tag || null, emp.rows[0].team_id, user.id]
-  )
-  return result.rows[0]
+  return transaction(async (client) => {
+    const result = await client.query(
+      `INSERT INTO performance_notes (employee_id, note_date, category, body, tag, team_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id, employee_id, note_date::text AS note_date, category, body, tag, created_at`,
+      [employee_id, date, cat, String(noteBody).trim(), tag || null, emp.rows[0].team_id, user.id]
+    )
+    const row = result.rows[0]
+    const who = await employeeDisplayName(client, employee_id)
+    await logChange(client, {
+      teamId: emp.rows[0].team_id,
+      actor: user,
+      action: 'add',
+      entity: 'performance_note',
+      entityId: row.id,
+      employeeId: employee_id,
+      employeeName: who,
+      summary: `Added a ${describeNote(row)} for ${who}`,
+      after: row,
+    })
+    return row
+  })
 })

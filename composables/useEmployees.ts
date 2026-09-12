@@ -27,7 +27,7 @@ export const useEmployees = () => {
       await fetchEmployees()
       return data
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return null
     } finally {
       loading.value = false
@@ -42,7 +42,7 @@ export const useEmployees = () => {
       await fetchEmployees()
       return data
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return null
     } finally {
       loading.value = false

@@ -99,9 +99,9 @@ unless you are deliberately testing the container.
 
 Throwaway-Postgres harness for validating SQL/migrations before they ship:
 ```bash
-docker run -d --name t -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=scheduling -p 55432:5432 postgres:16-alpine
+docker run -d --name throwaway-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=scheduling -p 55432:5432 postgres:16-alpine
 # pipe setup.sql then each migration in order through:
-docker exec -i t psql -v ON_ERROR_STOP=1 -U postgres -d scheduling
+docker exec -i throwaway-pg psql -v ON_ERROR_STOP=1 -U postgres -d scheduling
 ```
 
 ---
@@ -111,7 +111,7 @@ docker exec -i t psql -v ON_ERROR_STOP=1 -U postgres -d scheduling
 - **Nuxt 4, SSR disabled** (`ssr: false`). Pages in `pages/`, shared logic in `composables/`, server in `server/`.
 - **Nitro file-based API**, method-suffixed: `server/api/<resource>/index.get.ts`, `[id].put.ts`, etc.
 - **Raw `pg`, no ORM.** All SQL hand-written and **parameterized** (`$1,$2…`) — never string-concatenate input into SQL. Pool + `query()` + `transaction()` in `server/utils/db.ts`.
-- **Auth:** custom JWT in an HttpOnly cookie. `server/middleware/auth.ts` populates `event.context.user`; routes gate with `requireAuth` / `requireAdmin` / `requireSuperAdmin` from `server/utils/authorize.ts`.
+- **Auth:** custom JWT in an HttpOnly cookie. `server/middleware/auth.ts` populates `event.context.user`; routes gate with `requireAuth` / `requireTeamLead` / `requireSupervisor` / `requireSuperAdmin` from `server/utils/authorize.ts`. Four exclusive roles (Super Admin, Supervisor, Team Lead / Coordinator, Kiosk) defined once in `utils/roles.ts`; no role = no access. See `docs/ROLES.md`.
 - **Frontend talks to the API via `$fetch`** inside composables; components stay thin.
 
 ## ⚠️ Multi-tenancy: the #1 gotcha

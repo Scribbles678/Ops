@@ -30,6 +30,7 @@ export function signToken(user: AuthUser): string {
       team_id: user.team_id,
       is_admin: user.is_admin,
       is_super_admin: user.is_super_admin,
+      is_team_lead: user.is_team_lead ?? false,
       is_display_user: user.is_display_user,
       is_active: user.is_active,
       employee_id: user.employee_id ?? null,

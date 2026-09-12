@@ -15,6 +15,7 @@ export interface AppUser {
   team_id: string | null
   is_admin: boolean
   is_super_admin: boolean
+  is_team_lead: boolean
   is_display_user: boolean
   is_active: boolean
   employee_id: string | null

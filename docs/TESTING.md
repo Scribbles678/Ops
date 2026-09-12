@@ -207,12 +207,14 @@ see that team's data and nothing else.
 A bad migration crashloops the pod on deploy, so validate before shipping:
 
 ```bash
-docker run -d --name t -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=scheduling \
+docker run -d --name throwaway-pg -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=scheduling \
   -p 55432:5432 postgres:16-alpine
 # pipe setup.sql, then every migration in filename order, through:
-docker exec -i t psql -v ON_ERROR_STOP=1 -U postgres -d scheduling
-docker rm -f t
+docker exec -i throwaway-pg psql -v ON_ERROR_STOP=1 -U postgres -d scheduling
+docker rm -f throwaway-pg
 ```
+
+(Docker Desktop on Windows rejects a one-letter container name, hence `throwaway-pg`.)
 
 Migrations re-run on **every** boot, so re-run them twice against the same
 database and confirm the second pass is clean. See `CONTEXT.md` for the ledger.
@@ -234,9 +236,14 @@ team ("Site B")** and non-super-admin logins as fixtures:
 
 | Login | Role | Team |
 |---|---|---|
-| `admin@example.com` / `admin123` | super admin | Default Team |
-| `siteb.admin@example.com` / `testpass123` | admin | Site B |
-| `tenant.test@example.com` / `testpass123` | user | Default Team |
+| `admin@example.com` / `admin123` | Super Admin | Default Team |
+| `siteb.admin@example.com` / `testpass123` | Supervisor | Site B |
+| `lead@example.com` / `testpass123` | Team Lead / Coordinator | Default Team |
+| `kiosk@example.com` / `testpass123` | Kiosk | Default Team |
+| `tenant.test@example.com` / `testpass123` | **no role** (tests the lock-out) | Default Team |
+
+The kiosk account lands on `/display` and is locked there; use it to test the
+request modal as staff see it, including the "Check my requests" UPI lookup.
 
 Site B deliberately has a job function named **`Pick`**, colliding with Default
 Team's, because job functions are matched by name on the builder's save path —
@@ -296,4 +303,4 @@ you aren't deliberately testing the container.
 
 ---
 
-**Last Updated**: August 2026
+**Last Updated**: September 2026

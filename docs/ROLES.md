@@ -1,508 +1,119 @@
-# User Roles & Permissions Documentation
+# Roles & Permissions
 
-Complete guide to the role system, permissions, and team isolation.
-
----
-
-## Table of Contents
-
-1. [Role Hierarchy](#role-hierarchy)
-2. [Role Definitions](#role-definitions)
-3. [Permissions Matrix](#permissions-matrix)
-4. [Team Isolation Rules](#team-isolation-rules)
-5. [Role Assignment](#role-assignment)
-6. [Use Cases](#use-cases)
-7. [Security Considerations](#security-considerations)
+Four roles. An account holds **exactly one**, and an account with **no role can do
+nothing**. The role universe lives in one file, `utils/roles.ts`, used by the server
+gates and the Settings page alike — if you change a role's meaning, change it there.
 
 ---
 
-## Role Hierarchy
+## The four roles
 
-The application uses a **four-tier role system**:
+| Role | Stored as | Who | Can |
+|---|---|---|---|
+| **Super Admin** | `is_super_admin` | system owner / IT | everything, plus users and teams (create, edit, reset passwords, change any team assignment, switch their own team) |
+| **Supervisor** | `is_admin` | runs the team | everything on the floor **plus** Request Rules, blocked dates, and the **change log** (who approved / rejected / deleted what — see PTO-AND-REQUESTS.md). *(Labelled "Admin" until Sep 2026 — same flag, same rights.)* |
+| **Team Lead / Coordinator** | `is_team_lead` | day-to-day leads | schedules, employees, training, shifts, targets, PTO entries; approve / reject / delete requests; errors, performance notes and attendance points; the full Employee Overview. On Settings they see only **Change Password** and **Account Information**. |
+| **Kiosk** | `is_display_user` | the shared wall iPad | locked to `/display`; can submit requests and look one employee's requests up by UPI |
 
-```
-Super Admin (Highest)
-    ↓
-Admin
-    ↓
-User (Standard)
-    ↓
-Display User (Read-Only)
-```
+**No role** (all four flags false): can sign in, change their password and see their
+Account Information — nothing else. Every team-scoped read and write is refused
+(403) and the route middleware keeps them on `/settings`, which explains why. A
+Super Admin assigns a role from User Management.
 
----
-
-## Role Definitions
-
-### 1. **Super Admin** 🔑
-**Purpose**: Full system administration across all teams
-
-**Key Characteristics:**
-- Highest level of access
-- Can manage all teams and users
-- Can see and modify any team's data by switching their current team (one team in view at a time)
-- Can assign roles to other users
-- Can create and manage teams
-
-**Database Flag**: `is_super_admin = true` in `user_profiles`
-
-**Permissions:**
-- ✅ View and manage data for **any** team — one at a time, by switching their current team in Settings (user and team management stay install-wide)
-- ✅ Create and manage users across all teams
-- ✅ Assign users to any team
-- ✅ Create and delete teams
-- ✅ Grant Admin and Super Admin roles
-- ✅ Activate/deactivate any user
-- ✅ Reset passwords for any user
-- ✅ Access User Management section (all users)
-- ✅ Access Team Management section
-- ✅ Modify system-wide settings
-
-**Restrictions:**
-- None (full system access)
-
-**Use Cases:**
-- System administrators
-- IT department
-- Senior management overseeing multiple teams
-- Initial setup and configuration
+There is no "regular user" any more. The old no-flag account could build schedules
+and edit the team setup; that role was folded into Team Lead / Coordinator when the
+roles were tightened in Sep 2026.
 
 ---
 
-### 2. **Admin** 👔
-**Purpose**: Team-level administration within a specific team
+## How it is enforced
 
-**Key Characteristics:**
-- Can manage users within their own team
-- Can see and modify all data for their team
-- Can assign users to their team
-- Cannot access other teams' data
-- Cannot create new teams
-- Cannot assign super admin or admin roles
+**Server** — `server/utils/authorize.ts`:
 
-**Database Flag**: `is_admin = true` in `user_profiles`
+| gate | who passes | used by |
+|---|---|---|
+| `requireAuth` | any active account | most reads and writes (then team-scoped) |
+| `requireTeamLead` | Team Lead, Supervisor, Super Admin | request approve/reject/delete, performance errors and notes, attendance points |
+| `requireSupervisor` | Supervisor, Super Admin | team settings (request rules), blocked dates, the user list, the change log |
+| `requireSuperAdmin` | Super Admin | create/edit/delete users, reset passwords, teams |
 
-**Permissions:**
-- ✅ **All User permissions** for their own team
-- ✅ View users in their own team
-- ✅ View and manage all data for their own team
-- ✅ Approve/reject PTO and schedule requests for their team
-- ❌ **Cannot** change their own team assignment — super admin only. An admin who could reassign themselves could walk into another site's data at will, which defeats team isolation entirely.
+`getTeamFilter` / `getWriteTeamId` additionally refuse a **no-role** account and a
+**team-less** account, so those never reach a query. The Employee Overview API
+returns its review sections (`performance`, `attendancePoints`) only to Team Lead
+and above.
 
-**Note**: Admin role can **view** team users, but **cannot create new users or reset passwords** — these operations require Super Admin privileges and are enforced by `requireSuperAdmin()` in server API routes (`server/utils/authorize.ts`).
+**Client** — `middleware/auth.global.ts` sends Kiosk accounts to `/display` and
+no-role accounts to `/settings`; the Settings page shows the Request Rules card
+only to Supervisors and Super Admins, and User / Team Management only to Super
+Admins. Client checks are convenience; the server gates are the authority.
 
-**Restrictions:**
-- ❌ Cannot see data from other teams
-- ❌ Cannot create new users (requires Super Admin)
-- ❌ Cannot reset user passwords (requires Super Admin)
-- ❌ Cannot activate/deactivate users (requires Super Admin)
-- ❌ Cannot create or delete teams
-- ❌ Cannot assign users to teams, including themselves (requires Super Admin)
-- ❌ Cannot grant Admin or Super Admin roles
-- ❌ Cannot access User Management section (Super Admin only)
-- ❌ Cannot access Team Management section
-- ❌ Cannot modify system-wide settings
+**Exactly one role.** `POST /api/admin/users/create` requires a `role` and
+`PUT /api/admin/users/[id]` takes one; both write all four flags together from
+`flagsForRole()`. The Settings forms offer a single Role dropdown. Reads derive the
+role with `roleOf()` — the **highest flag wins** — so an account that still carries
+two flags from before Sep 2026 behaves as its stronger role until it is next edited,
+at which point it is normalised. No migration rewrote anyone's flags.
 
-**Use Cases:**
-- Team leads
-- Department managers
-- Shift supervisors
-- Anyone who needs to manage their team's schedule and users
+The role travels in the signed JWT, so a change applies at the person's **next
+sign-in** (sessions last 8 hours; the kiosk's 30 days).
 
 ---
 
-### 3. **User** 👤
-**Purpose**: Standard user with team-specific access
+## Team isolation
 
-**Key Characteristics:**
-- Can view and edit their team's schedules
-- Can manage employees, shifts, and training for their team
-- Can create and edit schedules
-- Cannot manage users
-- Cannot access other teams' data
-- Cannot change team assignments
-
-**Database Flag**: `is_admin = false` AND `is_super_admin = false` in `user_profiles`
-
-**Permissions:**
-- ✅ View and manage schedules for their own team
-- ✅ View and manage employees in their own team
-- ✅ View and manage job functions in their own team
-- ✅ View and manage training records in their own team
-- ✅ View and manage PTO requests in their own team
-- ✅ View and manage shift swaps in their own team
-- ✅ Change their own password (via Settings page)
-- ✅ View their own account information
-
-**Restrictions:**
-- ❌ Cannot see data from other teams
-- ❌ Cannot create or manage other users
-- ❌ Cannot create or manage teams
-- ❌ Cannot access User Management or Team Management sections
-- ❌ Cannot modify system settings
-
-**Use Cases:**
-- Regular team members who need to create and manage schedules
-- Employees who need to view training records and assignments
-- Day-to-day operations staff
+Unchanged by roles: every account belongs to one team, `getTeamFilter()` returns the
+caller's own team for everyone (Super Admins included — they switch team in
+Settings → Change Team), and only User Management reads across teams via the
+explicit `readsAllTeams()`. See `CONTEXT.md` → Multi-Tenancy.
 
 ---
 
-### 4. **Display User** 📺 (kiosk)
-**Purpose**: Locked-down account for a shared wall/iPad kiosk showing today's schedule
+## Rolling the roles out to an existing install
 
-**Key Characteristics:**
-- **On login, redirected straight to `/display`** (login.vue + auth.global.ts).
-- **Locked to `/display`** — the global middleware (`middleware/auth.global.ts`) bounces a display user back to `/display` if they try to reach any other route, even by typing the URL.
-- Can only view **today's schedule** (read-only), auto-refreshing.
-- Assigned to a specific team (the team whose schedule the kiosk shows). The display page's data fetches are team-scoped, so the account **needs a `team_id`**.
-- **Can submit time-off / schedule-change requests** via the form on the display page — this is the one deliberate write the kiosk account performs (the request picks the employee from a dropdown; `submitted_by` is the kiosk account).
+The migration (021) only adds the `is_team_lead` column. On deploy:
 
-**Database Flag**: `is_display_user = true` in `user_profiles`
+1. Nobody's flags change, so nobody is locked out: Super Admins stay Super Admins,
+   the kiosk stays the kiosk, and **every Admin is now a Supervisor** with the rights
+   they already had.
+2. The people who should be **Team Lead / Coordinator** (today's Admins who are
+   really leads) need reassigning by hand in Settings → User Management: open the
+   person, pick the role, save. Their password and team are untouched; it takes
+   effect at their next sign-in. What they lose is the Request Rules card.
+3. **Check for accounts with no flags before deploying** — after this change they
+   cannot do anything until given a role:
 
-**Permissions:**
-- ✅ View today's schedule (read-only)
-- ✅ Access `/display` page (only)
-- ✅ Submit time-off / schedule-change requests via the display page form
+   ```sql
+   SELECT email, team_id FROM user_profiles
+   WHERE NOT is_super_admin AND NOT is_admin AND NOT is_team_lead AND NOT is_display_user
+     AND is_active;
+   ```
 
-**Restrictions:**
-- ❌ No write access except submitting requests
-- ❌ Today's data only
-- ❌ Locked to `/display` — cannot navigate to any other page
-
-> **iPad lockdown:** keeping the user *inside the app* (so they can't leave the browser/page) is an OS-level concern — use iOS **Guided Access** (or Single App Mode / MDM kiosk mode) on the iPad. The app-level lock above only governs in-app routes.
-
-**Use Cases:**
-- TV displays in break rooms
-- Public schedule monitors
-- Kiosk displays
-- Any read-only viewing scenario
+   Assign each a role (probably Team Lead / Coordinator) in User Management right
+   after deploying, or beforehand via SQL:
+   `UPDATE user_profiles SET is_team_lead = true WHERE email = '…';`
 
 ---
 
-## Permissions Matrix
+## Assigning a role
 
-| Feature | Super Admin | Admin | User | Display User |
-|---------|------------|-------|------|--------------|
-| **View All Teams' Data** | ✅ | ❌ | ❌ | ❌* |
-| **View Own Team's Data** | ✅ | ✅ | ✅ | ✅ (today only) |
-| **Edit Own Team's Data** | ✅ | ✅ | ✅ | ❌ |
-| **Create Schedules** | ✅ | ✅ | ✅ | ❌ |
-| **Manage Employees** | ✅ (all) | ✅ (team) | ✅ (team) | ❌ |
-| **Manage Job Functions** | ✅ (all) | ✅ (team) | ✅ (team) | ❌ |
-| **Manage Shifts** | ✅ (all) | ✅ (team) | ✅ (team) | ❌ |
-| **Manage Training** | ✅ (all) | ✅ (team) | ✅ (team) | ❌ |
-| **Manage PTO** | ✅ (all) | ✅ (team) | ✅ (team) | ❌ |
-| **Create Teams** | ✅ | ❌ | ❌ | ❌ |
-| **Manage Users** | ✅ (all) | ✅ (team) | ❌ | ❌ |
-| **Assign Roles** | ✅ | ❌ | ❌ | ❌ |
-| **Change Team Assignments** | ✅ | ✅ (team) | ❌ | ❌ |
-| **Access Settings Page** | ✅ | ✅ | ✅ | ❌ |
-| **Access Display Mode** | ✅ | ✅ | ✅ | ✅ (only) |
-| **View Historical Data** | ✅ | ✅ | ✅ | ❌ |
-| **Export Data** | ✅ | ✅ | ✅ | ❌ |
+Settings → User Management (Super Admin only) → Create User, or Edit on an existing
+row → **Role** dropdown → Save. Every account needs a team as well; the form
+requires both.
 
-*Every account must belong to a team — display users included. A team-less account is refused all data reads and writes (403); it can still sign in and list teams so a super admin can assign one. The create-user form requires a team, and `POST /api/admin/users/create` rejects a request without one.
+Via SQL, set exactly one flag true and the other three false.
 
 ---
 
-## Team Isolation Rules
+## Test fixtures (dev database)
 
-### How Team Isolation Works
-
-1. **Data Filtering**: All API queries apply `WHERE team_id = $user.team_id` via `getTeamFilter()` in `server/utils/authorize.ts`
-2. **Server-side enforcement**: JWT middleware (`server/middleware/auth.ts`) populates `event.context.user`; API routes read `user.team_id` when filtering/writing data
-3. **Automatic Assignment**: New records receive the user's `team_id` on insert
-4. **Super Admin scoping** (changed Aug 2026): `getTeamFilter()` returns the caller's own `team_id` for **everyone, super admins included**. A super admin views another team by switching team in Settings → Change Team, which re-issues the session token so the change applies at once. Only genuinely install-wide screens (user management) opt out, via the explicit `readsAllTeams()` helper.
-
-> Note: The repo contains legacy `rls-policies.sql` from an earlier Supabase-based prototype. The current production enforcement is **API-level**, not database-level RLS.
-
-### Team Isolation by Role
-
-| Role | Can See | Can Edit |
-|------|---------|----------|
-| **Super Admin** | All teams | All teams |
-| **Admin** | Own team only | Own team only |
-| **User** | Own team only | Own team only |
-| **Display User** | Own team (or all if `team_id = NULL`) | None (read-only) |
-
-### Examples
-
-**Scenario 1: Regular User**
-- Assigned to "Domestic" team
-- Can only see Domestic employees, schedules, training
-- Cannot see "International" team data
-- New records automatically assigned to "Domestic"
-
-**Scenario 2: Super Admin**
-- Not assigned to any specific team
-- Can reach any team's data by switching team (one at a time)
-- Can create records for any team (by specifying `team_id`)
-- Can manage users across all teams
-
-**Scenario 3: Admin**
-- Assigned to "Domestic" team
-- Can see and manage all Domestic team data
-- Can assign users to Domestic team
-- Cannot see "International" team data
+| Login | Role | Team |
+|---|---|---|
+| `admin@example.com` / `admin123` | Super Admin | Default Team |
+| `siteb.admin@example.com` / `testpass123` | Supervisor | Site B |
+| `lead@example.com` / `testpass123` | Team Lead / Coordinator | Default Team |
+| `kiosk@example.com` / `testpass123` | Kiosk | Default Team |
+| `tenant.test@example.com` / `testpass123` | **no role** — for testing the lock-out | Default Team |
 
 ---
 
-## Role Assignment
-
-### Who Can Assign Roles?
-
-| Role | Can Assign |
-|------|------------|
-| **Super Admin** | All roles (Super Admin, Admin, User, Display User) |
-| **Admin** | Cannot assign roles (Super Admin only) |
-| **User** | Cannot assign roles |
-| **Display User** | Cannot assign roles |
-
-**Note**: Only Super Admins can create users, assign roles, and manage user accounts through the User Management interface.
-
-### How to Assign Roles
-
-#### Via Settings Page (Super Admin Only)
-
-1. Navigate to **Settings** page (or **User Management** page for Super Admins)
-2. Go to **User Management** section (only visible to Super Admins)
-3. Click **Create User** or **Edit** existing user
-4. Enter user details:
-   - **Email address** (required)
-   - **Password** (minimum 6 characters)
-   - **Full Name** (optional)
-   - **Team** (select from dropdown)
-5. Check the role(s):
-   - **Admin (Team Manager)** → `is_admin=true`
-   - **Super Admin (System Administrator)** → `is_super_admin=true`
-   - **Display Only (kiosk)** → `is_display_user=true` (leave Admin/Super Admin unchecked)
-   - (none checked = regular User)
-6. Save
-
-> **Where the live UI is:** user management is rendered inline in **`pages/settings.vue`** (the "Super Admin Management" section). The unused legacy `pages/admin/users.vue` twin was deleted in Jul 2026 — edit `settings.vue`. (The `components/details/*Tab.vue` files are the same kind of unused twin, still present.)
-
-**Note**: The username is automatically derived from the email address (part before '@').
-
-#### Via SQL (Advanced)
-
-```sql
--- Make user a Super Admin
-UPDATE user_profiles 
-SET is_super_admin = true 
-WHERE id = 'user-uuid-here';
-
--- Make user an Admin
-UPDATE user_profiles 
-SET is_admin = true 
-WHERE id = 'user-uuid-here';
-
--- Make user a Display User
-UPDATE user_profiles 
-SET is_display_user = true 
-WHERE id = 'user-uuid-here';
-
--- Remove all roles (make regular User)
-UPDATE user_profiles 
-SET is_super_admin = false, 
-    is_admin = false, 
-    is_display_user = false 
-WHERE id = 'user-uuid-here';
-```
-
----
-
-## Use Cases
-
-### Use Case 1: Multi-Team Organization
-
-**Scenario**: Company has "Domestic" and "International" teams
-
-**Setup:**
-- 1 Super Admin (manages everything)
-- 2 Admins (one per team)
-- Multiple Users per team
-- 1 Display User per location (optional)
-
-**Result:**
-- Each team only sees their own data
-- Admins manage their team independently
-- Super Admin can see everything
-
----
-
-### Use Case 2: Single Team with Multiple Users
-
-**Scenario**: One team, multiple schedulers
-
-**Setup:**
-- 1 Super Admin (or Admin)
-- Multiple Users
-- 1 Display User for TV
-
-**Result:**
-- All users see same data (same team)
-- Users can collaborate on schedules
-- Display shows team schedule
-
----
-
-### Use Case 3: TV Display Only
-
-**Scenario**: Public TV showing today's schedule
-
-**Setup:**
-- 1 Display User account
-- Login on TV browser
-- Auto-refresh enabled
-
-**Result:**
-- TV shows today's schedule
-- No login required for viewers
-- Can't be edited from TV
-- Auto-updates every 2 minutes
-
----
-
-### Use Case 4: Team-Specific TV Displays
-
-**Scenario**: Each team has their own TV display
-
-**Setup:**
-- 1 Display User per team
-- Each assigned to their team (`team_id` set)
-- Login on respective TV
-
-**Result:**
-- Each TV shows only that team's schedule
-- Isolated displays per team
-- Can't see other teams' schedules
-
----
-
-## Security Considerations
-
-### Role Immutability
-
-- **Regular users cannot change their own role**
-- Only Super Admins can assign/change roles
-- Database triggers prevent role escalation
-- Users cannot change their `team_id` (except Super Admin/Admin)
-
-### Team Isolation Security
-
-- **API-level enforcement**: Every server route applies `team_id` filter via `getTeamFilter(user)` in `server/utils/authorize.ts`
-- **JWT-backed**: `team_id` comes from the signed JWT payload, not the client — cannot be spoofed
-- **Super Admin scoping**: sees one team at a time — their current team — and switches between them in Settings. User and team management remain install-wide via `readsAllTeams()`.
-
-### Display User Security
-
-- **Read-only**: Cannot modify any data
-- **Route restriction**: Middleware prevents access to other pages
-- **Today only**: Can only see current day's schedule
-- **Revocable**: Can disable display user account
-
-### Best Practices
-
-1. **Minimize Super Admins**: Only assign to trusted personnel
-2. **Use Admins for Teams**: Let team leads be Admins, not Super Admins
-3. **Separate Display Accounts**: Use different accounts for each TV
-4. **Regular Audits**: Review user roles periodically
-5. **Team Assignment**: Always assign users to teams (except Super Admin)
-
----
-
-## Role Management Workflow
-
-### Creating a New User
-
-1. **Super Admin** creates user via Settings → User Management page
-2. Enter user details:
-   - **Email address** (required, used for login)
-   - **Password** (minimum 6 characters)
-   - **Full Name** (optional)
-3. Select role(s):
-   - Super Admin (if needed)
-   - Admin (if team manager) - Note: Admin can view team data but cannot create users
-   - Display User (if TV display)
-   - None = Regular User
-4. Assign to team (required for Admin/User, optional for Super Admin)
-5. Username is automatically derived from email (part before '@')
-6. User receives credentials and can login with their email address
-
-### Changing a User's Role
-
-1. **Super Admin** goes to Settings → User Management
-2. Finds user and clicks **Edit**
-3. Updates role checkboxes (Super Admin, Admin, Display User)
-4. Can also update team assignment, full name, and active status
-5. Saves changes
-6. User's permissions update immediately
-
-### Removing Access
-
-1. **Super Admin** goes to Settings → User Management
-2. Finds user and clicks **Edit**
-3. Sets `is_active = false` to deactivate (user cannot login but data is preserved)
-4. OR deletes user account (removes from auth and user_profiles)
-5. User can no longer login after deactivation or deletion
-
----
-
-## Troubleshooting
-
-### User Can't See Their Team's Data
-
-**Possible Causes:**
-- User not assigned to a team (`team_id = NULL`)
-- User's team doesn't have any data
-- JWT cookie stale (team_id changed after login — user needs to re-login)
-
-**Solution:**
-- Assign user to team in Settings
-- Verify team has data
-- Check user's `team_id` in `user_profiles` table
-- Have user log out and back in to refresh JWT
-
-### User Can See All Teams' Data
-
-**Possible Causes:**
-- User is Super Admin
-- User's `team_id = NULL` (should only happen for Super Admin)
-
-**Solution:**
-- Verify user's role in Settings
-- Check `is_super_admin` flag in database
-
-### Display User Can Access Other Pages
-
-**Possible Causes:**
-- Middleware not updated
-- Display user flag not set correctly
-
-**Solution:**
-- Update middleware to restrict display users
-- Verify `is_display_user = true` in database
-
----
-
-## Summary
-
-| Role | Access Level | Team Scope | Write Access | Use Case |
-|------|-------------|------------|--------------|----------|
-| **Super Admin** | Full | All teams | ✅ Full | System administration |
-| **Admin** | Team | Own team | ✅ Full | Team management |
-| **User** | Team | Own team | ✅ Full | Regular operations |
-| **Display User** | Read-only | Own team (or all) | ❌ None | TV displays |
-
----
-
-## Next Steps
-
-- See [CONTEXT.md](./CONTEXT.md) for full technical architecture including auth, multi-tenancy, and the schedule builder algorithm
-- See [RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md) for production deployment
-
----
-
-**Last Updated**: June 2026
-
+**Last Updated**: September 2026

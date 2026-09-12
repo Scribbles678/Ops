@@ -1,18 +1,15 @@
-<template>
-  <div class="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto" @click.self="$emit('close')">
-    <div class="bg-white rounded-xl shadow-2xl max-w-6xl w-full my-4">
-      <div class="p-6">
+<!--
+  Employee Overview dashboard. Rendered inline by pages/employee-overview.vue,
+  which owns the chosen employee and period (v-model) so they live in the URL.
 
-        <!-- Header -->
-        <div class="flex justify-between items-start mb-4">
-          <div>
-            <h2 class="text-xl font-bold text-gray-900">Employee Overview</h2>
-            <p class="text-sm text-gray-500 mt-0.5">
-              Scheduled work, skills and attendance drawn from schedule history.
-            </p>
-          </div>
-          <button @click="$emit('close')" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
-        </div>
+  Until Sep 2026 this was a modal opened from the training matrix and the PTO
+  calendar; it is now a page reachable from the home screen, and those buttons
+  link to it instead.
+-->
+<template>
+  <div class="bg-white rounded-xl shadow border border-gray-200">
+    <div>
+      <div class="p-6">
 
         <!-- Filter row: scopes every panel below -->
         <div class="flex flex-wrap items-end gap-3 p-3 bg-gray-50 border border-gray-200 rounded-lg mb-4">
@@ -41,10 +38,21 @@
               >{{ p.label }}</button>
             </div>
           </div>
+          <!-- Every manual change to this person's record, and who made it.
+               Supervisors and above; the endpoint refuses everyone else. -->
+          <button
+            v-if="canManageTeam(user)"
+            @click="showChangeLog = true"
+            :disabled="!employeeId"
+            class="ml-auto px-3 py-2 text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+          >
+            Change log
+          </button>
           <button
             @click="exportCsv"
             :disabled="!data"
-            class="ml-auto px-3 py-2 text-sm rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-40"
+            class="px-3 py-2 text-sm rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-40"
+            :class="canManageTeam(user) ? '' : 'ml-auto'"
           >
             Export CSV
           </button>
@@ -62,19 +70,14 @@
         <!-- Dashboard. Held at reduced opacity while refetching so there's no skeleton flash. -->
         <div v-else-if="data" :class="loading ? 'opacity-60 transition-opacity' : ''">
 
-          <!-- Summary tiles -->
-          <div class="grid grid-cols-2 md:grid-cols-5 gap-2.5 mb-3">
+          <!-- Summary tiles (a fifth, Attendance points, for admins) -->
+          <div class="grid grid-cols-2 md:grid-cols-3 gap-2.5 mb-3" :class="data.attendancePoints ? 'lg:grid-cols-5' : 'lg:grid-cols-4'">
             <div class="border border-gray-200 rounded-lg p-3">
               <div class="text-[10px] uppercase tracking-wide text-gray-500 font-medium">Days scheduled</div>
               <div class="text-2xl font-bold text-gray-900 leading-tight">{{ data.summary.daysScheduled }}</div>
               <div class="text-[11px] text-gray-500">
                 {{ data.summary.firstDate ? shortDate(data.summary.firstDate) + ' – ' + shortDate(data.summary.lastDate) : 'No schedule data' }}
               </div>
-            </div>
-            <div class="border border-gray-200 rounded-lg p-3">
-              <div class="text-[10px] uppercase tracking-wide text-gray-500 font-medium">Hours scheduled</div>
-              <div class="text-2xl font-bold text-gray-900 leading-tight">{{ data.summary.hoursScheduled }}<span class="text-sm font-medium text-gray-500 ml-0.5">h</span></div>
-              <div class="text-[11px] text-gray-500">{{ data.summary.avgHoursPerDay }}h avg / day</div>
             </div>
             <div class="border border-gray-200 rounded-lg p-3">
               <div class="text-[10px] uppercase tracking-wide text-gray-500 font-medium">Time off taken</div>
@@ -91,12 +94,14 @@
               <div class="text-2xl font-bold text-gray-900 leading-tight">{{ data.summary.functionsWorked }}</div>
               <div class="text-[11px] text-gray-500">of {{ data.summary.functionsTrained }} trained</div>
             </div>
+            <div v-if="data.attendancePoints" class="border border-gray-200 rounded-lg p-3">
+              <div class="text-[10px] uppercase tracking-wide text-gray-500 font-medium">Attendance points</div>
+              <div class="text-2xl font-bold leading-tight" :class="data.attendancePoints.total > 0 ? 'text-amber-600' : 'text-gray-900'">{{ fmtPoints(data.attendancePoints.total) }}</div>
+            </div>
           </div>
 
-          <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 mb-3">
-
-            <!-- WORK MIX -->
-            <div class="lg:col-span-7 border border-gray-200 rounded-lg p-4">
+          <!-- WORK MIX -->
+          <div class="border border-gray-200 rounded-lg p-4 mb-3">
               <div class="flex justify-between items-baseline mb-3">
                 <h3 class="font-semibold text-gray-900 text-sm">Work mix</h3>
                 <button
@@ -166,70 +171,16 @@
               </div>
             </div>
 
-            <!-- SKILLS -->
-            <div class="lg:col-span-5 border border-gray-200 rounded-lg p-4">
-              <div class="flex justify-between items-baseline mb-3">
-                <h3 class="font-semibold text-gray-900 text-sm">Skills &amp; training</h3>
-                <span class="text-[10px] uppercase tracking-wide text-gray-400">{{ data.skills.trained.length }} certified</span>
-              </div>
-
-              <div v-if="!data.skills.trained.length" class="text-sm text-gray-500 py-6 text-center">
-                No training records for this employee.
-              </div>
-
-              <template v-else>
-                <div class="mb-1.5 flex justify-between items-baseline text-[13px]">
-                  <span class="text-gray-700">Training in use</span>
-                  <span class="text-xs text-gray-500 tabular-nums">{{ usedTrainingCount }} of {{ data.skills.trained.length }}</span>
-                </div>
-                <div class="flex gap-0.5 h-2.5 bg-gray-100 rounded-sm overflow-hidden mb-4">
-                  <span class="bg-blue-600 h-full" :style="{ width: usedPct + '%' }"></span>
-                  <span class="bg-amber-400 h-full" :style="{ width: (100 - usedPct) + '%' }"></span>
-                </div>
-
-                <div v-if="data.skills.neverWorked.length" class="mb-3">
-                  <div class="text-xs text-gray-600 mb-1.5">
-                    Trained but never scheduled
-                    <span class="ml-1 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-medium">{{ data.skills.neverWorked.length }} unused</span>
-                  </div>
-                  <div class="flex flex-wrap gap-1">
-                    <span
-                      v-for="t in data.skills.neverWorked"
-                      :key="t.id"
-                      class="text-[11px] border border-amber-300 bg-amber-50 text-amber-900 rounded px-1.5 py-0.5"
-                    >{{ t.name }}</span>
-                  </div>
-                </div>
-
-                <div v-if="data.skills.stale.length" class="mb-3">
-                  <div class="text-xs text-gray-600 mb-1.5">
-                    Not worked in {{ data.skills.staleDays }}+ days
-                    <span class="ml-1 px-1.5 py-0.5 rounded bg-gray-100 text-gray-700 font-medium">{{ data.skills.stale.length }}</span>
-                  </div>
-                  <div class="flex flex-wrap gap-1">
-                    <span
-                      v-for="t in data.skills.stale"
-                      :key="t.id"
-                      class="text-[11px] border border-gray-300 text-gray-600 rounded px-1.5 py-0.5"
-                      :title="'Last worked ' + shortDate(t.lastWorked)"
-                    >{{ t.name }}</span>
-                  </div>
-                </div>
-
-                <div
-                  v-if="data.skills.teamAvgTrained !== null"
-                  class="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-600"
-                >
-                  Team-wide, staff average <b class="text-gray-900">{{ data.skills.teamAvgTrained }}</b> trainings
-                  and work <b class="text-gray-900">{{ data.skills.teamAvgWorked }}</b>.
-                </div>
-              </template>
-            </div>
-          </div>
-
           <!-- ATTENDANCE -->
           <div class="border border-gray-200 rounded-lg p-4 mb-3">
-            <h3 class="font-semibold text-gray-900 text-sm mb-3">Attendance &amp; requests</h3>
+            <div class="flex justify-between items-baseline mb-3">
+              <h3 class="font-semibold text-gray-900 text-sm">Attendance &amp; requests</h3>
+              <button
+                v-if="data.attendancePoints"
+                @click="openPointModal"
+                class="text-xs text-blue-600 hover:text-blue-800"
+              >+ Add attendance point</button>
+            </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
 
               <div>
@@ -291,6 +242,37 @@
                     {{ mondayFridayShare }}% of absences fall on Mon or Fri.
                   </div>
                 </template>
+              </div>
+            </div>
+
+            <!-- Attendance points in this period. Admin-only (null for everyone
+                 else). Every entry stays readable and deletable, so a mis-click
+                 can be corrected. -->
+            <div v-if="data.attendancePoints" class="mt-4 pt-3 border-t border-gray-100">
+              <div class="flex justify-between items-baseline mb-2">
+                <div class="text-[10px] uppercase tracking-wide text-gray-500 font-medium">Attendance points</div>
+                <span class="text-xs text-gray-500 tabular-nums">{{ fmtPoints(data.attendancePoints.total) }} total in this period</span>
+              </div>
+              <div v-if="!data.attendancePoints.entries.length" class="text-sm text-gray-400 py-2">None in this period.</div>
+              <div v-else class="max-h-40 overflow-y-auto">
+                <div
+                  v-for="p in data.attendancePoints.entries"
+                  :key="p.id"
+                  class="flex items-start justify-between gap-2 py-1 text-xs border-b border-gray-50 last:border-b-0"
+                >
+                  <div class="min-w-0 flex items-start gap-2">
+                    <span
+                      class="flex-none px-1.5 py-0.5 rounded font-semibold tabular-nums"
+                      :class="p.points >= 1 ? 'bg-amber-100 text-amber-800' : 'bg-amber-50 text-amber-700'"
+                    >{{ fmtPoints(p.points) }} pt</span>
+                    <div class="min-w-0">
+                      <span class="tabular-nums text-gray-700">{{ longDate(p.point_date) }}</span>
+                      <span v-if="p.logged_by" class="ml-2 text-gray-400">by {{ p.logged_by }}</span>
+                      <div v-if="p.notes" class="text-gray-600 whitespace-pre-wrap break-words">{{ p.notes }}</div>
+                    </div>
+                  </div>
+                  <button @click="deletePoint(p)" class="text-gray-400 hover:text-red-600 flex-none" title="Delete">&times;</button>
+                </div>
               </div>
             </div>
           </div>
@@ -560,9 +542,14 @@
             </div>
           </template>
 
-          <!-- ACTIVITY LOG -->
+          <!-- ACTIVITY LOG — paged, ACTIVITY_PAGE_SIZE rows at a time -->
           <div class="border border-gray-200 rounded-lg p-4">
-            <h3 class="font-semibold text-gray-900 text-sm mb-3">Activity log</h3>
+            <div class="flex justify-between items-baseline mb-3">
+              <h3 class="font-semibold text-gray-900 text-sm">Activity log</h3>
+              <span v-if="data.activity.length > ACTIVITY_PAGE_SIZE" class="text-xs text-gray-500 tabular-nums">
+                {{ activityRange.from }}–{{ activityRange.to }} of {{ data.activity.length }}
+              </span>
+            </div>
             <div v-if="!data.activity.length" class="text-sm text-gray-500 py-4 text-center">
               No requests or call-ins in this period.
             </div>
@@ -578,7 +565,7 @@
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-100">
-                  <tr v-for="row in data.activity" :key="row.id">
+                  <tr v-for="row in activityPage" :key="row.id">
                     <td class="px-3 py-2 whitespace-nowrap">{{ longDate(row.date) }}</td>
                     <td class="px-3 py-2 whitespace-nowrap">{{ typeLabel(row.type) }}</td>
                     <td class="px-3 py-2 text-gray-500 whitespace-nowrap">{{ timeLabel(row) || '—' }}</td>
@@ -592,9 +579,100 @@
                 </tbody>
               </table>
             </div>
+            <div v-if="activityPageCount > 1" class="flex items-center justify-between mt-3 pt-3 border-t border-gray-100 text-xs">
+              <button
+                type="button"
+                @click="activityPageIndex--"
+                :disabled="activityPageIndex === 0"
+                class="px-3 py-1.5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white"
+              >← Newer</button>
+              <span class="text-gray-500 tabular-nums">Page {{ activityPageIndex + 1 }} of {{ activityPageCount }}</span>
+              <button
+                type="button"
+                @click="activityPageIndex++"
+                :disabled="activityPageIndex >= activityPageCount - 1"
+                class="px-3 py-1.5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white"
+              >Older →</button>
+            </div>
           </div>
         </div>
       </div>
+    </div>
+
+    <AuditChangeLogModal
+      v-if="showChangeLog && employeeId"
+      :title="`Change log — ${data?.employee?.name ?? 'this employee'}`"
+      subtitle="Every manual change to this person's requests, time off, attendance points, notes and errors."
+      :employee-id="employeeId"
+      @close="showChangeLog = false"
+    />
+
+    <!-- Add attendance point. Half or full, on a date, optional note. -->
+    <div
+      v-if="showPointModal"
+      class="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4"
+      @click.self="closePointModal"
+      @keydown.esc="closePointModal"
+    >
+      <form @submit.prevent="submitPoint" class="bg-white rounded-xl shadow-2xl max-w-sm w-full">
+        <div class="p-5">
+          <div class="flex justify-between items-start mb-3">
+            <div>
+              <h3 class="text-base font-bold text-gray-900">Add attendance point</h3>
+              <p class="text-xs text-gray-500 mt-0.5">{{ data?.employee?.name }}</p>
+            </div>
+            <button type="button" @click="closePointModal" class="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+          </div>
+
+          <!-- The choice, first and large: this is the thing that must not be fumbled. -->
+          <div class="grid grid-cols-2 gap-2 mb-3">
+            <button
+              v-for="opt in POINT_OPTIONS"
+              :key="opt.value"
+              type="button"
+              @click="pointForm.points = opt.value"
+              class="rounded-lg border-2 px-3 py-3 text-center transition"
+              :class="pointForm.points === opt.value
+                ? 'border-amber-500 bg-amber-50 text-amber-900'
+                : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'"
+            >
+              <div class="text-2xl font-bold leading-none tabular-nums">{{ opt.label }}</div>
+              <div class="text-[11px] mt-1">{{ opt.hint }}</div>
+            </button>
+          </div>
+
+          <div class="mb-3">
+            <label class="block text-[11px] font-medium text-gray-600 mb-1">Date</label>
+            <input v-model="pointForm.point_date" type="date" required
+              class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white" />
+          </div>
+          <div class="mb-3">
+            <label class="block text-[11px] font-medium text-gray-600 mb-1">Note (optional)</label>
+            <textarea v-model="pointForm.notes" rows="2" maxlength="2000"
+              placeholder="What happened…"
+              class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded bg-white"></textarea>
+          </div>
+
+          <div v-if="pointFormError" class="text-xs text-red-600 mb-3">{{ pointFormError }}</div>
+
+          <div class="flex gap-2">
+            <button
+              type="button"
+              @click="closePointModal"
+              class="flex-1 px-3 py-2 text-sm rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200 font-medium"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              :disabled="savingPoint"
+              class="flex-1 px-3 py-2 text-sm rounded-md bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 font-medium"
+            >
+              {{ savingPoint ? 'Saving…' : `Add ${fmtPoints(pointForm.points)} point` }}
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
 
     <!-- Delete confirmation. Sits above the overview modal and names the exact
@@ -637,27 +715,37 @@
   </div>
 </template>
 
-<script setup lang="ts">
-const props = defineProps<{ preselectedEmployeeId?: string | null }>()
-defineEmits<{ close: [] }>()
-
-const { employees, fetchEmployees } = useEmployees()
-const { jobFunctions, fetchJobFunctions } = useJobFunctions()
-
-const employeeId = ref(props.preselectedEmployeeId || '')
-const data = ref<any>(null)
-const loading = ref(false)
-const error = ref('')
-const showMixTable = ref(false)
-
-const periods = [
+<script lang="ts">
+/** The period presets, exported so the page can validate a ?period= value. */
+export const OVERVIEW_PERIODS = [
   { key: '7d', label: '7d' },
   { key: '30d', label: '30d' },
   { key: '90d', label: '90d' },
   { key: '12mo', label: '12mo' },
   { key: 'all', label: 'All' },
-]
-const period = ref('all')
+] as const
+export type OverviewPeriod = (typeof OVERVIEW_PERIODS)[number]['key']
+</script>
+
+<script setup lang="ts">
+import { canManageTeam } from '~/utils/roles'
+
+// Both are v-models: the page keeps them in the URL so an overview is
+// bookmarkable and Back/Forward work.
+const employeeId = defineModel<string>('employeeId', { default: '' })
+const period = defineModel<OverviewPeriod>('period', { default: 'all' })
+
+const { employees, fetchEmployees } = useEmployees()
+const { jobFunctions, fetchJobFunctions } = useJobFunctions()
+const { user } = useAuth()
+const showChangeLog = ref(false)
+
+const data = ref<any>(null)
+const loading = ref(false)
+const error = ref('')
+const showMixTable = ref(false)
+
+const periods = OVERVIEW_PERIODS
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const toStr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -697,15 +785,6 @@ const absenceCount = computed(() =>
   Object.values(data.value?.attendance?.byKind ?? {}).reduce((s: number, v: any) => s + v.count, 0)
 )
 
-const usedTrainingCount = computed(() => {
-  const t = data.value?.skills?.trained ?? []
-  return t.filter((x: any) => !x.neverWorked).length
-})
-const usedPct = computed(() => {
-  const total = data.value?.skills?.trained?.length ?? 0
-  return total ? Math.round((usedTrainingCount.value / total) * 100) : 0
-})
-
 const maxMixHours = computed(() =>
   Math.max(...(data.value?.workMix ?? []).map((m: any) => m.hours), 0)
 )
@@ -733,6 +812,26 @@ const mondayFridayShare = computed(() => {
   if (!total) return 0
   return Math.round((((w[1] ?? 0) + (w[5] ?? 0)) / total) * 100)
 })
+
+// --- activity log paging --------------------------------------------------------
+// The API returns the whole period's rows (newest first); paging is purely a
+// display concern, so it lives here and resets whenever the data changes.
+const ACTIVITY_PAGE_SIZE = 15
+const activityPageIndex = ref(0)
+const activityPageCount = computed(() =>
+  Math.max(1, Math.ceil((data.value?.activity?.length ?? 0) / ACTIVITY_PAGE_SIZE))
+)
+const activityPage = computed(() => {
+  const start = activityPageIndex.value * ACTIVITY_PAGE_SIZE
+  return (data.value?.activity ?? []).slice(start, start + ACTIVITY_PAGE_SIZE)
+})
+const activityRange = computed(() => {
+  const total = data.value?.activity?.length ?? 0
+  const from = total ? activityPageIndex.value * ACTIVITY_PAGE_SIZE + 1 : 0
+  return { from, to: Math.min(from + ACTIVITY_PAGE_SIZE - 1, total) }
+})
+// A new employee or period is a new list: back to the first page.
+watch(data, () => { activityPageIndex.value = 0 })
 
 // --- labels -------------------------------------------------------------------
 const KIND_LABELS: Record<string, string> = {
@@ -864,6 +963,58 @@ const deleteError = (e: any) => {
     detail: bits.join(' · '),
     sub: e.notes || (e.logged_by ? `Logged by ${e.logged_by}` : undefined),
     run: () => $fetch(`/api/performance/errors/${e.id}`, { method: 'DELETE' }),
+  }
+}
+
+// --- attendance points ---------------------------------------------------------
+const POINT_OPTIONS = [
+  { value: 1, label: '1', hint: 'Full point' },
+  { value: 0.5, label: '½', hint: 'Half point' },
+]
+/** 1 → "1", 0.5 → "½", 1.5 → "1½" — how the floor says it. */
+const fmtPoints = (n: number) => {
+  const whole = Math.floor(n)
+  const half = n - whole >= 0.5
+  if (whole === 0 && half) return '½'
+  return `${whole}${half ? '½' : ''}`
+}
+
+const showPointModal = ref(false)
+const savingPoint = ref(false)
+const pointFormError = ref('')
+const pointForm = ref({ point_date: todayStr(), points: 1, notes: '' })
+
+const openPointModal = () => {
+  pointForm.value = { point_date: todayStr(), points: 1, notes: '' }
+  pointFormError.value = ''
+  showPointModal.value = true
+}
+const closePointModal = () => { showPointModal.value = false }
+
+const submitPoint = async () => {
+  savingPoint.value = true
+  pointFormError.value = ''
+  try {
+    await $fetch('/api/attendance-points', {
+      method: 'POST',
+      body: { employee_id: employeeId.value, ...pointForm.value },
+    })
+    showPointModal.value = false
+    await load()
+  } catch (e: any) {
+    pointFormError.value = e.data?.message || e.message || 'Could not save'
+  } finally {
+    savingPoint.value = false
+  }
+}
+
+const deletePoint = (p: any) => {
+  pendingDelete.value = {
+    title: 'Delete this attendance point?',
+    message: 'It will come off the total. This cannot be undone.',
+    detail: `${fmtPoints(p.points)} point · ${longDate(p.point_date)}`,
+    sub: p.notes || (p.logged_by ? `Logged by ${p.logged_by}` : undefined),
+    run: () => $fetch(`/api/attendance-points/${p.id}`, { method: 'DELETE' }),
   }
 }
 
@@ -1090,18 +1241,24 @@ const exportCsv = () => {
   for (const m of d.workMix) lines.push([m.name, m.hours, m.days, m.share].map(esc).join(','))
   lines.push('')
 
-  lines.push('TRAINED BUT NEVER SCHEDULED')
-  if (d.skills.neverWorked.length) for (const t of d.skills.neverWorked) lines.push(esc(t.name))
-  else lines.push('(none)')
-  lines.push('')
-
   lines.push('ACTIVITY')
   lines.push('Date,Type,Time,Status,Notes')
   for (const r of d.activity) {
     lines.push([r.date, typeLabel(r.type), timeLabel(r), statusLabel(r.status), r.notes || ''].map(esc).join(','))
   }
 
-  // Admin-only sections; d.performance is null for everyone else.
+  // Admin-only sections; null for everyone else.
+  if (d.attendancePoints) {
+    lines.push('')
+    lines.push('ATTENDANCE POINTS')
+    lines.push(['Total', d.attendancePoints.total].join(','))
+    lines.push('Date,Points,Note,Logged by')
+    if (d.attendancePoints.entries.length) {
+      for (const p of d.attendancePoints.entries) {
+        lines.push([p.point_date, p.points, p.notes || '', p.logged_by || ''].map(esc).join(','))
+      }
+    } else lines.push('(none)')
+  }
   if (d.performance) {
     lines.push('')
     lines.push('ERRORS LOGGED')

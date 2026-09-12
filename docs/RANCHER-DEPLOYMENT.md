@@ -99,7 +99,7 @@ Watch the pod logs — you should see lines like:
 ```
 [bootstrap] no schema detected — applying setup.sql
 [bootstrap]   ✓ base schema created
-[bootstrap] applying 17 migration(s)
+[bootstrap] applying 21 migration(s)
 [bootstrap]   ✓ 001-add-staffing-targets.sql
 ...
 [bootstrap]   ✓ 008-add-missing-columns.sql
@@ -134,6 +134,40 @@ docker push your-registry.example.com/scheduling-app:latest
 Then in Rancher → `scheduling-app` workload → **Redeploy**.
 
 Any new migrations ship with the image and are applied automatically on startup. No manual SQL, no re-seeding.
+
+### Release checklist — the Sep 2026 update (roles, change log, attendance points, UPI)
+
+The migrations (019–022) are all additive and apply themselves. What needs a
+person is the data around them. **Before** redeploying, on the work database:
+
+```sql
+-- 1. Accounts with NO role: after this update they cannot do anything until a
+--    Super Admin assigns one. (Every "Admin" becomes a Supervisor automatically.)
+SELECT email FROM user_profiles
+WHERE is_active AND NOT is_super_admin AND NOT is_admin AND NOT is_display_user;
+
+-- 2. Accounts with NO team: refused all data (this has been true since Aug 2026).
+SELECT email FROM user_profiles WHERE team_id IS NULL AND is_active;
+
+-- 3. Rows with NO team in any data table are invisible to everyone — see TESTING.md.
+
+-- 4. Two dead settings keys that nothing reads (see PTO-AND-REQUESTS.md):
+DELETE FROM team_settings
+WHERE setting_key IN ('max_leave_early_per_employee_per_day',
+                      'max_shift_change_per_employee_per_day');
+```
+
+**After** the first boot, in Settings → User Management:
+
+1. Open each team lead and change their role from Supervisor to **Team Lead /
+   Coordinator** (one dropdown each; applies at their next sign-in).
+2. Give any no-role account from query 1 a role.
+3. Fill in **Full Name** on every account — the change log records names.
+
+Then in Team Setup → Employees & Training, add each employee's **UPI** so they
+can check their own requests at the kiosk. Optional, in Team Setup → Job
+Functions: tick "Keep covered during 15-minute breaks" on the few functions that
+must stay staffed through a break (the builder no longer chases the rest).
 
 ---
 

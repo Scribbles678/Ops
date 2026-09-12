@@ -96,9 +96,11 @@ try {
   // ---- the main screens render ----
   for (const [name, path] of [
     ['settings', '/settings'],
-    ['training', '/training'],
-    ['details', '/details'],
+    ['team setup - employees & training', '/details?tab=employees'],
+    ['team setup - job functions', '/details?tab=job-functions'],
+    ['old /training address redirects', '/training'],
     ['pto calendar', '/pto-calendar'],
+    ['employee overview', '/employee-overview'],
     ['create schedule', '/schedule/tomorrow'],
     ['schedule day', '/schedule/' + DATE],
     ['display board', '/display'],

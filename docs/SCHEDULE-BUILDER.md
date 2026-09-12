@@ -177,7 +177,7 @@ lunch window as a gap.** The team lead's rule: when a whole shift goes on break,
 the floor does not expect Pick to be staffed for those fifteen minutes, and listing
 34 such holes on every build buried the two or three a supervisor could act on.
 
-Two checkboxes per job function (Details → Job Functions → Edit) say "this one
+Two checkboxes per job function (Team Setup → Job Functions → Edit) say "this one
 matters enough to keep staffed through it": **Keep covered during 15-minute
 breaks** (`break_coverage_required`) and **Keep covered through lunch**
 (`lunch_coverage_required`). These columns existed from migration 006 but were
@@ -260,7 +260,7 @@ per-function A/B are what to read when touching this engine.
 
 ## Business priority (`staffing_priority`, migration 018)
 
-Set per job function in **Details -> Job Functions -> Edit**. 1 = Critical (fill
+Set per job function in **Team Setup -> Job Functions -> Edit**. 1 = Critical (fill
 first) ... 5 = Optional (drop first), default 3 = Normal.
 
 Priority *leads* the fill order; scarcity breaks ties inside a priority band, so
@@ -448,4 +448,4 @@ by construction. For anything that renders, also run `node scripts/ui-smoke.mjs`
 
 ---
 
-**Last Updated**: August 2026
+**Last Updated**: September 2026

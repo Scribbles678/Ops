@@ -33,6 +33,8 @@ export interface RequestFilters {
   date_from?: string
   date_to?: string
   employee_id?: string
+  /** Free-text match on the employee's name. */
+  q?: string
 }
 
 export const useScheduleRequests = () => {
@@ -49,6 +51,7 @@ export const useScheduleRequests = () => {
       if (filters.date_from) params.set('date_from', filters.date_from)
       if (filters.date_to) params.set('date_to', filters.date_to)
       if (filters.employee_id) params.set('employee_id', filters.employee_id)
+      if (filters.q) params.set('q', filters.q)
 
       const qs = params.toString()
       const url = '/api/schedule-requests' + (qs ? `?${qs}` : '')

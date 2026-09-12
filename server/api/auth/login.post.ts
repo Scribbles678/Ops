@@ -19,13 +19,14 @@ export default defineEventHandler(async (event) => {
     team_id: string | null
     is_admin: boolean
     is_super_admin: boolean
+    is_team_lead: boolean
     is_display_user: boolean
     is_active: boolean
     employee_id: string | null
     password_hash: string
   }>(
     `SELECT id, email, username, full_name, team_id, is_admin, is_super_admin,
-            is_display_user, is_active, employee_id, password_hash
+            is_team_lead, is_display_user, is_active, employee_id, password_hash
      FROM user_profiles
      WHERE email = $1
      LIMIT 1`,

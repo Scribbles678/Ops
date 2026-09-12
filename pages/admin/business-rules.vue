@@ -54,7 +54,7 @@
 
         <div v-else-if="gridHours.length === 0" class="text-center py-5 text-sm text-gray-600">
           No active shifts are set up, so there are no hours to set targets for.
-          Add shifts in <NuxtLink to="/details" class="text-blue-600 hover:underline">Details &amp; Settings → Shift Management</NuxtLink>.
+          Add shifts in <NuxtLink to="/details?tab=shifts" class="text-blue-600 hover:underline">Team Setup → Shift Management</NuxtLink>.
         </div>
 
         <div v-else>
@@ -145,7 +145,7 @@
           </p>
           <p class="mt-1.5 text-xs text-gray-500">
             Columns follow your active shifts, set in
-            <NuxtLink to="/details" class="text-blue-600 hover:underline">Details &amp; Settings → Shift Management</NuxtLink>.
+            <NuxtLink to="/details?tab=shifts" class="text-blue-600 hover:underline">Team Setup → Shift Management</NuxtLink>.
           </p>
 
           <div class="flex justify-end mt-4">

@@ -10,6 +10,12 @@
           <h1 class="text-2xl font-bold text-gray-900">PTO Calendar</h1>
           <div class="flex items-center gap-2">
             <button
+              @click="showRequestModal = true"
+              class="px-4 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium mr-2"
+            >
+              New Request
+            </button>
+            <button
               @click="viewMode = 'week'"
               :class="viewMode === 'week' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 border border-gray-300'"
               class="px-3 py-1.5 rounded-md text-sm font-medium"
@@ -22,12 +28,6 @@
               class="px-3 py-1.5 rounded-md text-sm font-medium"
             >
               Month
-            </button>
-            <button
-              @click="showOverviewModal = true"
-              class="px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
-            >
-              Employee Overview
             </button>
           </div>
         </div>
@@ -45,20 +45,6 @@
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-green-500 inline-block"></span> Approved</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-yellow-400 inline-block"></span> Pending</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-red-200 border border-red-400 inline-block"></span> Blocked (no requests allowed)</span>
-      </div>
-
-      <!-- New Request card (above the calendar) -->
-      <div class="mb-6 bg-white shadow rounded-lg p-6 flex items-center justify-between">
-        <div>
-          <h2 class="text-lg font-semibold text-gray-900">Add or Edit a Request</h2>
-          <p class="text-sm text-gray-500 mt-1">Submit a new time-off or schedule-change request for an employee.</p>
-        </div>
-        <button
-          @click="showRequestModal = true"
-          class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium"
-        >
-          New Request
-        </button>
       </div>
 
       <!-- Loading -->
@@ -233,10 +219,48 @@
         </div>
       </div>
 
-      <!-- All Requests Table -->
+      <!-- All Requests Table. Shows the calendar's period, or — while a name is
+           typed in the search box — every request for matching people, all dates. -->
       <div class="mt-6 bg-white shadow rounded-lg p-6">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">Requests</h2>
-        <div v-if="allRequests.length === 0" class="text-sm text-gray-500">No requests for this period.</div>
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 class="text-lg font-semibold text-gray-900">Requests</h2>
+            <p class="text-xs text-gray-500 mt-0.5">
+              <template v-if="requestSearch.trim()">
+                Everyone matching “{{ requestSearch.trim() }}”, all dates
+                <span v-if="requestsLoading"> · searching…</span>
+              </template>
+              <template v-else>{{ dateRangeLabel }}</template>
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <!-- Who approved, rejected or deleted what. Supervisors and above. -->
+            <button
+              v-if="canManageTeam(user)"
+              type="button"
+              @click="showChangeLog = true"
+              class="px-3 py-1.5 text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 whitespace-nowrap"
+            >Change log</button>
+            <div class="relative">
+              <input
+                v-model="requestSearch"
+                type="search"
+                placeholder="Search by name…"
+                aria-label="Search requests by employee name"
+                class="w-56 pl-8 pr-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+              />
+              <svg class="w-4 h-4 text-gray-400 absolute left-2.5 top-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z" />
+              </svg>
+            </div>
+            <span v-if="allRequests.length > REQUESTS_PAGE_SIZE" class="text-xs text-gray-500 tabular-nums whitespace-nowrap">
+              {{ requestRange.from }}–{{ requestRange.to }} of {{ allRequests.length }}
+            </span>
+          </div>
+        </div>
+        <div v-if="allRequests.length === 0" class="text-sm text-gray-500">
+          {{ requestSearch.trim() ? `No requests found for “${requestSearch.trim()}”.` : 'No requests for this period.' }}
+        </div>
         <div v-else class="overflow-x-auto">
           <table class="min-w-full text-sm">
             <thead class="bg-gray-50">
@@ -252,7 +276,7 @@
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
-              <tr v-for="req in allRequests" :key="req.id">
+              <tr v-for="req in requestPage" :key="req.id">
                 <td class="px-3 py-2">{{ req.employee_name }}</td>
                 <td class="px-3 py-2">{{ formatRequestType(req.request_type) }}</td>
                 <td class="px-3 py-2 text-gray-500 whitespace-nowrap">{{ requestTimeLabel(req) || '—' }}</td>
@@ -292,14 +316,31 @@
             </tbody>
           </table>
         </div>
+        <div v-if="requestPageCount > 1" class="flex items-center justify-between mt-3 pt-3 border-t border-gray-100 text-xs">
+          <button
+            type="button"
+            @click="requestPageIndex--"
+            :disabled="requestPageIndex === 0"
+            class="px-3 py-1.5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white"
+          >← Newer</button>
+          <span class="text-gray-500 tabular-nums">Page {{ requestPageIndex + 1 }} of {{ requestPageCount }}</span>
+          <button
+            type="button"
+            @click="requestPageIndex++"
+            :disabled="requestPageIndex >= requestPageCount - 1"
+            class="px-3 py-1.5 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-white"
+          >Older →</button>
+        </div>
       </div>
 
     </div>
 
-    <!-- Employee Overview -->
-    <EmployeeOverview
-      v-if="showOverviewModal"
-      @close="showOverviewModal = false"
+    <AuditChangeLogModal
+      v-if="showChangeLog"
+      title="Request change log"
+      subtitle="Every request approved, rejected or deleted by hand, and who did it."
+      :entity="['request']"
+      @close="showChangeLog = false"
     />
 
     <!-- Request Modal -->
@@ -312,7 +353,9 @@
 </template>
 
 <script setup lang="ts">
-import { formatTimeOfDay, ptoTimeLabel, ptoTimeToMinutes, ptoTypeLabel } from '~/utils/ptoDisplay'
+import { ptoTimeLabel, ptoTypeLabel } from '~/utils/ptoDisplay'
+import { requestTimeLabel, requestTypeLabel as formatRequestType } from '~/utils/requestDisplay'
+import { canLead, canManageTeam } from '~/utils/roles'
 
 const { user } = useAuth()
 const { fetchRequests, requests, overrideRequest, cancelRequest, loading } = useScheduleRequests()
@@ -321,16 +364,16 @@ const { blockedDates, fetchBlockedDates } = useTeamBlockedDates()
 const viewMode = ref<'week' | 'month'>('week')
 const referenceDate = ref(new Date())
 const showRequestModal = ref(false)
+const showChangeLog = ref(false)
 
-// Employee Overview modal (per-employee dashboard; replaced the old history modal).
-const showOverviewModal = ref(false)
 
 
 const onRequestSubmitted = () => {
   loadCalendar()
 }
 
-const isAdmin = computed(() => user.value?.is_admin || user.value?.is_super_admin)
+// Team Lead and above may approve, reject and delete (utils/roles.ts).
+const isAdmin = computed(() => canLead(user.value))
 
 // Calendar data from the PTO calendar API
 const calendarData = ref<{ pto_days: any[]; requests: any[]; hours_by_date?: Record<string, DayHours> }>({ pto_days: [], requests: [] })
@@ -523,6 +566,36 @@ const getBlockForDate = (date: string): { reason: string | null } | null => {
 const allRequests = computed(() => requests.value)
 const pendingRequests = computed(() => requests.value.filter(r => r.status === 'pending'))
 
+// Search by name. While a term is present the table switches from "this
+// period" to "every request for matching people, all dates" — looking someone
+// up is only useful if it isn't limited to the week on screen. The calendar
+// grid above is unaffected. Debounced so a keystroke doesn't fire a request.
+const requestSearch = ref('')
+const requestsLoading = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+watch(requestSearch, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(loadRequests, 250)
+})
+onBeforeUnmount(() => { if (searchTimer) clearTimeout(searchTimer) })
+
+// Paged, REQUESTS_PAGE_SIZE rows at a time. Purely a display concern; the API
+// already returns newest first.
+const REQUESTS_PAGE_SIZE = 15
+const requestPageIndex = ref(0)
+const requestPageCount = computed(() => Math.max(1, Math.ceil(allRequests.value.length / REQUESTS_PAGE_SIZE)))
+const requestPage = computed(() => {
+  const start = requestPageIndex.value * REQUESTS_PAGE_SIZE
+  return allRequests.value.slice(start, start + REQUESTS_PAGE_SIZE)
+})
+const requestRange = computed(() => {
+  const total = allRequests.value.length
+  const from = total ? requestPageIndex.value * REQUESTS_PAGE_SIZE + 1 : 0
+  return { from, to: Math.min(from + REQUESTS_PAGE_SIZE - 1, total) }
+})
+// A fresh list (new period, new search, an approve/delete) starts on page one.
+watch(requests, () => { requestPageIndex.value = 0 })
+
 const formatDate = (dateStr: string | null | undefined) => {
   if (!dateStr) return ''
   const datePart = dateStr.split('T')[0]
@@ -556,35 +629,11 @@ const formatFullTimestamp = (ts: string | null | undefined) => {
   })
 }
 
-// Format a stored time ("HH:MM[:SS]") as "h:MM AM/PM".
-const formatT = (t: string | null | undefined): string => {
-  const mins = ptoTimeToMinutes(t)
-  return mins == null ? '' : formatTimeOfDay(mins)
-}
-
 // pto_days time detail now comes from the shared helper (utils/ptoDisplay), so
 // the calendar and the display board can't drift on how they read a record.
 
-// Human time detail for a schedule_requests row (used by tables + pending requests).
-const requestTimeLabel = (req: any): string => {
-  if (!req) return ''
-  if (req.request_type === 'arrive_late') return req.start_time ? `arrives ${formatT(req.start_time)}` : ''
-  if (req.request_type === 'leave_early') return req.start_time ? `leaves ${formatT(req.start_time)}` : ''
-  if (req.request_type === 'pto_partial' && req.start_time && req.end_time) return `${formatT(req.start_time)} – ${formatT(req.end_time)}`
-  return '' // pto_full_day, leave_on_time, shift_swap — no time detail
-}
-
-const formatRequestType = (type: string) => {
-  const labels: Record<string, string> = {
-    leave_early: 'Leave Early',
-    leave_on_time: 'Leave on Time',
-    arrive_late: 'Arrive Late',
-    pto_full_day: 'Full Day Off',
-    pto_partial: 'Partial Day',
-    shift_swap: 'Shift Change',
-  }
-  return labels[type] || type
-}
+// Request type / time labels come from utils/requestDisplay so the tables here
+// and the request modal cannot drift on how they read a request row.
 
 const navigate = (direction: number) => {
   const d = new Date(referenceDate.value)
@@ -600,12 +649,23 @@ const goToToday = () => {
   referenceDate.value = new Date()
 }
 
+/** The Requests table: this period, or every request for a searched name. */
+const loadRequests = async () => {
+  const q = requestSearch.value.trim()
+  requestsLoading.value = true
+  try {
+    await (q ? fetchRequests({ q }) : fetchRequests({ date_from: dateFrom.value, date_to: dateTo.value }))
+  } finally {
+    requestsLoading.value = false
+  }
+}
+
 const loadCalendar = async () => {
   const [calData] = await Promise.all([
     $fetch<{ pto_days: any[]; requests: any[] }>('/api/pto-calendar', {
       params: { date_from: dateFrom.value, date_to: dateTo.value },
     }),
-    fetchRequests({ date_from: dateFrom.value, date_to: dateTo.value }),
+    loadRequests(),
     fetchBlockedDates(),
   ])
   calendarData.value = calData

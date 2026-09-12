@@ -1,5 +1,5 @@
 import { query } from '../../../utils/db'
-import { requireAdmin, getTeamFilter } from '../../../utils/authorize'
+import { requireTeamLead, getTeamFilter } from '../../../utils/authorize'
 
 /**
  * List logged performance errors.
@@ -10,7 +10,7 @@ import { requireAdmin, getTeamFilter } from '../../../utils/authorize'
  * Query params: employee_id, date_from, date_to
  */
 export default defineEventHandler(async (event) => {
-  const user = requireAdmin(event)
+  const user = requireTeamLead(event)
   const teamId = getTeamFilter(user)
   const params = getQuery(event)
 

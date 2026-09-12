@@ -3,7 +3,7 @@
     <div class="container mx-auto px-4 py-6 md:py-8">
       <!-- Header -->
       <div class="flex items-center justify-between mb-5">
-        <h1 class="text-2xl md:text-3xl font-semibold text-gray-800">Details & Settings</h1>
+        <h1 class="text-2xl md:text-3xl font-semibold text-gray-800">Team Setup</h1>
         <NuxtLink to="/" class="btn-secondary">
           ← Back to Home
         </NuxtLink>
@@ -13,6 +13,17 @@
       <div class="mb-5">
         <div class="border-b border-gray-200">
           <nav class="-mb-px flex flex-wrap gap-2 md:gap-4">
+            <button
+              @click="activeTab = 'employees'"
+              :class="[
+                'py-2 md:py-3 px-1 border-b-2 font-medium text-sm transition',
+                activeTab === 'employees'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ]"
+            >
+              Employees &amp; Training
+            </button>
             <button
               @click="activeTab = 'job-functions'"
               :class="[
@@ -50,8 +61,13 @@
         </div>
       </div>
 
+      <!-- Employees & Training tab. Its own component with its own cards, so it sits
+           outside the shared card below. v-if (not v-show) on purpose: remounting
+           refetches, so a job function added on the next tab shows up here. -->
+      <TeamEmployeesTraining v-if="activeTab === 'employees'" />
+
       <!-- Tab Content -->
-      <div class="card">
+      <div v-else class="card">
         <!-- Job Functions Tab -->
         <div v-if="activeTab === 'job-functions'">
           <div class="p-4 md:p-5">
@@ -600,7 +616,22 @@
 </template>
 
 <script setup lang="ts">
-const activeTab = ref('job-functions')
+// The tab lives in the URL (?tab=…) so links can land on a specific one — the
+// Rules & Targets page points at Shift Management, /training redirects here —
+// and the back button behaves.
+type TeamSetupTab = 'employees' | 'job-functions' | 'shifts' | 'target-hours'
+const TABS: TeamSetupTab[] = ['employees', 'job-functions', 'shifts', 'target-hours']
+const route = useRoute()
+const router = useRouter()
+const tabFromQuery = (): TeamSetupTab => {
+  const t = String(route.query.tab ?? '')
+  return (TABS as string[]).includes(t) ? (t as TeamSetupTab) : 'employees'
+}
+const activeTab = ref<TeamSetupTab>(tabFromQuery())
+watch(activeTab, (tab) => {
+  if (route.query.tab !== tab) router.replace({ query: { ...route.query, tab } })
+})
+watch(() => route.query.tab, () => { activeTab.value = tabFromQuery() })
 
 // Composables
 const { 
@@ -907,6 +938,8 @@ onMounted(async () => {
     fetchShifts(),
     fetchEmployeesForDetails(false) // Get all employees including inactive
   ])
+  // Landing straight on Target Hours (?tab=target-hours) skips the tab watcher.
+  if (activeTab.value === 'target-hours') await fetchTargetHours()
 })
 
 // Load per-tab data on demand

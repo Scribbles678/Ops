@@ -164,7 +164,7 @@
         <div class="space-y-2 mb-4">
           <label class="block text-xs font-medium text-gray-700">Select Job Function:</label>
           <p v-if="availableJobFunctions.length === 0 && trainingByEmployee && Object.keys(trainingByEmployee).length > 0" class="text-sm text-amber-600 py-2">
-            No trained job functions. Assign training in Details & Settings first.
+            No trained job functions. Assign training in Team Setup → Employees & Training first.
           </p>
           <div v-else class="grid grid-cols-2 gap-1.5">
             <button

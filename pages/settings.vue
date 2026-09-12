@@ -127,22 +127,20 @@
           <div>
             <dt class="text-sm font-medium text-gray-500">Role</dt>
             <dd class="mt-1">
-              <span v-if="userProfile?.is_super_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
-                Super Admin
+              <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full" :class="roleBadgeClass(roleOf(userProfile))">
+                {{ roleLabel(roleOf(userProfile)) }}
               </span>
-              <span v-else-if="userProfile?.is_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                Admin
-              </span>
-              <span v-else class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-                User
-              </span>
+              <p v-if="userProfile && roleOf(userProfile) === null" class="mt-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                This account has no role, so it cannot view or change anything yet. Ask a Super Admin to assign one.
+              </p>
             </dd>
           </div>
         </dl>
       </div>
 
-      <!-- Request Rules Section (Admin/Super Admin only) -->
-      <div v-if="userProfile?.is_admin || userProfile?.is_super_admin" class="bg-white shadow rounded-lg p-6 mb-6">
+      <!-- Request Rules Section (Supervisor and Super Admin only — Team Leads
+           see just the two cards above) -->
+      <div v-if="canManageTeam(userProfile)" class="bg-white shadow rounded-lg p-6 mb-6">
         <h2 class="text-xl font-semibold text-gray-900 mb-1">Request Rules</h2>
         <p class="text-sm text-gray-500 mb-4">Configure auto-approval limits for time-off and schedule change requests.</p>
 
@@ -465,17 +463,8 @@
                     </span>
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap">
-                    <span v-if="u.is_super_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-purple-100 text-purple-800">
-                      Super Admin
-                    </span>
-                    <span v-else-if="u.is_admin" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
-                      Admin
-                    </span>
-                    <span v-else-if="u.is_display_user" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-amber-100 text-amber-800">
-                      Display Only
-                    </span>
-                    <span v-else class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-                      User
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full" :class="roleBadgeClass(roleOf(u))">
+                      {{ roleLabel(roleOf(u)) }}
                     </span>
                   </td>
                   <td class="px-4 py-3 whitespace-nowrap">
@@ -613,40 +602,18 @@
           </select>
         </div>
 
-        <div class="space-y-2">
-          <div class="flex items-center">
-            <input
-              id="is_admin"
-              v-model="newUser.is_admin"
-              type="checkbox"
-              class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label for="is_admin" class="ml-2 block text-sm text-gray-900">Admin (Team Manager)</label>
-          </div>
-          <div class="flex items-center">
-            <input
-              id="is_super_admin"
-              v-model="newUser.is_super_admin"
-              type="checkbox"
-              class="h-4 w-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
-            />
-            <label for="is_super_admin" class="ml-2 block text-sm text-gray-900">Super Admin (System Administrator)</label>
-          </div>
-          <p class="text-xs text-gray-500 ml-6">
-            Super Admin includes all Admin permissions plus system-wide access.
-          </p>
-          <div class="flex items-center pt-1">
-            <input
-              id="is_display_user"
-              v-model="newUser.is_display_user"
-              type="checkbox"
-              class="h-4 w-4 text-amber-600 border-gray-300 rounded focus:ring-amber-500"
-            />
-            <label for="is_display_user" class="ml-2 block text-sm text-gray-900">Display Only (kiosk)</label>
-          </div>
-          <p class="text-xs text-gray-500 ml-6">
-            Locked to the wall-display schedule; can only view it and submit time-off requests. For the shared iPad. Leave Admin/Super Admin unchecked.
-          </p>
+        <div>
+          <label for="new_user_role" class="block text-sm font-medium text-gray-700 mb-1">Role *</label>
+          <select
+            id="new_user_role"
+            v-model="newUser.role"
+            required
+            class="w-full px-3 py-2 border border-gray-300 rounded-md"
+          >
+            <option value="" disabled>Select a role…</option>
+            <option v-for="r in ROLES" :key="r.key" :value="r.key">{{ r.label }}</option>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">{{ roleDescription(newUser.role) || 'An account holds exactly one role.' }}</p>
         </div>
         
         <div v-if="error" class="bg-red-50 border border-red-200 rounded-md p-3">
@@ -703,41 +670,18 @@
           </select>
         </div>
         
-        <div class="space-y-2">
-          <div>
-            <label class="flex items-center">
-              <input
-                v-model="editUserData.is_admin"
-                type="checkbox"
-                class="mr-2"
-                :disabled="editingUser?.is_super_admin"
-              />
-              <span class="text-sm text-gray-700">Admin (Team Manager)</span>
-            </label>
-          </div>
-          <div>
-            <label class="flex items-center">
-              <input
-                v-model="editUserData.is_super_admin"
-                type="checkbox"
-                class="mr-2"
-              />
-              <span class="text-sm text-gray-700">Super Admin (System Administrator)</span>
-            </label>
-          </div>
-          <div>
-            <label class="flex items-center">
-              <input
-                v-model="editUserData.is_display_user"
-                type="checkbox"
-                class="mr-2"
-              />
-              <span class="text-sm text-gray-700">Display Only (kiosk)</span>
-            </label>
-          </div>
-          <p class="text-xs text-gray-500 ml-6">
-            Only Super Admins can change roles. Super Admin includes all Admin permissions. Display Only locks the account to the wall-display schedule.
-          </p>
+        <div>
+          <label for="edit_user_role" class="block text-sm font-medium text-gray-700 mb-1">Role *</label>
+          <select
+            id="edit_user_role"
+            v-model="editUserData.role"
+            required
+            class="w-full px-3 py-2 border border-gray-300 rounded-md"
+          >
+            <option value="" disabled>Select a role…</option>
+            <option v-for="r in ROLES" :key="r.key" :value="r.key">{{ r.label }}</option>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">{{ roleDescription(editUserData.role) || 'An account holds exactly one role. Only Super Admins can change it.' }}</p>
         </div>
         
         <div>
@@ -921,6 +865,8 @@
 // Page is protected by auth.global.ts middleware
 
 const route = useRoute()
+import { ROLES, roleOf, roleLabel, canManageTeam, type Role } from '~/utils/roles'
+
 const { user, fetchCurrentUser, changePassword: changePasswordApi } = useAuth()
 const { isSuperAdmin, checkIsSuperAdmin, fetchAllTeams, createTeam: createTeamFn, deleteTeam: deleteTeamFn } = useTeam()
 const { fetchSettings, saveSetting, getSetting, loading: teamSettingsLoading, error: teamSettingsError } = useTeamSettings()
@@ -1093,22 +1039,27 @@ const userToReset = ref<any>(null)
 const editingUser = ref<any>(null)
 const newPasswordReset = ref('')
 const confirmNewPasswordReset = ref('')
-const editUserData = ref({
+const editUserData = ref<{ full_name: string; team_id: string; role: Role | ''; is_active: boolean }>({
   full_name: '',
   team_id: '',
-  is_admin: false,
-  is_super_admin: false,
-  is_display_user: false,
+  role: '',
   is_active: true
 })
-const newUser = ref({
+const newUser = ref<{ email: string; password: string; full_name: string; team_id: string; role: Role | '' }>({
   email: '',
   password: '',
   full_name: '',
   team_id: '',
-  is_admin: false,
-  is_super_admin: false,
-  is_display_user: false
+  role: '',
+})
+
+const roleDescription = (role: Role | '') => ROLES.find((r) => r.key === role)?.description ?? ''
+const roleBadgeClass = (role: Role | null) => ({
+  'bg-purple-100 text-purple-800': role === 'super_admin',
+  'bg-blue-100 text-blue-800': role === 'supervisor',
+  'bg-teal-100 text-teal-800': role === 'team_lead',
+  'bg-amber-100 text-amber-800': role === 'kiosk',
+  'bg-gray-100 text-gray-800': role === null,
 })
 const newTeam = ref({
   name: ''
@@ -1132,6 +1083,8 @@ const fetchUserProfile = async () => {
       team_id: authUser.team_id,
       is_admin: authUser.is_admin,
       is_super_admin: authUser.is_super_admin,
+      is_team_lead: authUser.is_team_lead,
+      is_display_user: authUser.is_display_user,
       is_active: authUser.is_active,
       teams: teamData ? { id: teamData.id, name: teamData.name } : null,
     }
@@ -1225,9 +1178,7 @@ const createUser = async () => {
         password: newUser.value.password,
         full_name: newUser.value.full_name || null,
         team_id: newUser.value.team_id || null,
-        is_admin: newUser.value.is_admin || false,
-        is_super_admin: newUser.value.is_super_admin || false,
-        is_display_user: newUser.value.is_display_user || false
+        role: newUser.value.role,
       }
     })
 
@@ -1236,9 +1187,7 @@ const createUser = async () => {
       password: '',
       full_name: '',
       team_id: '',
-      is_admin: false,
-      is_super_admin: false,
-      is_display_user: false
+      role: '',
     }
     showCreateModal.value = false
     await fetchUsers()
@@ -1301,9 +1250,8 @@ const editUser = (u: any) => {
   editUserData.value = {
     full_name: u.full_name || '',
     team_id: u.team_id || '',
-    is_admin: u.is_admin || false,
-    is_super_admin: u.is_super_admin || false,
-    is_display_user: u.is_display_user || false,
+    // A legacy multi-flag row shows as its stronger role; saving normalises it.
+    role: roleOf(u) ?? '',
     is_active: u.is_active !== false
   }
   showEditModal.value = true
@@ -1319,9 +1267,7 @@ const saveUserEdit = async () => {
       body: {
         full_name: editUserData.value.full_name || null,
         team_id: editUserData.value.team_id || null,
-        is_admin: editUserData.value.is_admin,
-        is_super_admin: editUserData.value.is_super_admin,
-        is_display_user: editUserData.value.is_display_user,
+        role: editUserData.value.role || undefined,
         is_active: editUserData.value.is_active
       }
     })
@@ -1486,7 +1432,7 @@ onMounted(async () => {
     if (user.value?.id) {
       await fetchUserProfile()
       ownTeamData.value.team_id = userProfile.value?.team_id || ''
-      if (user.value?.is_admin || user.value?.is_super_admin) {
+      if (canManageTeam(user.value)) {
         await loadRequestRules()
         await fetchBlockedDates()
       }

@@ -1,8 +1,8 @@
 import { query } from '../../utils/db'
-import { requireAdmin, getTeamFilter } from '../../utils/authorize'
+import { requireSupervisor, getTeamFilter } from '../../utils/authorize'
 
 export default defineEventHandler(async (event) => {
-  const user = requireAdmin(event)
+  const user = requireSupervisor(event)
   const teamId = getTeamFilter(user) || user.team_id
   const body = await readBody(event)
   const { setting_key, setting_value } = body

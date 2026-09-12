@@ -2,7 +2,8 @@ import { query } from '../../utils/db'
 import { requireAuth, getTeamFilter } from '../../utils/authorize'
 
 /**
- * List schedule requests with optional filters: status, date_from, date_to, employee_id
+ * List schedule requests with optional filters: status, date_from, date_to,
+ * employee_id, q (case-insensitive match on the employee's first or last name).
  */
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
@@ -36,6 +37,17 @@ export default defineEventHandler(async (event) => {
   if (params.employee_id) {
     conditions.push(`sr.employee_id = $${++idx}`)
     values.push(params.employee_id)
+  }
+
+  const q = String(params.q ?? '').trim()
+  if (q) {
+    // Matches "max", "kangas", "max kangas" and "kangas, max".
+    conditions.push(
+      `(e.first_name ILIKE $${++idx} OR e.last_name ILIKE $${idx}
+        OR (e.first_name || ' ' || e.last_name) ILIKE $${idx}
+        OR (e.last_name || ', ' || e.first_name) ILIKE $${idx})`
+    )
+    values.push(`%${q}%`)
   }
 
   const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : ''

@@ -17,6 +17,7 @@ apart — so treat a second implementation as a bug, not a shortcut.
 | `server/utils/ptoUsage.ts` | How many hours a team has already committed on a date, in total (`getUsedHoursByDate`) or itemised by source (`getUsedHoursBreakdownByDate`). |
 | `server/utils/requestRules.ts` | `evaluateRequest()` — the auto-approval rule engine. |
 | `utils/ptoDisplay.ts` | How a `pto_days` row should be READ and DISPLAYED (client + server). |
+| `utils/requestDisplay.ts` | How a `schedule_requests` row is LABELLED (type name, "leaves 4:00 PM"). The PTO calendar and the request modal both use it. |
 
 ### Why they exist
 
@@ -176,6 +177,61 @@ full day**, and `display.vue` treats it as out-all-day — so a malformed row
 silently removes a working person from the board. There is no CHECK constraint on
 `pto_type`; if you add one, count the offending rows on each install first.
 
+### Staff checking their own requests (the UPI lookup)
+
+Staff have no logins; they use the kiosk. The request modal (`components/
+schedule-requests/RequestFormModal.vue`, mounted on `/display` and on the PTO
+calendar) has two tabs: **New request** and **Check my requests**. The second asks
+for the employee's **UPI** — a numeric identifier kept on `employees.upi`
+(migration 020, digits only, unique per team, set in Team Setup → Employees &
+Training → Add/Edit) — and shows that person's requests: upcoming plus the last
+60 days, with an Approved / Not approved chip and the rejection reason.
+
+It is a **soft gate by design** (a UPI is an identifier, not a secret), so the
+protection is placed where it matters: `POST /api/schedule-requests/lookup` does
+the matching **server-side, within the caller's team**, and is rate-limited to 20
+a minute per device so nobody can sit at the kiosk cycling through numbers. A
+wrong number says so ("No employee with that UPI…") rather than pretending the
+person has no requests — usability over hiding which numbers exist. The kiosk is
+a shared screen, so leaving the tab or closing the modal forgets the lookup.
+
+⚠ **Request-row time convention** (see `utils/requestDisplay.ts`, the one place
+that labels a request): `arrive_late` stores the arrival in **`start_time`** on
+the request row — the submit endpoint requires it there — while the `pto_days`
+row it materialises stores it in `end_time`. Anything seeding requests by hand
+must follow the request convention or the time shows as "—".
+
+### The change log (who changed what)
+
+People's records used to change without a trace: a request row remembers
+`approved_by`, but a **deleted** request left nothing, and PTO days and call-ins
+entered or removed on the schedule page never said who did it. That is the path
+for quietly altering someone's time off, so since Sep 2026 every manual change is
+written to **`audit_log`** (migration 022) **inside the same transaction as the
+change**, by `logChange()` in `server/utils/auditLog.ts`:
+
+| change | logged as |
+|---|---|
+| request approved / rejected / deleted by hand | `approve` / `reject` / `delete` on `request`, e.g. *"Deleted Max Kangas's Full Day Off for Sep 15 (was approved)"* |
+| PTO day or call-in added / removed on the schedule page | `add` / `delete` on `pto_day` |
+| attendance point given / removed | `add` / `delete` on `attendance_point` |
+| performance note added / edited / deleted, error logged / removed | `add` / `edit` / `delete` on `performance_note` / `performance_error` |
+
+Each entry carries the actor's id **and name as it was**, the employee's id and
+name, a plain sentence composed at write time, and `before` / `after` snapshots —
+so a deleted record can still be read, and a renamed or deleted account cannot
+blur who did what.
+
+**Read-only, Supervisor and above.** `GET /api/audit-log` is the only route; there
+is no update or delete. The **Change log** button on the PTO calendar's Requests
+card shows request changes for the team; the one on the Employee Overview shows
+every kind of change for the selected person. Both are `components/audit/
+ChangeLogModal.vue`, paged 15 at a time with an action filter. Team Leads never
+see the button and the endpoint refuses them.
+
+Not logged: requests submitted through the form (the request row is its own
+record and the rules decide it) and schedule assignments.
+
 ### Multi-day ranges
 
 A request spanning several days where only some are available does **not** silently
@@ -236,6 +292,15 @@ These numbers come from `getUsedHoursBreakdownByDate` via `/api/pto-calendar`, a
 reads on the calendar is, by construction, the same number the approval rule
 measures against the daily cap. **The component must never total hours itself.**
 
+**Requests table.** Paged 15 rows at a time, newest first. The search box switches
+its scope: with a name typed, the table shows **every request for matching people,
+all dates** (`GET /api/schedule-requests?q=`, which matches first name, last name,
+"First Last" and "Last, First"); cleared, it goes back to the calendar's period.
+The calendar grid above never changes with the search — looking someone up is
+only useful if it isn't limited to the week on screen, and the subtitle says which
+scope is showing. The Employee Overview button that used to sit in the header was
+removed in Sep 2026 (the overview has its own home card).
+
 **Week Availability strip** reads `/api/pto/availability`, which runs the same
 `ptoHours` / `ptoUsage` helpers as approval. If the strip and the approval decision
 ever disagree again, that is the signal something bypassed the shared module.
@@ -260,11 +325,12 @@ place rather than making you switch to week view to find the rest.
 
 ## Employee Overview
 
-`components/employee/Overview.vue`, served by
-`GET /api/employees/[id]/overview`. Opened from the PTO Calendar's history button
-and from the Employees & Training Matrix page. Periods: 7d / 30d / 90d / etc.
-Shows hours per function, PTO usage, a rolling picking-error line chart, and
-performance notes.
+`pages/employee-overview.vue`, rendering `components/employee/Overview.vue`, served
+by `GET /api/employees/[id]/overview`. A home-screen card since Sep 2026 (it was a
+modal before); the PTO Calendar header and Team Setup → Employees & Training link
+to it, and the per-row "Overview" button lands preselected via `?employee=`. The
+period preset is `?period=` (7d / 30d / 90d / 12mo / all). Shows hours per
+function, PTO usage, a rolling picking-error line chart, and performance notes.
 
 **Performance tracking** (migrations 015, 016) is admin-only and entry is
 one-at-a-time; there is no importer yet for the historical Excel error sheet.
@@ -273,6 +339,14 @@ one-at-a-time; there is no importer yet for the historical Excel error sheet.
 |---|---|
 | `performance_errors` | one row per logged picking error (raw counts, not rates) |
 | `performance_notes` | free-text review notes, plus `tag` (migration 016) for the quick-add buttons |
+| `attendance_points` | one row per attendance point — **half or full only** (CHECK), on a date, optional note (migration 019) |
+
+**Attendance points** (Sep 2026) are the sixth KPI tile and a list under Attendance
+& requests, both admin-only like the rest of the review material. "+ Add attendance
+point" opens a modal: the ½ / 1 choice first and large, then date (default today)
+and an optional note. The tile is the period sum, so it follows the period toggle
+like everything else; entries can be deleted through the same confirmation dialog
+as errors and notes, and they appear in the CSV export.
 
 Deleting a logged error requires a confirmation modal — these are review inputs and
 must not be lost to a stray click. The error chart is a **rolling line chart** (not
@@ -317,4 +391,4 @@ as pseudo-assignments in slate `#94a3b8`.
 
 ---
 
-**Last Updated**: August 2026
+**Last Updated**: September 2026

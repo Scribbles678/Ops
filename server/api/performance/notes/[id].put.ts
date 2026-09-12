@@ -1,5 +1,6 @@
-import { query } from '../../../utils/db'
-import { requireAdmin, getTeamFilter } from '../../../utils/authorize'
+import { query, transaction } from '../../../utils/db'
+import { requireTeamLead, getTeamFilter } from '../../../utils/authorize'
+import { logChange, employeeDisplayName, describeNote } from '../../../utils/auditLog'
 
 const CATEGORIES = ['positive', 'coaching', 'concern', 'general']
 
@@ -10,13 +11,13 @@ const CATEGORIES = ['positive', 'coaching', 'concern', 'general']
  * when another admin edits it, so review material keeps an honest attribution.
  */
 export default defineEventHandler(async (event) => {
-  const user = requireAdmin(event)
+  const user = requireTeamLead(event)
   const teamId = getTeamFilter(user)
   const id = getRouterParam(event, 'id')
   const body = await readBody(event)
 
-  const existing = await query<{ team_id: string | null }>(
-    'SELECT team_id FROM performance_notes WHERE id = $1',
+  const existing = await query<any>(
+    'SELECT id, employee_id, note_date::text AS note_date, category, body, tag, team_id FROM performance_notes WHERE id = $1',
     [id]
   )
   if (!existing.rows[0]) {
@@ -59,11 +60,29 @@ export default defineEventHandler(async (event) => {
   }
 
   values.push(id)
-  const result = await query(
-    `UPDATE performance_notes SET ${updates.join(', ')}
-     WHERE id = $${values.length}
-     RETURNING id, employee_id, note_date::text AS note_date, category, body, updated_at`,
-    values
-  )
-  return result.rows[0]
+  return transaction(async (client) => {
+    const result = await client.query(
+      `UPDATE performance_notes SET ${updates.join(', ')}
+       WHERE id = $${values.length}
+       RETURNING id, employee_id, note_date::text AS note_date, category, body, tag, updated_at`,
+      values
+    )
+    const before = existing.rows[0]
+    const after = result.rows[0]
+    const who = await employeeDisplayName(client, before.employee_id)
+    const changed = ['body', 'category', 'note_date'].filter((k) => String(before[k] ?? '') !== String(after[k] ?? ''))
+    await logChange(client, {
+      teamId: before.team_id,
+      actor: user,
+      action: 'edit',
+      entity: 'performance_note',
+      entityId: before.id,
+      employeeId: before.employee_id,
+      employeeName: who,
+      summary: `Edited a note for ${who} (${changed.join(', ') || 'no change'}) — now a ${describeNote(after)}`,
+      before,
+      after,
+    })
+    return after
+  })
 })

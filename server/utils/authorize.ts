@@ -1,4 +1,5 @@
 import type { H3Event } from 'h3'
+import { roleOf, canLead, canManageTeam } from '../../utils/roles'
 
 export interface AuthUser {
   id: string
@@ -8,6 +9,7 @@ export interface AuthUser {
   team_id: string | null
   is_admin: boolean
   is_super_admin: boolean
+  is_team_lead: boolean
   is_display_user: boolean
   is_active: boolean
   employee_id: string | null
@@ -36,14 +38,43 @@ export function requireAuth(event: H3Event): AuthUser {
 }
 
 /**
- * Require admin or super admin. Throws 403 otherwise.
+ * Roles (utils/roles.ts): Super Admin > Supervisor > Team Lead / Coordinator >
+ * Kiosk. These two gates are the only levels the API distinguishes above "any
+ * signed-in account":
+ *
+ *   requireSupervisor  Supervisor or Super Admin — request rules, blocked dates,
+ *                      the user list. (Was requireAdmin until Sep 2026.)
+ *   requireTeamLead    Team Lead or above — approvals, review notes, errors,
+ *                      attendance points: the day-to-day running of the floor.
  */
-export function requireAdmin(event: H3Event): AuthUser {
+export function requireSupervisor(event: H3Event): AuthUser {
   const user = requireAuth(event)
-  if (!user.is_admin && !user.is_super_admin) {
-    throw createError({ statusCode: 403, message: 'Admin access required' })
+  if (!canManageTeam(user)) {
+    throw createError({ statusCode: 403, message: 'Supervisor access required' })
   }
   return user
+}
+
+export function requireTeamLead(event: H3Event): AuthUser {
+  const user = requireAuth(event)
+  if (!canLead(user)) {
+    throw createError({ statusCode: 403, message: 'Team Lead access required' })
+  }
+  return user
+}
+
+/**
+ * An account with no role can do nothing. Enforced inside both team helpers
+ * rather than in requireAuth, so /api/auth/me and change-password still work
+ * and the person can at least sign in and see why.
+ */
+function requireRole(user: AuthUser): void {
+  if (roleOf(user) === null) {
+    throw createError({
+      statusCode: 403,
+      message: 'Your account has no role assigned, so it cannot view or change anything. Ask a Super Admin to assign one.',
+    })
+  }
 }
 
 /**
@@ -85,6 +116,7 @@ export function requireSuperAdmin(event: H3Event): AuthUser {
  * themselves in Settings → Change Team instead of being locked out entirely.
  */
 export function getTeamFilter(user: AuthUser): string {
+  requireRole(user)
   if (!user.team_id) {
     throw createError({
       statusCode: 403,
@@ -124,6 +156,7 @@ export function readsAllTeams(user: AuthUser): boolean {
  * silently creating one.
  */
 export function getWriteTeamId(user: AuthUser): string {
+  requireRole(user)
   if (!user.team_id) {
     throw createError({
       statusCode: 403,

@@ -32,14 +32,20 @@ scheduling-app-v2/
 │   ├── index.vue              # Dashboard/home with navigation cards
 │   ├── login.vue              # Email/password login
 │   ├── reset-password.vue     # Two-step password reset (request + token)
-│   ├── training.vue           # Employee training matrix (checkboxes per job function)
-│   ├── details.vue            # Tabbed config: job functions, shifts, employees, productivity
+│   ├── training.vue           # REDIRECT only → /details?tab=employees (the matrix moved
+│   │                          #   into Team Setup, Sep 2026; kept so bookmarks work)
+│   ├── details.vue            # "Team Setup" (renamed from Details, Sep 2026). Tabs, each
+│   │                          #   addressable as ?tab=: employees | job-functions | shifts |
+│   │                          #   target-hours. Job Functions / Shifts / Target Hours editors
+│   │                          #   are inline; Employees & Training is components/team/
 │   ├── display.vue            # Read-only wall/iPad board, auto-refresh every 2 min.
 │   │                          #   Sized for DISTANCE reading, not a desktop dashboard.
 │   │                          #   Chip text colour comes from measured WCAG contrast
 │   │                          #   (getTextColor) - see the note under Display Board.
 │   ├── settings.vue           # User settings, password change, team settings, request rules
 │   ├── pto-calendar.vue       # PTO calendar (week/month views) + request approval workflow
+│   ├── employee-overview.vue  # Employee Overview page (home card, Sep 2026). Employee and
+│   │                          #   period live in ?employee=&period= so a view is linkable
 │   ├── schedule/
 │   │   ├── [date].vue         # Schedule editor with 15-min grid, dashboards, KPI strip
 │   │   └── tomorrow.vue       # Create schedule: 5 cards (copy today, Automated Builder,
@@ -54,19 +60,18 @@ scheduling-app-v2/
 │                              #   management lives inline in settings.vue; the
 │                              #   Database Cleanup feature was removed (migration 014).
 ├── components/
-│   ├── details/                      # ⚠ LEGACY / UNUSED — none of these *Tab.vue
-│   │   │                             #   components are referenced. The Details page
-│   │   │                             #   (pages/details.vue) is monolithic: the Job
-│   │   │                             #   Functions / Shifts / etc. editors are inline
-│   │   │                             #   in that file. Edit pages/details.vue, NOT these.
-│   │   ├── EmployeesTab.vue          # (unused)
-│   │   ├── JobFunctionsTab.vue       # (unused) — real job-function editor is inline in pages/details.vue
-│   │   ├── ProductivityRatesTab.vue  # (unused)
-│   │   ├── ShiftManagementTab.vue    # (unused)
-│   │   └── ShiftsTab.vue             # (unused)
+│   ├── team/
+│   │   └── EmployeesTraining.vue     # Employees & Training tab of Team Setup — the old
+│   │                                 #   /training page moved here whole (auto-saving matrix,
+│   │                                 #   add/edit employee, shift per employee, Overview button).
+│   │                                 #   Flushes pending auto-saves on unmount AND route-leave.
+│   │                                 #   (components/details/*Tab.vue — five unused twins of
+│   │                                 #    the inline editors — were DELETED at the same time.)
 │   ├── employee/
 │   │   └── Overview.vue              # Employee Overview dashboard (hours/function, PTO,
-│   │                                 #   rolling error chart, performance notes)
+│   │                                 #   rolling error chart, performance notes). Rendered
+│   │                                 #   inline by pages/employee-overview.vue; was a modal
+│   │                                 #   until Sep 2026 — every old button now links there
 │   ├── schedule/
 │   │   ├── AssignmentModal.vue       # Create/edit assignment with validation
 │   │   ├── CoveragePreview.vue       # Pre-build coverage grid on Create Schedule
@@ -120,8 +125,14 @@ scheduling-app-v2/
 │   │   ├── preferred-assignments/ # CRUD
 │   │   ├── pto/               # Get by date, create, delete, availability
 │   │   ├── pto-calendar/      # Aggregated calendar view (PTO + approved/pending requests)
-│   │   ├── schedule-requests/ # Unified request CRUD, auto-approval engine, preview (dry run)
+│   │   ├── schedule-requests/ # Unified request CRUD, auto-approval engine, preview (dry run),
+│   │   │                      #   lookup (kiosk "check my requests" by UPI — team-scoped,
+│   │   │                      #   rate-limited 20/min)
 │   │   ├── performance/       # errors/ + notes/ CRUD (picking errors, review notes)
+│   │   ├── attendance-points/ # POST + [id].delete — half/full points, Team Lead+ (read via
+│   │   │                      #   employees/[id]/overview)
+│   │   ├── audit-log/         # GET only — the change log, Supervisor+, team-scoped, paged.
+│   │   │                      #   Written by the endpoints above via server/utils/auditLog.ts
 │   │   ├── shift-swaps/       # Get by date, create, delete
 │   │   ├── teams/             # CRUD
 │   │   ├── team-settings/     # Per-team key/value settings (request-rule limits)
@@ -141,6 +152,8 @@ scheduling-app-v2/
 │       ├── ptoHours.ts        # SINGLE SOURCE for PTO-hour accounting + business days
 │       ├── ptoUsage.ts        # Team hours already committed per date (dedupes requests/pto_days)
 │       ├── requestRules.ts    # evaluateRequest() — the auto-approval rule engine
+│       ├── auditLog.ts        # logChange() + the sentence builders for the change log.
+│       │                      #   Call it INSIDE the transaction that makes the change
 │       └── email.ts           # SMTP email via nodemailer
 ├── middleware/
 │   └── auth.global.ts         # Client-side route guard (redirect to /login if unauthenticated)
@@ -148,6 +161,10 @@ scheduling-app-v2/
 │   ├── timeSlots.ts           # 15-min slot generation, break detection
 │   ├── validationRules.ts     # Assignment validation (training, overlap, duration)
 │   ├── ptoDisplay.ts          # SINGLE SOURCE for reading/displaying a pto_days row
+│   ├── requestDisplay.ts      # SINGLE SOURCE for labelling a schedule_requests row (type,
+│   │                          #   time). Used by the PTO calendar and the request modal.
+│   ├── roles.ts               # SINGLE SOURCE for the four roles: roleOf (highest flag wins),
+│   │                          #   flagsForRole (exactly one true), canLead, canManageTeam
 │   ├── localDate.ts           # SINGLE SOURCE for "today" as YYYY-MM-DD (local / named TZ).
 │   │                          #   Never toISOString().slice(0,10): that is UTC and names
 │   │                          #   tomorrow from 7pm Central — Create Schedule did this
@@ -164,7 +181,7 @@ scheduling-app-v2/
 │   └── database.types.ts      # TypeScript DB types (skeleton)
 ├── sql-schema/                # PostgreSQL table definitions + triggers + migrations
 │   ├── setup.sql              # Full schema bootstrap (applied once on empty DB)
-│   └── migrations/            # 001–018 incremental migrations (idempotent; no 009 — deleted)
+│   └── migrations/            # 001–022 incremental migrations (idempotent; no 009 — deleted)
 ├── scripts/
 │   ├── seed-first-user.js     # Creates initial admin user
 │   ├── seed-test-data.js      # Seeds a 50-person demo team. LOCAL ONLY — refuses a
@@ -214,7 +231,8 @@ teams (multi-tenant root)
 
 password_reset_tokens (→ user_profiles)
 schedule_assignments_archive / daily_targets_archive (frozen history; nothing writes here since migration 014)
-performance_errors / performance_notes (→ employees; Employee Overview)
+performance_errors / performance_notes / attendance_points (→ employees; Employee Overview)
+audit_log (→ user_profiles actor, employees; the change log — history outlives both)
 ```
 
 ### Key Tables
@@ -222,9 +240,9 @@ performance_errors / performance_notes (→ employees; Employee Overview)
 | Table | Purpose |
 |-------|---------|
 | **teams** | Multi-tenant root. name (unique). |
-| **user_profiles** | email, username, password_hash, full_name, team_id, is_super_admin, is_admin, is_display_user, is_active, last_login, **employee_id** (optional FK to employees) |
+| **user_profiles** | email, username, password_hash, full_name, team_id, is_super_admin, is_admin (Supervisor), **is_team_lead** (migration 021), is_display_user (Kiosk), is_active, last_login, **employee_id** (optional FK to employees). Exactly one role flag per account — see `utils/roles.ts` |
 | **password_reset_tokens** | user_id, token_hash, expires_at, used_at (self-service reset) |
-| **employees** | first_name, last_name, is_active, shift_id (FK), team_id |
+| **employees** | first_name, last_name, is_active, shift_id (FK), **upi** (digits, unique per team, optional — migration 020; the kiosk "Check my requests" gate), team_id |
 | **job_functions** | name, color_code (#hex), productivity_rate, unit_of_measure, custom_unit, sort_order, **lunch_coverage_required**, **break_coverage_required**, **exclude_from_targets**, **max_headcount** (per-hour ceiling for the builder, NULL=unlimited), **surplus_overflow** (preferred surplus sink), **staffing_priority** (1=fill first … 5=drop first, default 3; **V2 builder only**), team_id |
 | **shifts** | name, start/end time, break_1/break_2/lunch start/end times, is_active, team_id |
 | **schedule_assignments** | employee_id, job_function_id, shift_id, schedule_date, assignment_order, start_time, end_time, team_id |
@@ -242,6 +260,8 @@ performance_errors / performance_notes (→ employees; Employee Overview)
 | **business_rules** | job_function_name, time_slot_start/end, min/max_staff, priority, fan_out (legacy) |
 | **performance_errors** | employee_id, error_date, count/detail — raw picking-error log (admin-only; drives the Employee Overview trend chart) |
 | **performance_notes** | employee_id, note text, **tag** (migration 016, powers the quick-add buttons), for reviews |
+| **audit_log** | the change log (migration 022): actor id + **name snapshot**, action, entity_type, entity_id, employee id + name snapshot, `summary` sentence, `before`/`after` jsonb, created_at. Append-only via the API; read by Supervisors on the PTO calendar and Employee Overview |
+| **attendance_points** | employee_id, point_date, **points** (0.5 or 1.0 only), notes, created_by (migration 019) — admin-only; the Attendance points KPI on the Employee Overview is the period sum |
 | **schedule_assignments_archive** / **daily_targets_archive** | historical rows from the removed cleanup feature. **Nothing writes to these any more**, but they hold real history on installs where cleanup ran, so migration 014 deliberately did NOT drop them. The schedule CSV export reads them alongside the live tables. |
 
 > All data tables carry a `team_id`. Most tables auto-update `updated_at` via the `update_updated_at_column()` trigger (some use per-table equivalents).
@@ -272,15 +292,17 @@ performance_errors / performance_notes (→ employees; Employee Overview)
 The login endpoint always runs a bcrypt comparison (against a dummy hash when the email is unknown) so response timing doesn't leak whether an account exists.
 
 ### JWT payload
-The signed token carries: `id`, `email`, `username`, `full_name`, `team_id`, `is_admin`, `is_super_admin`, `is_display_user`, `is_active`, `employee_id`. Because `team_id` and roles come from the signed token, they can't be spoofed by the client. (Changing a user's team/role requires re-login to take effect.)
+The signed token carries: `id`, `email`, `username`, `full_name`, `team_id`, `is_admin`, `is_super_admin`, `is_team_lead`, `is_display_user`, `is_active`, `employee_id`. Because `team_id` and roles come from the signed token, they can't be spoofed by the client. (Changing a user's team/role requires re-login to take effect.)
 
 ### Role Hierarchy
 | Role | Capabilities |
 |------|-------------|
-| **Super Admin** | All data across all teams, user/team management |
-| **Admin** | Team-scoped data + approvals; **cannot** create users / reset passwords (super-admin only) |
-| **User** | Team-scoped data, schedule viewing/editing |
-| **Display User** | Kiosk account: locked to `/display` (today's schedule, read-only) + can submit time-off/schedule-change requests via the display form. Settable as "Display Only" in the user-management role dropdown. |
+| **Super Admin** | Everything, plus users and teams |
+| **Supervisor** | Team-scoped data + approvals + review material + Request Rules / blocked dates (was "Admin") |
+| **Team Lead / Coordinator** | Same as Supervisor minus Request Rules / blocked dates; Settings shows only their own account (Sep 2026) |
+| **Kiosk** | Locked to `/display`; submits requests and looks them up by UPI |
+
+Exactly one role per account; **no role = no access** (kept on `/settings` until a Super Admin assigns one).
 
 See `ROLES.md` for the full permission matrix.
 
@@ -301,6 +323,7 @@ See `ROLES.md` for the full permission matrix.
 - Default: 200 req/min
 - Admin routes: 100 req/min
 - User creation: 5 req/hour
+- UPI lookup (`/api/schedule-requests/lookup`): 20 req/min, its own bucket
 - Password reset: 3 req/hour
 
 ---
@@ -311,7 +334,7 @@ See `ROLES.md` for the full permission matrix.
 "Meter" is a special job function category. Individual meters are named "Meter 1", "Meter 2", etc. Training on the parent "Meter" function qualifies an employee for any "Meter N" assignment. The Automated Builder and the `validate_assignment_training` DB trigger both support this parent-child relationship via name pattern matching (`/^Meter [0-9]+$/`), scoped to the function's `team_id`.
 
 ### Coverage Requirements
-Job functions can be flagged `lunch_coverage_required` and/or `break_coverage_required` (Details → Job Functions → Edit: "Keep covered during 15-minute breaks" / "Keep covered through lunch"). **By default the builder does not treat a hole during a break or lunch window as a gap** — the floor does not expect every function staffed through a 15-minute break. For a flagged function those shortfalls count, closing one earns an extra reward, and one that remains is reported as a thing to fix. Wired up Sep 2026; the columns existed since migration 006 but nothing read them. Detail in [SCHEDULE-BUILDER.md](./SCHEDULE-BUILDER.md).
+Job functions can be flagged `lunch_coverage_required` and/or `break_coverage_required` (Team Setup → Job Functions → Edit: "Keep covered during 15-minute breaks" / "Keep covered through lunch"). **By default the builder does not treat a hole during a break or lunch window as a gap** — the floor does not expect every function staffed through a 15-minute break. For a flagged function those shortfalls count, closing one earns an extra reward, and one that remains is reported as a thing to fix. Wired up Sep 2026; the columns existed since migration 006 but nothing read them. Detail in [SCHEDULE-BUILDER.md](./SCHEDULE-BUILDER.md).
 
 ### Exclude From Targets
 Job functions flagged `exclude_from_targets` are hidden from the staffing-targets grid (used for functions that shouldn't be driven by per-hour headcount demand).
@@ -398,6 +421,10 @@ This means **no manual SQL on deploy or update** — new migrations ship in the 
 | 016-add-note-tag | `performance_notes.tag` — powers the quick-add note buttons. |
 | 017-lower-assignment-minimum | Lowers the `check_schedule_assignment_min_duration` CHECK from 30 to **15** minutes so supervisors can make manual quarter-hour tweaks. The V2 builder still only *emits* 30-min-or-longer blocks — the gap between the two floors is intentional. |
 | 018-add-staffing-priority | `job_functions.staffing_priority` (integer, CHECK 1–5, default 3) — business priority for the **V2** builder. Default 3 means existing behaviour is unchanged until someone sets a value, so this migration cannot alter a schedule on its own. |
+| 019-add-attendance-points | `attendance_points` table (half or full point on a date, optional note; CHECK `points IN (0.5, 1.0)`). Admin-only via the API, summed per period on the Employee Overview. Additive; multi-team safe. |
+| 020-add-employee-upi | `employees.upi` (digits only, CHECK; unique per team via a partial index). Typed at the kiosk to look up one's own requests. Additive; multi-team safe. |
+| 022-add-audit-log | `audit_log` table — the change log: who approved / rejected / deleted a request, added or removed a PTO day, attendance point, note or error, with a plain-language summary and before/after snapshots. Written in the same transaction as the change; no update/delete route. Additive; multi-team safe. |
+| 021-add-team-lead-role | `user_profiles.is_team_lead` — the Team Lead / Coordinator role flag. No data change and no exclusivity CHECK on purpose: existing accounts keep their flags, so nobody is locked out on deploy; the user endpoints enforce one-role-per-account from here on. |
 
 ---
 
@@ -433,4 +460,4 @@ docker compose up        # Starts app + PostgreSQL (app self-bootstraps schema +
 
 ---
 
-**Last Updated**: August 2026
+**Last Updated**: September 2026

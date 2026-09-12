@@ -2,6 +2,7 @@ import { query } from '../../../utils/db'
 import { requireAuth, getTeamFilter } from '../../../utils/authorize'
 import { countBusinessDaysBetween, fmtDate } from '../../../utils/ptoHours'
 import { getEmployeeAbsences } from '../../../utils/ptoUsage'
+import { canLead } from '../../../../utils/roles'
 
 /**
  * Employee Overview — every metric behind the dashboard, aggregated in SQL.
@@ -224,10 +225,29 @@ export default defineEventHandler(async (event) => {
   // --- Performance: errors + notes (ADMIN ONLY) -----------------------------
   // Regular Users keep every other panel but must not see review material, so
   // these come back null rather than empty — the UI hides the sections entirely.
-  const isAdmin = user.is_admin || user.is_super_admin
+  // Team Lead and above (utils/roles.ts) — the same line the write endpoints draw.
+  const isAdmin = canLead(user)
   let performance: any = null
+  // Attendance points (migration 019): half or full points on a date. Admin-only
+  // like the performance tables, and null for everyone else so the UI hides the
+  // tile, the button and the list together.
+  let attendancePoints: { total: number; entries: any[] } | null = null
 
   if (isAdmin) {
+    const pointRows = await query<any>(
+      `SELECT ap.id, ap.point_date::text AS point_date, ap.points, ap.notes, ap.created_at,
+              COALESCE(u.full_name, u.username) AS logged_by
+       FROM attendance_points ap
+       LEFT JOIN user_profiles u ON u.id = ap.created_by
+       WHERE ap.employee_id = $1 AND ap.point_date BETWEEN $2 AND $3
+       ORDER BY ap.point_date DESC, ap.created_at DESC`,
+      [employeeId, from, to]
+    )
+    const entries = pointRows.rows.map((r: any) => ({ ...r, points: Number(r.points) }))
+    attendancePoints = {
+      total: Math.round(entries.reduce((s: number, r: any) => s + r.points, 0) * 10) / 10,
+      entries,
+    }
     // The trend reports a trailing 30-day count, so it needs 30 days of history
     // BEFORE the visible range — otherwise a short period (7d) would compute a
     // "30-day" figure from only 7 days of data and badly undercount.
@@ -372,6 +392,7 @@ export default defineEventHandler(async (event) => {
   return {
     canSeePerformance: isAdmin,
     performance,
+    attendancePoints,
     employee: {
       id: employee.id,
       name: `${employee.last_name}, ${employee.first_name}`,

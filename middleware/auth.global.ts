@@ -3,6 +3,8 @@
  * On server: skip composables (useState/useRequestEvent cause "instance unavailable" in Nitro SSR).
  * On client: use useAuth for redirects.
  */
+import { roleOf } from '~/utils/roles'
+
 export default defineNuxtRouteMiddleware(async (to) => {
   const publicRoutes = ['/login', '/display', '/reset-password']
   const isPublicRoute = publicRoutes.includes(to.path)
@@ -24,6 +26,13 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // for an authenticated display user trying to go elsewhere.
   if (user.value?.is_display_user && to.path !== '/display') {
     return navigateTo('/display')
+  }
+
+  // No role = no access. Every data endpoint refuses such an account, so keep it
+  // on Settings, where it can see why and change its password, until a Super
+  // Admin assigns a role.
+  if (user.value && roleOf(user.value) === null && to.path !== '/settings') {
+    return navigateTo('/settings')
   }
 
   if (user.value && to.path === '/login') {

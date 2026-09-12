@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { query } from '../../../utils/db'
 import { requireSuperAdmin } from '../../../utils/authorize'
+import { flagsForRole, isRole } from '../../../../utils/roles'
 
 export default defineEventHandler(async (event) => {
   if (event.method !== 'POST') {
@@ -10,7 +11,7 @@ export default defineEventHandler(async (event) => {
   requireSuperAdmin(event)
 
   const body = await readBody(event)
-  const { email, password, full_name, team_id, is_admin, is_super_admin, is_display_user } = body ?? {}
+  const { email, password, full_name, team_id, role } = body ?? {}
 
   if (!email || !password) {
     throw createError({ statusCode: 400, message: 'Email and password are required' })
@@ -24,6 +25,13 @@ export default defineEventHandler(async (event) => {
   if (password.length < 8) {
     throw createError({ statusCode: 400, message: 'Password must be at least 8 characters' })
   }
+
+  // Exactly one role, always. An account with no role can do nothing, so
+  // creating one would just produce a login that is refused on every screen.
+  if (!isRole(role)) {
+    throw createError({ statusCode: 400, message: 'A role is required (Super Admin, Supervisor, Team Lead / Coordinator or Kiosk)' })
+  }
+  const flags = flagsForRole(role)
 
   // Every account must belong to a team. A team-less account can neither read
   // nor write any data (see getTeamFilter), so creating one just produces a
@@ -52,18 +60,21 @@ export default defineEventHandler(async (event) => {
 
   const result = await query<{ id: string; username: string; email: string }>(
     `INSERT INTO user_profiles
-       (username, email, password_hash, full_name, team_id, is_admin, is_super_admin, is_display_user, is_active)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
-     RETURNING id, username, email, full_name, team_id, is_admin, is_super_admin, is_display_user, is_active, created_at`,
+       (username, email, password_hash, full_name, team_id,
+        is_admin, is_super_admin, is_team_lead, is_display_user, is_active)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+     RETURNING id, username, email, full_name, team_id,
+               is_admin, is_super_admin, is_team_lead, is_display_user, is_active, created_at`,
     [
       username,
       normalizedEmail,
       password_hash,
       full_name ?? null,
       team_id,
-      is_admin ?? false,
-      is_super_admin ?? false,
-      is_display_user ?? false,
+      flags.is_admin,
+      flags.is_super_admin,
+      flags.is_team_lead,
+      flags.is_display_user,
     ]
   )
 

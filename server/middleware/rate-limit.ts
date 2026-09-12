@@ -42,6 +42,13 @@ const RATE_LIMIT_CONFIG = {
   passwordReset: {
     maxRequests: 3,
     windowMs: 60 * 60 * 1000 // 1 hour
+  },
+  // Kiosk "check my requests" by UPI: a soft gate, so keep guessing slow.
+  // 20 a minute is plenty for real use (a typo or two) and too slow to walk
+  // through employee numbers.
+  upiLookup: {
+    maxRequests: 20,
+    windowMs: 60 * 1000 // 1 minute
   }
 }
 
@@ -67,10 +74,16 @@ export default defineEventHandler(async (event) => {
     config = RATE_LIMIT_CONFIG.passwordReset
   } else if (event.path.includes('/admin/')) {
     config = RATE_LIMIT_CONFIG.admin
+  } else if (event.path.includes('/schedule-requests/lookup')) {
+    config = RATE_LIMIT_CONFIG.upiLookup
   }
 
   // Create a unique key for this IP and route type
-  const key = `${clientIP}:${event.path.split('/')[2] || 'default'}` // Use route prefix as part of key
+  // Use route prefix as part of key. The UPI lookup gets its own bucket so its
+  // tight limit isn't consumed by ordinary /schedule-requests traffic (the PTO
+  // calendar's list + search) and vice versa.
+  const bucket = config === RATE_LIMIT_CONFIG.upiLookup ? 'upi-lookup' : (event.path.split('/')[2] || 'default')
+  const key = `${clientIP}:${bucket}`
   
   const now = Date.now()
   const record = rateLimitStore[key]

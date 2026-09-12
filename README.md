@@ -5,20 +5,22 @@ A web-based scheduling application for distribution center operations. Built wit
 ## Features
 
 - **Daily Schedule Management** - Visual grid editor for employee assignments with 15-minute granularity
-- **Automated Schedule Builder** - Generates the day from staffing targets, training, shifts, required assignments, approved PTO and shift swaps. Deterministic (no LLM, no solver): 96 x 15-minute slots, a cost function over every candidate, pre-flight feasibility, per-gap explanations, and a business-priority matrix (`staffing_priority`) deciding which functions go short first. Targets are a minimum, so surplus labour is deployed (with per-function caps and overflow sinks) rather than parked
+- **Automated Schedule Builder** - Generates the day from staffing targets, training, shifts, required assignments, approved PTO and shift swaps. Deterministic (no LLM, no solver): 96 x 15-minute slots, a cost function over every candidate, pre-flight feasibility, per-gap explanations, and a business-priority matrix (`staffing_priority`) deciding which functions go short first. Targets are a minimum, so surplus labour is deployed (with per-function caps and overflow sinks) rather than parked. Two placement engines share the pipeline: the slot engine, and **Builder V2**, which keeps each person on one job for each stretch between breaks
 - **Training & Coverage Preview** - Heatmap on Create Schedule: spare trained people for every job, every hour, before you build
-- **Employee Overview** - Per-employee dashboard: hours by function, PTO usage, rolling picking-error trend, and performance notes for reviews
+- **Employee Overview** - Per-employee page: hours by function, PTO usage, attendance points (half or full, per date), rolling picking-error trend, and performance notes for reviews
+- **Change Log** - Read-only audit of every manual change to a person's record (request approvals/rejections/deletions, hand-entered time off, attendance points, notes, errors) with who did it — for Supervisors, on the PTO Calendar and the Employee Overview
 - **Staffing Targets** - Set target headcount per job function per hour in a grid UI
-- **Coverage Requirements** - Flag job functions that need lunch/break coverage so the builder keeps the station continuously staffed
+- **Coverage Requirements** - By default a hole during a 15-minute break or lunch is not treated as a gap; flag the few job functions that must stay covered through them and the builder pulls cross-shift people onto them and flags what it cannot cover
 - **Employee Training Matrix** - Track which employees are trained for which job functions, with auto-save
-- **Required Assignments** - Pin specific employees to specific functions for explicit time blocks (legacy AM/PM split still honoured)
+- **Required Assignments** - Pin specific employees to specific functions for explicit time blocks (legacy AM/PM rows honoured by splitting at lunch)
 - **PTO Calendar** - Week/month calendar of approved time off, with per-day hours itemised by source (approved / call-in / manual) and an admin override workflow
 - **Schedule Requests** - Unified pipeline for PTO (full/partial), leave-early, leave-on-time, arrive-late and shift swaps, decided instantly by a rule engine (business-day notice, per-week limits, team PTO-hour caps by weekday, blocked dates)
 - **Shift Swap Tracking** - Record and manage shift swaps between employees
-- **Copy Schedule** - Duplicate a previous day's schedule to a new date
+- **Copy Schedule** - Replace a target day with today's schedule, trimmed around that day's time off and leaving swapped people off by name
+- **Staff self-service** - From the kiosk, an employee types their UPI to see their own requests and whether they were approved
 - **Display Mode** - Wall-mounted iPad/TV board of today's schedule, auto-refreshing every 2 min, sized for reading at a distance
 - **Multi-Tenant Teams** - Data isolation by team enforced on every request via the signed `team_id`; an account with no team is refused all data
-- **Authentication** - JWT-based auth with HttpOnly cookies, role hierarchy (Super Admin, Admin, User, Display)
+- **Authentication** - JWT-based auth with HttpOnly cookies; four exclusive roles (Super Admin, Supervisor, Team Lead / Coordinator, Kiosk) — an account with no role can do nothing
 
 ## Tech Stack
 
@@ -84,9 +86,10 @@ npm run dev
 | `/login` | Login page |
 | `/schedule/tomorrow` | Create schedule (Copy, Automated Builder, or Manual) |
 | `/schedule/[date]` | View/edit schedule for a specific date |
-| `/training` | Employee training matrix (auto-saves) |
-| `/details` | Manage job functions, shifts, and employees |
+| `/details` | Team Setup: employees & training matrix (auto-saves), job functions, shifts, target hours (`?tab=`) |
+| `/training` | Redirects to `/details?tab=employees` |
 | `/pto-calendar` | PTO calendar (week/month) + request approval workflow |
+| `/employee-overview` | One employee's hours, skills, attendance, review notes (`?employee=&period=`) |
 | `/display` | TV display mode (read-only, auto-refresh every 2 min) |
 | `/settings` | User settings, password, and team settings |
 | `/admin/business-rules` | Staffing targets grid (headcount per function per hour) |
@@ -96,9 +99,11 @@ npm run dev
 ```
 scheduling-app-v2/
 ├── components/
-│   ├── details/              # Job function, shift, employee editors
-│   ├── schedule/             # Schedule grid, shift groups, assignment cards
-│   └── schedule-requests/    # Request form modal + auto-approval result banner
+│   ├── audit/                # ChangeLogModal — the read-only change log
+│   ├── employee/             # Overview — the Employee Overview dashboard
+│   ├── schedule/             # Schedule grid, shift groups, assignment cards, coverage preview
+│   ├── schedule-requests/    # Request form modal (new request / check my requests) + result banner
+│   └── team/                 # EmployeesTraining — the Employees & Training tab of Team Setup
 ├── composables/              # Shared reactive logic
 │   ├── useScheduleBuilderV2.ts   # The schedule builder (drives utils/scheduleEngineV2/)
 │   ├── useAuth.ts                # JWT authentication
@@ -131,6 +136,8 @@ scheduling-app-v2/
 │   │   ├── schedule-requests/
 │   │   ├── team-settings/
 │   │   ├── team-blocked-dates/
+│   │   ├── attendance-points/
+│   │   ├── audit-log/
 │   │   └── ...
 │   ├── plugins/
 │   │   └── bootstrap.ts      # On-boot self-setup: schema + migrations + first admin
@@ -141,13 +148,18 @@ scheduling-app-v2/
 │       ├── ptoHours.ts       # Single source for PTO-hour accounting
 │       ├── ptoUsage.ts       # Team PTO hours already committed per date
 │       ├── requestRules.ts   # Auto-approval rule engine
+│       ├── auditLog.ts       # logChange() — writes the change log inside the caller's transaction
+│       ├── upi.ts            # Employee UPI validation
 │       └── email.ts          # Email utilities
 ├── utils/
+│   ├── roles.ts              # The four roles, defined once (server + client)
 │   ├── ptoDisplay.ts         # Single source for reading/displaying a pto_days row
-│   └── scheduleEngineV2/     # The schedule engine (types, slots, prepare, engine)
+│   ├── requestDisplay.ts     # Single source for labelling a schedule_requests row
+│   ├── localDate.ts          # "Today" as a local calendar date (never UTC)
+│   └── scheduleEngineV2/     # The schedule engine (types, slots, prepare, engine + periodEngine)
 ├── sql-schema/
 │   ├── setup.sql             # Full database schema (applied once on empty DB)
-│   ├── migrations/           # 001–018 incremental migrations (applied on boot; no 009)
+│   ├── migrations/           # 001–022 incremental migrations (applied on boot; no 009)
 │   └── ...                   # Individual table schemas for reference
 ├── scripts/
 │   ├── seed-first-user.js    # Create initial admin account
@@ -173,11 +185,11 @@ Core tables:
 | Table | Purpose |
 |-------|---------|
 | `teams` | Multi-tenant team isolation |
-| `user_profiles` | User accounts with roles, password hashes, optional employee link |
+| `user_profiles` | User accounts with exactly one role flag, password hashes, optional employee link |
 | `password_reset_tokens` | Self-service password reset tokens |
 | `team_settings` | Per-team configuration (request-rule limits) |
 | `team_blocked_dates` | Dates that auto-reject PTO/leave-early requests |
-| `employees` | Employee records (name, shift, active status) |
+| `employees` | Employee records (name, shift, active status, UPI) |
 | `job_functions` | Job roles with colors, coverage flags, exclude-from-targets, headcount caps, staffing priority |
 | `employee_training` | Which employees are trained for which functions (junction table) |
 | `shifts` | Shift definitions with break/lunch times |
@@ -193,15 +205,19 @@ Core tables:
 | `target_hours` | Default target hours per job function |
 | `performance_errors` | Picking-error log (admin-only; drives the Employee Overview trend) |
 | `performance_notes` | Review notes with quick-add tags |
+| `attendance_points` | Half or full attendance points per employee per date |
+| `audit_log` | The change log: who changed what, when, with a plain summary and before/after snapshots (append-only) |
 | `business_rules` | Legacy staffing rules (replaced by staffing_targets) |
 
 ## Automated Schedule Builder
 
-One deterministic engine (not an LLM, no solver) —
+One deterministic pipeline (not an LLM, no solver) —
 [utils/scheduleEngineV2/](utils/scheduleEngineV2/), driven by
 [composables/useScheduleBuilderV2.ts](composables/useScheduleBuilderV2.ts):
 96 x 15-minute slots, cost-function placement, per-gap explanations, and a
-business-priority matrix.
+business-priority matrix — with two placement engines the Create Schedule page
+offers as two cards: the slot engine, and the period engine ("Builder V2") that
+keeps each person on one job per stretch between breaks.
 
 > An earlier engine ("V1") was deleted in Aug 2026. The `V2` still in the file
 > names is history, not a choice — there is nothing to switch between.

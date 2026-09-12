@@ -1,16 +1,16 @@
 import { query } from '../../../utils/db'
-import { requireAdmin, getTeamFilter, readsAllTeams } from '../../../utils/authorize'
+import { requireSupervisor, getTeamFilter, readsAllTeams } from '../../../utils/authorize'
 
 export default defineEventHandler(async (event) => {
   try {
-    const user = requireAdmin(event)
+    const user = requireSupervisor(event)
     // User management is install-wide for a super admin: they must still see
     // every team's users after getTeamFilter became team-scoped for them.
     const teamId = readsAllTeams(user) ? null : getTeamFilter(user)
 
     let sql = `
       SELECT up.id, up.username, up.email, up.full_name, up.team_id, up.is_admin, up.is_super_admin,
-             up.is_display_user, up.is_active, up.last_login, up.created_at,
+             up.is_team_lead, up.is_display_user, up.is_active, up.last_login, up.created_at,
              json_build_object('id', t.id, 'name', t.name) AS team
       FROM user_profiles up
       LEFT JOIN teams t ON t.id = up.team_id`

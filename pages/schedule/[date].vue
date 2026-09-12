@@ -336,7 +336,7 @@
           <div class="space-y-2 mb-4">
             <h4 class="font-medium text-gray-700">Available Job Functions:</h4>
             <p v-if="availableJobFunctions.length === 0 && Object.keys(trainingByEmployee || {}).length > 0" class="text-sm text-amber-600 py-2">
-              No trained job functions. Assign training in Details & Settings first.
+              No trained job functions. Assign training in Team Setup → Employees & Training first.
             </p>
             <div v-else class="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
               <div v-for="jobFunction in availableJobFunctions" :key="jobFunction" 
@@ -944,7 +944,7 @@ onMounted(() => {
   })
 })
 
-// Target hours — the default per-function hours saved in Details & Settings → Target
+// Target hours — the default per-function hours saved in Team Setup → Target
 // Hours tab (the `target_hours` table). NOTE: this is intentionally NOT `daily_targets`
 // (that table stores per-date target *units*, a different concept); reading daily_targets
 // here was the bug that always showed 0.
@@ -2232,7 +2232,7 @@ const getEmployeesForJobFunction = (jobFunctionKey: string) => {
 }
 
 // Is this time slot inside the employee's shift break/lunch window? Driven by the
-// shift's break/lunch times (Details & Settings → Shift Management), independent of
+// shift's break/lunch times (Team Setup → Shift Management), independent of
 // the assignment data — so breaks always show in the dashboard even when an
 // assignment block happens to span them.
 const isEmployeeOnBreak = (employeeId: string, timeSlot: string): boolean => {

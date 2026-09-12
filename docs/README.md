@@ -12,10 +12,10 @@ all three drifted apart.
 |---|---|---|
 | **[CONTEXT.md](./CONTEXT.md)** | Architecture, directory map, data model, auth & multi-tenancy, DB triggers, migrations ledger, env vars, deployment/bootstrap | slowly |
 | **[SCHEDULE-BUILDER.md](./SCHEDULE-BUILDER.md)** | The builder engine: pipeline, cost function and weights, `staffing_priority`, the two block minimums, the review modal, how to validate a change | often |
-| **[PTO-AND-REQUESTS.md](./PTO-AND-REQUESTS.md)** | PTO hours model, the shared modules, auto-approval rules and settings keys, `pto_days` storage conventions, PTO calendar, Employee Overview, performance tracking | often |
+| **[PTO-AND-REQUESTS.md](./PTO-AND-REQUESTS.md)** | PTO hours model, the shared modules, auto-approval rules and settings keys, `pto_days` storage conventions, PTO calendar, the kiosk UPI lookup, the change log, Employee Overview, attendance points, performance tracking | often |
 | **[TESTING.md](./TESTING.md)** | How to verify a change: the four tiers, the engine harness (`sim-builder.mjs`), the browser smoke test (`ui-smoke.mjs`), multi-tenancy checks and fixtures | often |
-| **[ROLES.md](./ROLES.md)** | Roles, permissions matrix, team isolation rules, troubleshooting | rarely |
-| **[RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md)** | Production deployment on Rancher / Kubernetes, plus an architecture reference for IT Q&A | rarely |
+| **[ROLES.md](./ROLES.md)** | The four roles and what each can do, the server gates, team isolation, how to roll the roles out to an existing install | rarely |
+| **[RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md)** | Production deployment on Rancher / Kubernetes, the release checklist (what to check before and after an update), plus an architecture reference for IT Q&A | rarely |
 
 ## Where to start
 
@@ -33,14 +33,22 @@ all three drifted apart.
 - `../sql-schema/setup.sql` — full schema bootstrap
 - `../sql-schema/migrations/` — incremental migrations, auto-applied on boot
 
-## Two live twins to know about
+## Where the editors actually live
 
-Legacy duplicates that are **not** wired up. Edit the live one:
+This repo used to carry unused twins of its live editors — `components/details/*Tab.vue`
+beside `pages/details.vue`, `pages/admin/users.vue` beside `pages/settings.vue` — and
+edits landed in the dead copy more than once. Both twins are gone now (Jul and Sep
+2026). The rule survives them: **before editing a component, grep for where it is
+mounted.** Today the live homes are:
 
-| Live | Dead twin |
+| What | Where |
 |---|---|
-| `pages/details.vue` (monolithic, editors inline) | `components/details/*Tab.vue` |
-| `pages/settings.vue` (Super Admin Management section) | `pages/admin/users.vue` — deleted Jul 2026 |
+| Job Functions / Shifts / Target Hours editors | inline in `pages/details.vue` (Team Setup) |
+| Employees & Training tab | `components/team/EmployeesTraining.vue` |
+| User and team management | inline in `pages/settings.vue` |
+| Employee Overview | `components/employee/Overview.vue`, rendered by `pages/employee-overview.vue` |
+| Change log | `components/audit/ChangeLogModal.vue` |
+| The schedule assignment modal | `components/schedule/ShiftGroupedSchedule.vue` (not `AssignmentModal.vue`) |
 
 ## Abbott Labs Brand Colors
 
@@ -54,4 +62,4 @@ Legacy duplicates that are **not** wired up. Edit the live one:
 
 ---
 
-**Last Updated**: August 2026
+**Last Updated**: September 2026

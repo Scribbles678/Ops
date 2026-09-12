@@ -24,10 +24,10 @@
       </div>
 
       <!-- Main Menu Buttons -->
-      <div class="max-w-3xl w-full mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-        <!-- Update Training Button -->
+      <div class="max-w-4xl w-full mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <!-- Team Setup: employees, training, job functions, shifts, target hours -->
         <NuxtLink
-          to="/training"
+          to="/details"
           class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 flex items-center justify-center"
         >
           <div class="flex flex-col items-center justify-center">
@@ -36,28 +36,9 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
               </svg>
             </div>
-            <h2 class="text-sm md:text-base font-bold text-gray-800 mb-1 text-center">Employees & Training Matrix</h2>
+            <h2 class="text-sm md:text-base font-bold text-gray-800 mb-1 text-center">Team Setup</h2>
             <p class="text-xs text-gray-600 text-center px-2 leading-tight">
-              Manage employees, shifts, and job function training
-            </p>
-          </div>
-        </NuxtLink>
-
-        <!-- Details Button -->
-        <NuxtLink
-          to="/details"
-          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 flex items-center justify-center"
-        >
-          <div class="flex flex-col items-center justify-center">
-            <div class="bg-purple-100 rounded-full p-2 mb-2">
-              <svg class="w-10 h-10 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </div>
-            <h2 class="text-sm md:text-base font-bold text-gray-800 mb-1 text-center">Details</h2>
-            <p class="text-xs text-gray-600 text-center px-2 leading-tight">
-              Configure job functions, shifts, and employees
+              Employees, training, job functions, shifts, and target hours
             </p>
           </div>
         </NuxtLink>
@@ -113,6 +94,27 @@
             <h2 class="text-sm md:text-base font-bold text-gray-800 mb-1 text-center">PTO Calendar</h2>
             <p class="text-xs text-gray-600 text-center px-2 leading-tight">
               View time off and schedule change requests
+            </p>
+          </div>
+        </NuxtLink>
+
+        <!-- Employee Overview: one person's scheduled work, skills, attendance and
+             (for admins) performance notes -->
+        <NuxtLink
+          to="/employee-overview"
+          class="bg-white rounded-lg shadow-md border border-gray-200 hover:shadow-xl transition-all transform hover:scale-105 cursor-pointer p-6 flex items-center justify-center"
+        >
+          <div class="flex flex-col items-center justify-center">
+            <div class="bg-indigo-100 rounded-full p-2 mb-2">
+              <svg class="w-10 h-10 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 21v-1a5 5 0 015-5h1" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 21v-4m3 4v-7m3 7v-2" />
+              </svg>
+            </div>
+            <h2 class="text-sm md:text-base font-bold text-gray-800 mb-1 text-center">Employee Overview</h2>
+            <p class="text-xs text-gray-600 text-center px-2 leading-tight">
+              One person's hours, skills, attendance, and review notes
             </p>
           </div>
         </NuxtLink>

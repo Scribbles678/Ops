@@ -1,5 +1,6 @@
 import { query, transaction } from '../../utils/db'
-import { requireAdmin, getTeamFilter } from '../../utils/authorize'
+import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
+import { logChange, employeeDisplayName, describeRequest } from '../../utils/auditLog'
 
 /**
  * How a request type materializes into pto_days.pto_type.
@@ -24,7 +25,7 @@ const PTO_TYPE_FOR_REQUEST: Record<string, string> = {
  * If rejecting a previously approved request, deletes the downstream record.
  */
 export default defineEventHandler(async (event) => {
-  const user = requireAdmin(event)
+  const user = requireTeamLead(event)
   const teamId = getTeamFilter(user)
   const id = getRouterParam(event, 'id')
   const body = await readBody(event)
@@ -128,6 +129,25 @@ export default defineEventHandler(async (event) => {
         id,
       ]
     )
+
+    // Change log: who overrode what, and from which status.
+    const who = await employeeDisplayName(client, request.employee_id)
+    const verb = status === 'approved' ? 'Approved' : 'Rejected'
+    await logChange(client, {
+      teamId: request.team_id,
+      actor: user,
+      action: status === 'approved' ? 'approve' : 'reject',
+      entity: 'request',
+      entityId: request.id,
+      employeeId: request.employee_id,
+      employeeName: who,
+      summary:
+        `${verb} ${who}'s ${describeRequest(request)}` +
+        (oldStatus !== status ? ` (was ${oldStatus})` : ' (already ' + status + ')') +
+        (status === 'rejected' && rejection_reason ? `: ${rejection_reason}` : ''),
+      before: request,
+      after: updated.rows[0],
+    })
 
     return updated.rows[0]
   })

@@ -11,6 +11,21 @@
           >&times;</button>
         </div>
 
+        <!-- Two jobs: submit a request, or check what happened to one. Big tabs
+             because this is tapped on the kiosk. -->
+        <div class="grid grid-cols-2 gap-2 mb-4">
+          <button
+            v-for="t in MODES"
+            :key="t.key"
+            type="button"
+            @click="setMode(t.key)"
+            class="h-11 rounded-lg text-sm font-medium border transition-colors"
+            :class="mode === t.key
+              ? 'bg-blue-600 text-white border-blue-600'
+              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50 active:bg-gray-100'"
+          >{{ t.label }}</button>
+        </div>
+
         <!-- Inline login (when not authenticated) -->
         <div v-if="needsLogin">
           <p class="text-sm text-gray-600 mb-3">Please sign in to submit a request.</p>
@@ -45,6 +60,61 @@
               {{ loggingIn ? 'Signing in...' : 'Sign In' }}
             </button>
           </form>
+        </div>
+
+        <!-- Check my requests. The UPI is a soft gate, enforced by the lookup
+             endpoint (team-scoped, rate-limited), not by anything in here. -->
+        <div v-else-if="mode === 'lookup'" class="space-y-4">
+          <p class="text-sm text-gray-600">
+            Type your UPI to see your requests and whether they were approved.
+          </p>
+          <form @submit.prevent="doLookup" class="flex gap-2">
+            <input
+              v-model="lookupUpi"
+              type="text"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              autocomplete="off"
+              placeholder="Your UPI"
+              aria-label="Your UPI"
+              class="flex-1 h-12 px-4 text-lg tracking-wide border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
+            />
+            <button
+              type="submit"
+              :disabled="lookupLoading || !lookupUpi.trim()"
+              class="h-12 px-5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 font-medium"
+            >{{ lookupLoading ? 'Looking…' : 'Look up' }}</button>
+          </form>
+          <p v-if="lookupError" class="text-sm text-red-600">{{ lookupError }}</p>
+
+          <div v-if="lookupResult">
+            <div class="flex items-baseline justify-between gap-3 mb-2">
+              <p class="text-sm text-gray-800">
+                Showing requests for <b>{{ lookupResult.employee.name }}</b>
+                <span class="text-gray-500">— upcoming and the last {{ lookupResult.lookbackDays }} days</span>
+              </p>
+              <button type="button" @click="clearLookup" class="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap">Not you? Change UPI</button>
+            </div>
+            <div v-if="!lookupResult.requests.length" class="text-sm text-gray-500 py-6 text-center border border-gray-200 rounded-lg">
+              No requests in the last {{ lookupResult.lookbackDays }} days.
+            </div>
+            <div v-else class="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-[50vh] overflow-y-auto">
+              <div v-for="r in lookupResult.requests" :key="r.id" class="px-3 py-2.5 flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-sm font-medium text-gray-900">{{ formatLongDate(r.request_date) }}</div>
+                  <div class="text-sm text-gray-600">
+                    {{ requestTypeLabel(r.request_type) }}
+                    <span v-if="requestTimeLabel(r)" class="text-gray-400">· {{ requestTimeLabel(r) }}</span>
+                  </div>
+                  <div v-if="r.status === 'rejected' && r.rejection_reason" class="text-xs text-red-700 mt-0.5">{{ r.rejection_reason }}</div>
+                </div>
+                <span
+                  class="flex-none px-2.5 py-1 rounded-full text-xs font-semibold"
+                  :class="r.status === 'approved' ? 'bg-green-100 text-green-800' : r.status === 'rejected' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'"
+                >{{ r.status === 'approved' ? 'Approved' : r.status === 'rejected' ? 'Not approved' : r.status }}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Multi-day result summary (shown after a date-range submit) -->
@@ -410,6 +480,39 @@
 
 <script setup lang="ts">
 import type { SubmitResult } from '~/composables/useScheduleRequests'
+import { requestTypeLabel, requestTimeLabel } from '~/utils/requestDisplay'
+
+// --- New request / Check my requests -----------------------------------------
+const MODES = [
+  { key: 'new', label: 'New request' },
+  { key: 'lookup', label: 'Check my requests' },
+] as const
+type Mode = (typeof MODES)[number]['key']
+const mode = ref<Mode>('new')
+
+const lookupUpi = ref('')
+const lookupLoading = ref(false)
+const lookupError = ref('')
+const lookupResult = ref<{ employee: { name: string }; lookbackDays: number; requests: any[] } | null>(null)
+
+// The kiosk is a shared screen: leaving the tab forgets whose requests were up.
+const clearLookup = () => { lookupResult.value = null; lookupError.value = ''; lookupUpi.value = '' }
+const setMode = (m: Mode) => { if (m !== mode.value) clearLookup(); mode.value = m }
+
+const doLookup = async () => {
+  const upi = lookupUpi.value.trim()
+  if (!upi) return
+  lookupLoading.value = true
+  lookupError.value = ''
+  lookupResult.value = null
+  try {
+    lookupResult.value = await $fetch<any>('/api/schedule-requests/lookup', { method: 'POST', body: { upi } })
+  } catch (e: any) {
+    lookupError.value = e.data?.message || e.message || 'Could not look that up'
+  } finally {
+    lookupLoading.value = false
+  }
+}
 
 const props = defineProps<{
   preselectedEmployeeId?: string | null
