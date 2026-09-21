@@ -16,6 +16,8 @@ all three drifted apart.
 | **[TESTING.md](./TESTING.md)** | How to verify a change: the four tiers, the engine harness (`sim-builder.mjs`), the browser smoke test (`ui-smoke.mjs`), multi-tenancy checks and fixtures | often |
 | **[ROLES.md](./ROLES.md)** | The four roles and what each can do, the server gates, team isolation, how to roll the roles out to an existing install | rarely |
 | **[RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md)** | Production deployment on Rancher / Kubernetes, the release checklist (what to check before and after an update), plus an architecture reference for IT Q&A | rarely |
+| **[DB-DATA-LOSS-INCIDENT.md](./DB-DATA-LOSS-INCIDENT.md)** | The Sep 2026 database loss: summary, what IT needs to check, how the Postgres image and the app bootstrap combine to turn an empty volume into a "fresh install", candidate causes, recovery options, timeline | during the incident |
+| **[HARDENING-ROADMAP.md](./HARDENING-ROADMAP.md)** | Proposal (not yet implemented) for a durable deployment: StatefulSet + Retain storage, a bootstrap guard against silent re-init in production, backups, detection, versioned manifests, the persistence test | rarely |
 
 ## Where to start
 
@@ -24,6 +26,7 @@ all three drifted apart.
 - **Working on PTO, requests or availability?** [PTO-AND-REQUESTS.md](./PTO-AND-REQUESTS.md).
 - **About to verify or ship a change?** [TESTING.md](./TESTING.md) — `npm run build` is only the first of four tiers.
 - **Deploying?** [RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md).
+- **Helping with the Sep 2026 data loss?** [DB-DATA-LOSS-INCIDENT.md](./DB-DATA-LOSS-INCIDENT.md), then [HARDENING-ROADMAP.md](./HARDENING-ROADMAP.md).
 - **Setting up roles or teams?** [ROLES.md](./ROLES.md).
 
 ## Related
