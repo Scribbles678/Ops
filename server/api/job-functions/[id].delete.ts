@@ -1,8 +1,14 @@
 import { query } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
 
+/**
+ * Permanently delete a job function. This erases every schedule assignment on it,
+ * past and future, plus its training records and targets (ON DELETE CASCADE) —
+ * Team Setup shows those counts first (GET /api/job-functions/:id/usage) and
+ * offers Deactivate instead.
+ */
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getTeamFilter(user)
   const id = getRouterParam(event, 'id')
 
@@ -13,6 +19,10 @@ export default defineEventHandler(async (event) => {
     params.push(teamId)
   }
 
-  await query(sql, params)
+  const result = await query(sql, params)
+  // Used to report success whatever happened — including for another team's id.
+  if (!result.rowCount) {
+    throw createError({ statusCode: 404, message: 'Job function not found' })
+  }
   return { success: true }
 })

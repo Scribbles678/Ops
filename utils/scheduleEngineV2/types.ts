@@ -38,17 +38,6 @@ export const DB_MIN_BLOCK_MINUTES = 15
  */
 export const PREFERRED_MIN_MINUTES = 30
 
-/**
- * Period engine only (`periodEngine.ts`): the shortest stint a person may be given
- * when a stretch between breaks is split in two. `null` means never split — one
- * function per stretch, no exceptions.
- *
- * 45, not 60, because the 7AM shift's first stretch is 07:00-08:45 and startup is
- * a one-hour job: at 60 that stretch cannot be cut at all and startup goes
- * unstaffed every day. At 45 the only splits that survive are that case.
- */
-export const PERIOD_MIN_STINT_MINUTES: number | null = 45
-
 export interface EngineEmployee {
   id: string
   /** "Last, First" - for lists and the schedule grid, where it sorts correctly. */
@@ -75,25 +64,17 @@ export interface EngineFunction {
   maxHeadcount: number | null
   /** Preferred sink for surplus labour. */
   isOverflow: boolean
-  /** Functions excluded from targets are not gap-reported. */
-  excludeFromTargets: boolean
   /**
-   * 1 where a shortfall COUNTS. 0 inside a break window (or lunch window) when the
-   * function is not flagged to stay covered through it. The floor does not expect
-   * the builder to staff every function through a 15-minute break, so those
-   * shortfalls are neither scored, chased nor reported. Demand itself is left
-   * intact so placement still spans the window.
+   * 1 where a shortfall COUNTS; 0 inside any shift's break or lunch window. The
+   * floor does not expect a job staffed through a 15-minute break or lunch, so
+   * those shortfalls are neither scored, chased nor reported. Demand itself is
+   * left intact so placement still spans the window.
+   *
+   * Per-job "keep covered during breaks / through lunch" flags existed Sep 2026
+   * and were removed: on real data they never made the builder cover more (the
+   * trained people were simply not on shift then); they only added warnings.
    */
   mustCover: Uint8Array
-  /**
-   * 1 inside a break/lunch window this function IS flagged to stay covered
-   * through. Closing one of these slots earns an extra reward, and a shortfall
-   * here is reported as something a person must fix.
-   */
-  keepCovered: Uint8Array
-  /** job_functions.break_coverage_required / lunch_coverage_required */
-  coverBreaks: boolean
-  coverLunch: boolean
   /** trainedSupply / totalDemand — lower means harder to staff. */
   scarcity: number
   /**
@@ -116,17 +97,30 @@ export interface EngineAssignment {
 export type AssignmentReason =
   | 'required-pin'
   | 'coverage'
-  | 'cliff-patch'
   | 'surplus-under-target'
   | 'surplus-overflow'
   | 'surplus-continuation'
 
 /** Why a slot could not be covered. Answers "why is this cell empty?". */
 export type GapCause =
+  /** More work was asked for than there were people on the floor. No schedule can fix it. */
+  | 'floor-short'
+  /** Nobody on the team is trained for the job at all. */
+  | 'no-one-trained'
+  /** People are trained, but none of them is on the floor at that time. */
   | 'no-one-trained-on-shift'
   | 'all-trained-busy'
   | 'capped'
   | 'no-availability'
+
+/** Where in the app a person goes to fix an action. The review modal links there. */
+export type FixPlace = 'rules-and-targets' | 'required-assignments' | 'employees' | 'job-functions' | 'shifts'
+
+/** Something a person must change in the app, and where to change it. */
+export interface EngineAction {
+  message: string
+  fix?: FixPlace
+}
 
 export interface EngineGap {
   functionId: string
@@ -135,7 +129,10 @@ export interface EngineGap {
   time: string
   startSlot: number
   endSlot: number
+  /** The most people short at any moment in the gap. */
   shortfall: number
+  /** Headcount-hours short across the whole gap, every 15 minutes added up. */
+  hours: number
   cause: GapCause
   detail: string
 }
@@ -151,15 +148,17 @@ export interface FeasibilityIssue {
 export interface EngineResult {
   assignments: EngineAssignment[]
   gaps: EngineGap[]
-  overTarget: { functionName: string; time: string; surplus: number }[]
+  /** surplus = most people over target at once; hours = headcount-hours over, added up. */
+  overTarget: { functionName: string; time: string; surplus: number; hours: number }[]
   /** Produced BEFORE any assignment, so impossible targets are named up front. */
   feasibility: FeasibilityIssue[]
   /**
    * Things a PERSON must go and fix in the app - missing training, an unassigned
    * shift, a stale target cell. Kept separate from `warnings` so the review modal
-   * can lead with them instead of burying them among informational notes.
+   * can lead with them instead of burying them among informational notes. Each
+   * says where to fix it, so the modal can link straight there.
    */
-  actions: string[]
+  actions: EngineAction[]
   /** Informational only. Nothing for anyone to do. */
   warnings: string[]
   stats: {
@@ -208,13 +207,6 @@ export interface EngineWeights {
    * hole appears next — the single biggest lever in a tight day.
    */
   flexibility: number
-  /**
-   * Extra reward per break/lunch slot closed on a function flagged to stay
-   * covered through it (`keepCovered`). Stacks on `unmet`, so such a slot is worth
-   * double — enough to pull a cross-shift person onto that function across the
-   * window instead of onto something that merely has more open slots.
-   */
-  breakCover: number
 }
 
 export const DEFAULT_WEIGHTS: EngineWeights = {
@@ -229,7 +221,6 @@ export const DEFAULT_WEIGHTS: EngineWeights = {
   waste: 25,
   flexibility: 3,
   priority: 45,
-  breakCover: 100,
 }
 
 /** Lowest (worst) priority value; used to convert priority into a reward. */

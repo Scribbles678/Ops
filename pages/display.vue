@@ -20,6 +20,12 @@
       </div>
     </div>
 
+    <!-- The last refresh failed. Without this the board looked normal while showing
+         stale data, or nothing at all. Big and amber: it is read from across the floor. -->
+    <div v-if="loadFailed" role="alert" class="px-4 py-2 text-center text-lg font-semibold bg-amber-300 text-amber-950">
+      Can't reach the schedule right now — retrying every 2 minutes.<template v-if="lastUpdated"> Showing the board as of {{ lastUpdated }}.</template>
+    </div>
+
     <div class="max-w-[1500px] mx-auto px-4 py-3 space-y-3">
       <!-- Loading (initial load only) -->
       <div v-if="!initialLoadDone" class="flex items-center justify-center h-[60vh]">
@@ -130,21 +136,28 @@ const { formatTime, formatDate } = useLaborCalculations()
 const {
   scheduleAssignments: assignments,
   shifts,
+  error: scheduleError,
   fetchShifts,
   fetchScheduleForDate
 } = useSchedule()
 
 // PTO
-const { ptoByEmployeeId, fetchPTOForDate } = usePTO()
+const { ptoByEmployeeId, error: ptoError, fetchPTOForDate } = usePTO()
 
 // Shift Swaps
-const { swapByEmployeeId, fetchShiftSwapsForDate } = useShiftSwaps()
+const { swapByEmployeeId, error: swapsError, fetchShiftSwapsForDate } = useShiftSwaps()
 
 const {
   employees,
   loading: employeesLoading,
+  error: employeesError,
   fetchEmployees
 } = useEmployees()
+
+// True when the last refresh failed. The loaders catch their own errors and
+// return empty lists, so a failed refresh used to look like a good one: the board
+// went blank (or stayed stale) and "Updated" kept moving forward.
+const loadFailed = ref(false)
 
 const showRequestModal = ref(false)
 
@@ -384,7 +397,8 @@ const loadData = async () => {
       fetchPTOForDate(today.value),
       fetchShiftSwapsForDate(today.value)
     ])
-    updateLastUpdated()
+    loadFailed.value = !!(scheduleError.value || ptoError.value || swapsError.value || employeesError.value)
+    if (!loadFailed.value) updateLastUpdated()
     initialLoadDone.value = true
   } catch (e) {
     console.error('Failed to load display data:', e)

@@ -6,7 +6,7 @@ change, then say in your report which tiers you ran and which you skipped.
 
 | Tier | Command | Catches |
 |---|---|---|
-| 1. Typecheck | `npm run build` | type errors, broken imports, syntax |
+| 1. Build + type check | `npm run build`, then `vue-tsc` (below) | broken imports and syntax; type errors |
 | 2. Engine harness | `node scripts/sim-builder.mjs <date>` | schedule quality regressions |
 | 3. Browser smoke | `node scripts/ui-smoke.mjs` | render failures, JS errors, wrong-looking screens |
 | 4. Migration harness | throwaway Postgres (below) | a migration that crashloops the pod |
@@ -17,20 +17,41 @@ cleanly and was only ever visible in tier 3.
 
 ---
 
+## Tier 1 — build, then type check
+
+**`npm run build` does not check types.** Nuxt strips them without checking unless
+`typeCheck` is set, and it is not, so a build passes with type errors in it. Check
+types separately; nothing needs installing, `npx` fetches the tools:
+
+```bash
+npx --yes -p typescript@5.9 -p vue-tsc@3 vue-tsc --noEmit -p .nuxt/tsconfig.app.json
+npx --yes -p typescript@5.9 -p vue-tsc@3 vue-tsc --noEmit -p .nuxt/tsconfig.server.json
+```
+
+The code is **not** type-clean: about 220 errors in the app and 4 on the server
+already exist (Sep 2026), almost all "possibly undefined" from strict index access.
+So judge a change by its **own** errors: filter the output to the files you touched,
+and any flagged line that exists unchanged in `git show HEAD:<file>` was there before.
+The counts should not go up.
+
+---
+
 ## Tier 2 — the engine harness (`scripts/sim-builder.mjs`)
 
 Replays **real database rows** through the **real engine** and prints quality
 metrics. Read-only; it never writes a schedule.
 
 ```bash
-node scripts/sim-builder.mjs 2026-08-03                    # first team, both engines A/B'd
-node scripts/sim-builder.mjs 2026-08-03 --engine period    # slot | period | both
+node scripts/sim-builder.mjs 2026-08-03                    # the first team
 node scripts/sim-builder.mjs 2026-08-03 --team "Site B"    # a specific team
 ```
 
-It bundles `utils/scheduleEngineV2/` with esbuild and calls both engines directly.
+It bundles `utils/scheduleEngineV2/` with esbuild and calls the engine directly.
 **It contains no scheduling logic of its own** — that is the entire point of its
-current shape.
+current shape. Because `prepare()` sorts its own inputs, the harness builds exactly
+the schedule the app would (checked row for row against a real build). Before Sep
+2026 it loaded rows unordered, and the engine breaks ties by order, so it disagreed
+with the app on 10+ people's days.
 
 > Until Aug 2026 this file held a hand-written *copy* of the algorithm. It
 > drifted, so engine changes were being judged against code that was never
@@ -45,24 +66,25 @@ It reads **one team**, matching how the app scopes a build.
 ### Reading the output
 
 ```
-assignments: 203 | on-clock 356.0h | assigned 356.0h | IDLE 0.0h
-distinct functions/person: {"1":33,"2":16} | employees with no work: 0
-UNMET 30.5h  |  OVER-target 62.8h
+===== Automated Schedule Builder =====
+assignments: 176 | on-clock 307.0h | assigned 306.8h | IDLE 0.3h
+distinct functions/person: {"1":23,"2":14,"3":5} | employees with no work: 0
+UNMET 20.3h  |  OVER-target 35.0h  |  break/lunch holes not counted: 30.3h
+  unmet by function: Help desk 8.0h, Runner 3.8h, Pick 3.5h, Projects 2.0h, speedcell 1.5h, RT-pick 1.5h
+  over by function:  RT-pick 8.3h, Locus 7.0h, X4 6.8h, Conveyor 6.5h, speedcell 2.8h, EM9 1.8h, Pick 1.5h, Help desk 0.5h
 FIXABLE unmet (a trained person was free and idle): 0.0h  <-- the engine's own misses
-BOUNCING: 21 of 164 stretches between breaks carry more than one function | people who switch mid-stretch: 15
-    e.g. Smith, Barbara 07:00-08:45: startup 07:00-08:00 > Pick 08:00-08:45
-  gaps: 40 | feasibility issues: 14 | things to fix: 0 | notes: 0
+BOUNCING: 11 of 164 stretches between breaks carry more than one function | people who switch mid-stretch: 11
+    e.g. Smith, Barbara 07:00-08:45: startup 07:00-08:00 > Locus 08:00-08:45
+  gaps: 14 | feasibility issues: 1 | things to fix: 0 | notes: 0
 ```
 
-With both engines selected (the default) it ends with a per-function A/B,
-`slot -> period`, listing only the functions whose unmet differs.
+(2026-09-03 on the dev data, Sep 2026.)
 
 - **IDLE** — on-clock hours nobody was given work for. Should be at or near zero.
 - **UNMET** — target headcount-hours not covered, counting only shortfalls the
-  floor cares about: a hole during a break/lunch window on a function not flagged
-  to stay covered through it is reported separately as **not counted**. What is
-  left is mostly *not* the engine's fault: targets outside shift hours, or simply
-  too few bodies.
+  floor cares about: a hole during a break or lunch window is reported separately
+  as **not counted**. What is left is mostly *not* the engine's fault: targets
+  outside shift hours, or simply too few bodies.
 - **FIXABLE** — the number that matters. Unmet demand at a moment when a trained
   person was free and unassigned. That is the engine genuinely missing something.
   **Non-zero fixable is a bug; a large UNMET with zero fixable is a short floor.**
@@ -71,8 +93,9 @@ With both engines selected (the default) it ends with a per-function A/B,
 - **distinct functions/person** — the readability of someone's day. Drifting
   toward 3-4 for everyone means the schedule got choppier.
 - **BOUNCING** — stretches between breaks (the free grid straight out of
-  `prepare()`) that carry more than one function. The period engine exists to keep
-  this small; on the slot engine it runs 13-14%.
+  `prepare()`) that carry more than one function: someone moved to a different job
+  mid-stretch. It runs 7-10% of stretches on the dev data (11-16 people a day); a
+  change that raises it makes the floor's day choppier.
 
 ### Judging an engine change
 
@@ -92,10 +115,16 @@ Validate training against the `employee_training` table as the DB trigger reads
 it, never against the engine's own notion of training — that cannot catch a
 training bug by construction.
 
-**"things to fix"** echoes the engine's `actions` list — the same items the review
-modal leads with. A non-zero count means a person must change something in the app
-(missing training, an unassigned shift, a stale target cell), not that the engine
-misbehaved.
+**"things to fix"** echoes the `actions` from `prepare()` and the engine — the same
+items the build-result window leads with. Each `FIX:` line ends with `[where]`, the
+page the window links to for it. A non-zero count means a person must change
+something in the app (missing training, an unassigned shift, a stale target cell),
+not that the engine misbehaved.
+
+To see a state of the build-result window that real data does not produce (a failed
+load, missing targets, a skipped required assignment), intercept the request in
+Playwright — `page.route('**/api/pto/**', (r) => r.abort())`, or `route.fulfill` with
+edited JSON — instead of breaking the database.
 
 ---
 
@@ -141,23 +170,37 @@ ships, it is yours to restart, and it cannot disturb the user:
 
 ```bash
 npm run build
-DATABASE_URL="postgresql://postgres:postgres@localhost:5433/scheduling" DATABASE_SSL=false JWT_SECRET="local-smoke-test-secret-at-least-32-chars-long" NODE_ENV=development PORT=3005 node .output/server/index.mjs &
-sleep 14                      # it applies migrations on boot; wait before hitting it
-curl -s http://localhost:3005/api/health
+curl -s http://localhost:3017/api/health    # must FAIL first: the port has to be free
+DATABASE_URL="postgresql://postgres:postgres@localhost:5433/scheduling" DATABASE_SSL=false JWT_SECRET="local-smoke-test-secret-at-least-32-chars-long" NODE_ENV=development PORT=3017 node .output/server/index.mjs &
+# Wait until setup is done: /api/health answers 503 "starting up" until then.
+curl -sf --retry 30 --retry-all-errors --retry-delay 1 http://localhost:3017/api/health
 
-node scripts/ui-smoke.mjs --base http://localhost:3005
+node scripts/ui-smoke.mjs --base http://localhost:3017
 ```
 
-Stop it when you are done (Windows):
+**Another Claude session may be working in this repo at the same time**, with its
+own preview server. If the port was already taken, the new server logs `EADDRINUSE`
+and exits, and your tests then quietly run against the other session's server. So
+check the port is free first, as above, and stop only **your** server, by its port:
 
 ```powershell
-Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-  Where-Object { $_.CommandLine -like '*server/index.mjs*' } |
-  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+Stop-Process -Id (Get-NetTCPConnection -LocalPort 3017 -State Listen).OwningProcess -Force
 ```
+
+Never stop servers by matching `server/index.mjs` on the command line: that also
+kills the other session's (it happened, Sep 2026). And rebuilding `.output` swaps
+the files under any server already running from it, so say so before rebuilding
+while another session is active.
 
 Rebuild and restart it after every code change — it serves the built output, so it
 will not hot-reload.
+
+**Anything about sign-in or cookies: test on the machine's LAN address too**
+(`http://10.x.x.x:3017`), not only `localhost`. Browsers exempt localhost from the
+rule that a `Secure` cookie needs HTTPS, so localhost tests passed for months while
+the second site, on plain http, could not stay signed in (Sep 2026). To test
+destructive or cross-team writes, run the preview against a throwaway copy of the
+dev database (`pg_dump` into a scratch Postgres), never against dev itself.
 
 ### One-off browser scripts for things the smoke test cannot answer
 

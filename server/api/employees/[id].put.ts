@@ -1,9 +1,10 @@
 import { query } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
 import { normalizeUpi, isUpiTaken } from '../../utils/upi'
+import { assertShiftOnTeam } from '../../utils/teamOwnership'
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getTeamFilter(user)
   const id = getRouterParam(event, 'id')
   const body = await readBody(event)
@@ -18,6 +19,7 @@ export default defineEventHandler(async (event) => {
   const shiftSent = sent('shift_id')
   const upiSent = sent('upi')
   const upi = upiSent ? normalizeUpi(body.upi) : null
+  if (shiftSent) await assertShiftOnTeam(shift_id, teamId)
 
   let sql = `UPDATE employees
      SET first_name = COALESCE($1, first_name),

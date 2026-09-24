@@ -5,13 +5,12 @@ A web-based scheduling application for distribution center operations. Built wit
 ## Features
 
 - **Daily Schedule Management** - Visual grid editor for employee assignments with 15-minute granularity
-- **Automated Schedule Builder** - Generates the day from staffing targets, training, shifts, required assignments, approved PTO and shift swaps. Deterministic (no LLM, no solver): 96 x 15-minute slots, a cost function over every candidate, pre-flight feasibility, per-gap explanations, and a business-priority matrix (`staffing_priority`) deciding which functions go short first. Targets are a minimum, so surplus labour is deployed (with per-function caps and overflow sinks) rather than parked. Two placement engines share the pipeline: the slot engine, and **Builder V2**, which keeps each person on one job for each stretch between breaks
-- **Training & Coverage Preview** - Heatmap on Create Schedule: spare trained people for every job, every hour, before you build
+- **Automated Schedule Builder** - Generates the day from staffing targets, training, shifts, required assignments, approved PTO and shift swaps. Deterministic (no LLM, no solver): 96 x 15-minute slots, a cost function over every candidate, pre-flight feasibility, per-gap explanations, and a business-priority matrix (`staffing_priority`) deciding which functions go short first. Targets are a minimum, so surplus labour is deployed (with per-function caps and overflow sinks) rather than parked. It asks before replacing a day that already has a schedule, and names any required assignment it could not place
+- **Training Matrix** - Team Setup tab: how many people trained on each job are on shift each hour, against a per-job training target (hours below it show red)
 - **Employee Overview** - Per-employee page: hours by function, PTO usage, attendance points (half or full, per date), rolling picking-error trend, and performance notes for reviews
 - **Change Log** - Read-only audit of every manual change to a person's record (request approvals/rejections/deletions, hand-entered time off, attendance points, notes, errors) with who did it — for Supervisors, on the PTO Calendar and the Employee Overview
 - **Staffing Targets** - Set target headcount per job function per hour in a grid UI
-- **Coverage Requirements** - By default a hole during a 15-minute break or lunch is not treated as a gap; flag the few job functions that must stay covered through them and the builder pulls cross-shift people onto them and flags what it cannot cover
-- **Employee Training Matrix** - Track which employees are trained for which job functions, with auto-save
+- **Employees & Training** - Track which employees are trained for which job functions, with auto-save
 - **Required Assignments** - Pin specific employees to specific functions for explicit time blocks (legacy AM/PM rows honoured by splitting at lunch)
 - **PTO Calendar** - Week/month calendar of approved time off, with per-day hours itemised by source (approved / call-in / manual) and an admin override workflow
 - **Schedule Requests** - Unified pipeline for PTO (full/partial), leave-early, leave-on-time, arrive-late and shift swaps, decided instantly by a rule engine (business-day notice, per-week limits, team PTO-hour caps by weekday, blocked dates)
@@ -86,7 +85,7 @@ npm run dev
 | `/login` | Login page |
 | `/schedule/tomorrow` | Create schedule (Copy, Automated Builder, or Manual) |
 | `/schedule/[date]` | View/edit schedule for a specific date |
-| `/details` | Team Setup: employees & training matrix (auto-saves), job functions, shifts, target hours (`?tab=`) |
+| `/details` | Team Setup: employees & training (auto-saves), Training Matrix (trained people per hour vs a target), job functions, shifts, target hours (`?tab=`) |
 | `/training` | Redirects to `/details?tab=employees` |
 | `/pto-calendar` | PTO calendar (week/month) + request approval workflow |
 | `/employee-overview` | One employee's hours, skills, attendance, review notes (`?employee=&period=`) |
@@ -101,9 +100,9 @@ scheduling-app-v2/
 ├── components/
 │   ├── audit/                # ChangeLogModal — the read-only change log
 │   ├── employee/             # Overview — the Employee Overview dashboard
-│   ├── schedule/             # Schedule grid, shift groups, assignment cards, coverage preview
+│   ├── schedule/             # Schedule grid, shift groups, assignment cards
 │   ├── schedule-requests/    # Request form modal (new request / check my requests) + result banner
-│   └── team/                 # EmployeesTraining — the Employees & Training tab of Team Setup
+│   └── team/                 # EmployeesTraining and TrainingMatrix — two Team Setup tabs
 ├── composables/              # Shared reactive logic
 │   ├── useScheduleBuilderV2.ts   # The schedule builder (drives utils/scheduleEngineV2/)
 │   ├── useAuth.ts                # JWT authentication
@@ -156,10 +155,10 @@ scheduling-app-v2/
 │   ├── ptoDisplay.ts         # Single source for reading/displaying a pto_days row
 │   ├── requestDisplay.ts     # Single source for labelling a schedule_requests row
 │   ├── localDate.ts          # "Today" as a local calendar date (never UTC)
-│   └── scheduleEngineV2/     # The schedule engine (types, slots, prepare, engine + periodEngine)
+│   └── scheduleEngineV2/     # The schedule engine (types, slots, prepare, engine)
 ├── sql-schema/
 │   ├── setup.sql             # Full database schema (applied once on empty DB)
-│   ├── migrations/           # 001–022 incremental migrations (applied on boot; no 009)
+│   ├── migrations/           # 001–023 incremental migrations (applied on boot; no 009)
 │   └── ...                   # Individual table schemas for reference
 ├── scripts/
 │   ├── seed-first-user.js    # Create initial admin account
@@ -171,7 +170,7 @@ scheduling-app-v2/
 ├── Dockerfile                # Multi-stage production build
 └── docs/                     # Documentation
     ├── CONTEXT.md            # Architecture, data model, auth, deployment
-    ├── SCHEDULE-BUILDER.md   # Both builder engines, in depth
+    ├── SCHEDULE-BUILDER.md   # The schedule builder, in depth
     ├── PTO-AND-REQUESTS.md   # PTO hours, request rules, availability
     ├── ROLES.md              # Roles, permissions matrix, team isolation
     ├── TESTING.md            # How to verify a change (four tiers, harnesses, fixtures)
@@ -190,7 +189,7 @@ Core tables:
 | `team_settings` | Per-team configuration (request-rule limits) |
 | `team_blocked_dates` | Dates that auto-reject PTO/leave-early requests |
 | `employees` | Employee records (name, shift, active status, UPI) |
-| `job_functions` | Job roles with colors, coverage flags, exclude-from-targets, headcount caps, staffing priority |
+| `job_functions` | Job roles with colors, headcount caps, surplus overflow, staffing priority, training target |
 | `employee_training` | Which employees are trained for which functions (junction table) |
 | `shifts` | Shift definitions with break/lunch times |
 | `schedule_assignments` | Daily employee-to-function assignments |
@@ -215,12 +214,12 @@ One deterministic pipeline (not an LLM, no solver) —
 [utils/scheduleEngineV2/](utils/scheduleEngineV2/), driven by
 [composables/useScheduleBuilderV2.ts](composables/useScheduleBuilderV2.ts):
 96 x 15-minute slots, cost-function placement, per-gap explanations, and a
-business-priority matrix — with two placement engines the Create Schedule page
-offers as two cards: the slot engine, and the period engine ("Builder V2") that
-keeps each person on one job per stretch between breaks.
+business-priority matrix, launched from the Automated Schedule Builder card on the
+Create Schedule page.
 
-> An earlier engine ("V1") was deleted in Aug 2026. The `V2` still in the file
-> names is history, not a choice — there is nothing to switch between.
+> Two earlier engines are gone: "V1" (deleted Aug 2026) and a "period engine", the
+> "Builder V2" card (removed Sep 2026). The `V2` still in the file names is history,
+> not a choice — there is nothing to switch between.
 
 **Per-hour `staffing_targets` are a minimum, not a cap** — once targets are met,
 surplus labor is deployed so workers aren't idle, and over-target staffing is

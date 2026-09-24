@@ -1,6 +1,13 @@
 import bcrypt from 'bcryptjs'
 import { query } from '../../utils/db'
-import { signToken, COOKIE_NAME, sessionMaxAge } from '../../utils/jwt'
+import { setSessionCookie } from '../../utils/jwt'
+
+// A real cost-12 bcrypt hash of a throwaway string, compared against when the
+// email is unknown so that answer takes as long as a wrong password. The old
+// placeholder was 62 characters; bcryptjs returns false at once for anything that
+// isn't a 60-character hash, so an unknown email answered in ~2 ms and a real one
+// in ~240 ms — which told anyone which emails have accounts.
+const DUMMY_HASH = '$2b$12$dyju293u16xpKym7fzhVE.HsuVLU7loE1vienwFnkJ9x2j6WaZXlC'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
@@ -35,11 +42,9 @@ export default defineEventHandler(async (event) => {
 
   const user = result.rows[0]
 
-  // Use constant-time comparison to prevent timing attacks.
   // Always run bcrypt even if user not found (with a dummy hash) to avoid
   // leaking whether the email exists via response timing differences.
-  const dummyHash = '$2b$12$invalidhashusedtopreventtimingattacksxxxxxxxxxxxxxxxxxx'
-  const hashToCompare = user?.password_hash ?? dummyHash
+  const hashToCompare = user?.password_hash ?? DUMMY_HASH
   const passwordValid = await bcrypt.compare(password, hashToCompare)
 
   if (!user || !passwordValid) {
@@ -53,17 +58,9 @@ export default defineEventHandler(async (event) => {
   // Update last_login timestamp
   await query('UPDATE user_profiles SET last_login = NOW() WHERE id = $1', [user.id])
 
-  // Sign JWT and set as HttpOnly cookie
+  // Sign JWT and set as HttpOnly cookie (8h idle normally; 30d for kiosk accounts)
   const { password_hash: _, ...userWithoutHash } = user
-  const token = signToken(userWithoutHash)
-
-  setCookie(event, COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: sessionMaxAge(userWithoutHash), // 8h normally; 30d for display/kiosk accounts
-    path: '/',
-  })
+  setSessionCookie(event, userWithoutHash)
 
   return { success: true, user: userWithoutHash }
 })

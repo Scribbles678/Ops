@@ -1,8 +1,9 @@
 import { query } from '../../utils/db'
-import { requireAuth, getWriteTeamId } from '../../utils/authorize'
+import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
+import { assertJobFunctionsOnTeam } from '../../utils/teamOwnership'
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const { items } = body as { items: Array<{ job_function_id: string; target_hours: number }> }
@@ -10,6 +11,8 @@ export default defineEventHandler(async (event) => {
   if (!Array.isArray(items) || items.length === 0) {
     throw createError({ statusCode: 400, message: 'items array is required and must not be empty' })
   }
+  // Only this team's job functions (the ids come from the request body).
+  await assertJobFunctionsOnTeam(items.map((i) => i?.job_function_id).filter(Boolean), teamId)
 
   for (const item of items) {
     const { job_function_id, target_hours } = item

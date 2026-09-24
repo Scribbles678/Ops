@@ -15,7 +15,7 @@ A distribution center scheduling application for managing employee work assignme
 | Styling | Tailwind CSS |
 | Server | Nitro (file-based API routes with method suffixes) |
 | Database | PostgreSQL 16 (direct `pg` library, no ORM) |
-| Auth | JWT (HttpOnly cookies, 8hr expiry; 30d self-renewing for display/kiosk accounts), bcryptjs passwords |
+| Auth | JWT (HttpOnly cookies; sessions slide — 8 h idle, 30 d for display/kiosk accounts; the account is re-read from the DB on every API call), bcryptjs passwords |
 | Email | Nodemailer (SMTP) for password resets (optional) |
 | Export | xlsx for Excel export |
 | Deployment | Docker Compose / Rancher (Kubernetes) / Netlify |
@@ -35,9 +35,10 @@ scheduling-app-v2/
 │   ├── training.vue           # REDIRECT only → /details?tab=employees (the matrix moved
 │   │                          #   into Team Setup, Sep 2026; kept so bookmarks work)
 │   ├── details.vue            # "Team Setup" (renamed from Details, Sep 2026). Tabs, each
-│   │                          #   addressable as ?tab=: employees | job-functions | shifts |
-│   │                          #   target-hours. Job Functions / Shifts / Target Hours editors
-│   │                          #   are inline; Employees & Training is components/team/
+│   │                          #   addressable as ?tab=: employees | training-matrix |
+│   │                          #   job-functions | shifts | target-hours. Job Functions / Shifts /
+│   │                          #   Target Hours editors are inline; Employees & Training and
+│   │                          #   Training Matrix are in components/team/
 │   ├── display.vue            # Read-only wall/iPad board, auto-refresh every 2 min.
 │   │                          #   Sized for DISTANCE reading, not a desktop dashboard.
 │   │                          #   Chip text colour comes from measured WCAG contrast
@@ -48,9 +49,10 @@ scheduling-app-v2/
 │   │                          #   period live in ?employee=&period= so a view is linkable
 │   ├── schedule/
 │   │   ├── [date].vue         # Schedule editor with 15-min grid, dashboards, KPI strip
-│   │   └── tomorrow.vue       # Create schedule: 5 cards (copy today, Automated Builder,
-│   │                          #   Automated Builder V2, manual, Rules & Targets)
-│   │                          #   + Training & Coverage Preview
+│   │   └── tomorrow.vue       # Create schedule: 4 cards (copy today, Automated Builder,
+│   │                          #   manual, Rules & Targets). Build and copy ask before
+│   │                          #   replacing a scheduled day. (A dated coverage preview sat
+│   │                          #   under the cards until Sep 2026; removed)
 │   └── admin/
 │       └── business-rules.vue # Staffing targets grid (headcount per job function per hour).
 │                          #   Hour columns are derived from the team's ACTIVE SHIFTS,
@@ -59,8 +61,16 @@ scheduling-app-v2/
 │                              # NOTE: users.vue and cleanup.vue were DELETED. User
 │                              #   management lives inline in settings.vue; the
 │                              #   Database Cleanup feature was removed (migration 014).
+├── plugins/
+│   └── session.client.ts      # Any API 401 → "session ended" modal; reloads other tabs
+│                              #   when someone else signs in/out or the team changes
 ├── components/
+│   ├── SessionEndedModal.vue  # "Your session ended — sign in again" over the current page
 │   ├── team/
+│   │   ├── TrainingMatrix.vue        # Training Matrix tab of Team Setup: per job and hour, how
+│   │   │                             #   many trained people are on shift (regular shifts, no
+│   │   │                             #   date), against job_functions.training_target. Target
+│   │   │                             #   boxes save as you go (PUT /api/job-functions/:id)
 │   │   └── EmployeesTraining.vue     # Employees & Training tab of Team Setup — the old
 │   │                                 #   /training page moved here whole (auto-saving matrix,
 │   │                                 #   add/edit employee, shift per employee, Overview button).
@@ -74,7 +84,6 @@ scheduling-app-v2/
 │   │                                 #   until Sep 2026 — every old button now links there
 │   ├── schedule/
 │   │   ├── AssignmentModal.vue       # Create/edit assignment with validation
-│   │   ├── CoveragePreview.vue       # Pre-build coverage grid on Create Schedule
 │   │   ├── HorizontalSchedule.vue    # Horizontal timeline view
 │   │   ├── LaborHoursPanel.vue       # Scheduled vs required hours per job function
 │   │   ├── ScheduleGrid15Min.vue     # Dense 15-min grid editor (rows=employees, cols=time)
@@ -99,17 +108,15 @@ scheduling-app-v2/
 │   ├── useTeamSettings.ts         # Per-team settings (request-rule limits)
 │   ├── useTeamBlockedDates.ts     # Per-team blocked dates for request auto-rejection
 │   └── useScheduleBuilderV2.ts    # THE schedule builder — drives utils/scheduleEngineV2/
-│                                 #   with an engine choice: 'slot' or 'period'.
-│                                 #   (a V1 engine was deleted Aug 2026; the "V2"
-│                                 #    in the FILE name is history — the UI's "V2"
-│                                 #    card is the period engine)
+│                                 #   (the "V2" in the name is history: a V1 engine was
+│                                 #    deleted Aug 2026, a period engine Sep 2026)
 ├── server/
 │   ├── plugins/
 │   │   └── bootstrap.ts          # On-boot self-setup: schema + migrations + first admin
 │   ├── api/
 │   │   ├── auth/              # login, logout, me (get/put), change-password, forgot/reset-password
 │   │   ├── schedule/          # [date].get/delete, assignments CRUD, batch, copy, replace,
-│   │   │                      #   export, coverage-preview
+│   │   │                      #   export (coverage-preview was removed with the dated preview)
 │   │   │                      #   copy = transactional REPLACE of the target day (like
 │   │   │                      #   replace.post.ts). It used to append, so it failed on any
 │   │   │                      #   day that already had a schedule and left a half-copied day.
@@ -143,7 +150,9 @@ scheduling-app-v2/
 │   ├── middleware/
 │   │   ├── auth.ts            # Reads JWT cookie, populates event.context.user
 │   │   ├── cookie-security.ts # Security response headers
-│   │   └── rate-limit.ts      # Per-IP rate limiting (200/min default, stricter for auth)
+│   │   └── 1.rate-limit.ts    # Per-IP rate limiting, one counter per limit (200/min default;
+│   │                          #   sign-in 30/min; forgot/reset 10/h; create user 60/h). The "1."
+│   │                          #   makes it run before auth.ts, so floods never reach the DB
 │   └── utils/
 │       ├── db.ts              # PostgreSQL pool (singleton), query(), transaction()
 │       ├── jwt.ts             # signToken (8hr; 30d for display users), verifyToken, sessionMaxAge, COOKIE_NAME
@@ -168,20 +177,18 @@ scheduling-app-v2/
 │   ├── localDate.ts           # SINGLE SOURCE for "today" as YYYY-MM-DD (local / named TZ).
 │   │                          #   Never toISOString().slice(0,10): that is UTC and names
 │   │                          #   tomorrow from 7pm Central — Create Schedule did this
+│   ├── shiftHours.ts          # SINGLE SOURCE for which clock hours a shift covers (any part
+│   │                          #   of the hour). Staffing Targets "On shift" + Training Matrix
 │   └── scheduleEngineV2/      # THE schedule engine — pure, DB-free, unit-testable
-│       ├── types.ts           #   constants + weights (ENGINE_MIN 30 vs DB_MIN 15,
-│       │                      #   PERIOD_MIN_STINT 45)
+│       ├── types.ts           #   constants + weights (ENGINE_MIN 30 vs DB_MIN 15)
 │       ├── slots.ts           #   96-slot time helpers
-│       ├── prepare.ts         #   Phase A — DB rows -> slot model
-│       ├── engine.ts          #   Slot engine (Builder card) + the SHARED phases:
-│       │                      #   pins, commit, merge, gap explanation, stats
-│       └── periodEngine.ts    #   Period engine (Builder V2 card): one function per
-│                              #   stretch between breaks; imports the shared phases
+│       ├── prepare.ts         #   Phase A — DB rows -> slot model, required pins
+│       └── engine.ts          #   Phases B-H: pins, coverage, surplus, merge, gaps
 ├── types/
 │   └── database.types.ts      # TypeScript DB types (skeleton)
 ├── sql-schema/                # PostgreSQL table definitions + triggers + migrations
 │   ├── setup.sql              # Full schema bootstrap (applied once on empty DB)
-│   └── migrations/            # 001–022 incremental migrations (idempotent; no 009 — deleted)
+│   └── migrations/            # 001–023 incremental migrations (idempotent; no 009 — deleted)
 ├── scripts/
 │   ├── seed-first-user.js     # Creates initial admin user
 │   ├── seed-test-data.js      # Seeds a 50-person demo team. LOCAL ONLY — refuses a
@@ -222,7 +229,7 @@ teams (multi-tenant root)
   │     ├── schedule_requests (unified: pto_full_day, pto_partial, leave_early, leave_on_time, arrive_late, shift_swap)
   │     └── shift_swaps (original_shift ↔ swapped_shift)
   ├── shifts (with break/lunch times)
-  ├── job_functions (color, productivity rate, sort order, coverage flags)
+  ├── job_functions (color, sort order, builder settings)
   ├── schedule_assignments (employee + job_function + shift + date + time range)
   ├── staffing_targets (headcount per job function per hour — drives Automated Builder)
   ├── daily_targets (per date per job function)
@@ -243,7 +250,7 @@ audit_log (→ user_profiles actor, employees; the change log — history outliv
 | **user_profiles** | email, username, password_hash, full_name, team_id, is_super_admin, is_admin (Supervisor), **is_team_lead** (migration 021), is_display_user (Kiosk), is_active, last_login, **employee_id** (optional FK to employees). Exactly one role flag per account — see `utils/roles.ts` |
 | **password_reset_tokens** | user_id, token_hash, expires_at, used_at (self-service reset) |
 | **employees** | first_name, last_name, is_active, shift_id (FK), **upi** (digits, unique per team, optional — migration 020; the kiosk "Check my requests" gate), team_id |
-| **job_functions** | name, color_code (#hex), productivity_rate, unit_of_measure, custom_unit, sort_order, **lunch_coverage_required**, **break_coverage_required**, **exclude_from_targets**, **max_headcount** (per-hour ceiling for the builder, NULL=unlimited), **surplus_overflow** (preferred surplus sink), **staffing_priority** (1=fill first … 5=drop first, default 3; **V2 builder only**), team_id |
+| **job_functions** | name, color_code (#hex), sort_order, is_active, **max_headcount** (most people on it at once for the builder, NULL=unlimited), **surplus_overflow** (preferred surplus sink), **staffing_priority** (1=fill first … 5=drop first, default 3), **training_target** (Training Matrix goal, NULL=none; migration 023; not read by the builder), team_id. Off the form since Sep 2026 and read by nothing, columns kept: productivity_rate, unit_of_measure, custom_unit, exclude_from_targets, lunch_coverage_required, break_coverage_required |
 | **shifts** | name, start/end time, break_1/break_2/lunch start/end times, is_active, team_id |
 | **schedule_assignments** | employee_id, job_function_id, shift_id, schedule_date, assignment_order, start_time, end_time, team_id |
 | **employee_training** | employee_id, job_function_id (junction; unique pair) |
@@ -284,8 +291,9 @@ audit_log (→ user_profiles actor, employees; the change log — history outliv
 ## Authentication & Authorization
 
 ### Auth Flow
-1. User logs in via `/login` → POST `/api/auth/login` → constant-time bcrypt verify → `last_login` updated → JWT set as HttpOnly cookie (`sameSite=strict`, `secure` in production). Expiry: **8hr** normally, **30d** for display/kiosk accounts (`sessionMaxAge()` / `signToken` key off `is_display_user`). The `/display` page slides the session by POSTing `/api/auth/refresh` on every data refresh, so a 24/7 kiosk never logs out; it also reloads + re-checks the date on visibility/focus regain (wake from sleep) and rolls over at midnight.
-2. Every server request → `server/middleware/auth.ts` reads the cookie → verifies JWT → populates `event.context.user`
+1. User logs in via `/login` → POST `/api/auth/login` → bcrypt verify (an unknown email is compared against a real dummy hash, so both take the same time) → `last_login` updated → JWT set as HttpOnly cookie by `setSessionCookie()` (`sameSite=strict`; `secure` exactly when the request arrived over HTTPS, directly or per `X-Forwarded-Proto`). The client then calls `/api/auth/me` to confirm the browser kept the cookie before treating it as a sign-in. Lifetime: **8 h idle** normally, **30 d** for display/kiosk accounts. The `/display` page also POSTs `/api/auth/refresh` on every data refresh; it reloads + re-checks the date on visibility/focus regain (wake from sleep) and rolls over at midnight.
+2. Every `/api` request → `server/middleware/auth.ts` reads the cookie → verifies the JWT → **loads the account from `user_profiles`** (team, role flags, `is_active`) → populates `event.context.user`, or leaves it empty for a deleted/inactive account. A token older than 10 minutes is re-issued on use (sliding session). Until Sep 2026 the claims came from the token: a deactivated or moved account kept its old access for up to 8 hours, and a kiosk forever. The cookie used to be `secure` whenever `NODE_ENV` was production — always, in a build — so a site on plain `http://` "signed in" and then got 401 on everything.
+   - **Any 401 in the browser** → `plugins/session.client.ts` raises `components/SessionEndedModal.vue` ("Your session ended — sign in again") over the current page. The same person signing back in keeps the page (unsaved edits too); a different person or team reloads it. On `/display` only the kiosk account (or whoever was signed in) is accepted. Sign-in, sign-out and Change Team are broadcast to the browser's other tabs, which reload if the person or team changed.
 3. Client middleware (`middleware/auth.global.ts`) redirects unauthenticated users to `/login`. **Display-only (kiosk) users are redirected to `/display` on login and locked there** — the middleware bounces them back to `/display` from any other route.
 4. Public routes: `/login`, `/display`, `/reset-password`
 
@@ -311,7 +319,7 @@ See `ROLES.md` for the full permission matrix.
 - **Reads** use `getTeamFilter(user)` → **`user.team_id` for everyone, super admins included.** API queries append `WHERE team_id = $X`.
 - **Install-wide reads** use `readsAllTeams(user)` — an explicit, named opt-out used only where a screen is genuinely cross-team (user management). Getting an unscoped read any other way is a bug.
 - **Writes** use `getWriteTeamId(user)` → always the user's own `team_id`, **including super admins**. A new record is stamped with the creating user's team so the rest of that team can see it.
-  - Reads and writes now agree: both use the caller's team. **Until Aug 2026 a super admin's reads spanned every team while their saves landed in one**, and the Automated Builder is where that bit — it read every team's employees, training and targets, then wrote the result into the super admin's own team, putting another site's people on this site's board. A super admin switches team in **Settings → Change Team**, which validates the team, updates the profile AND re-issues the session token (the team is carried in the signed JWT, so updating only the database row left the old team in the cookie until the next login).
+  - Reads and writes now agree: both use the caller's team. **Until Aug 2026 a super admin's reads spanned every team while their saves landed in one**, and the Automated Builder is where that bit — it read every team's employees, training and targets, then wrote the result into the super admin's own team, putting another site's people on this site's board. A super admin switches team in **Settings → Change Team**, which validates the team, updates the profile, re-issues the session cookie and reloads the page and the browser's other tabs (the team is read from the database on every request since Sep 2026; before that it lived in the token, and a Settings page left open kept the old team's Request Rules on screen, which Save then copied into the new team).
   - `PUT /api/auth/me` is a **tenant boundary**, not a profile preference — it is admin/super-admin only. It had no role check at all, so any account, including a kiosk login, could move itself into another team.
   - **Never stamp writes with `getTeamFilter`** — use `getWriteTeamId`. Both now return the caller's team, and **both throw 403 when the account has no team**: reads fail closed (a null filter would have meant "every team") and writes fail rather than stamping `team_id = NULL` and creating a fresh orphan. A team-less account can still sign in and read `/api/auth/me` and `/api/teams`, so a super admin can assign it a team — it is not locked out of the app, only out of data.
   - **Every account must have a team.** The create-user form requires one and `POST /api/admin/users/create` rejects a request without one (validating the team exists). Only a **super admin** may change a team — their own via `PUT /api/auth/me`, anyone's via user management.
@@ -333,24 +341,35 @@ See `ROLES.md` for the full permission matrix.
 ### Meter Job Functions
 "Meter" is a special job function category. Individual meters are named "Meter 1", "Meter 2", etc. Training on the parent "Meter" function qualifies an employee for any "Meter N" assignment. The Automated Builder and the `validate_assignment_training` DB trigger both support this parent-child relationship via name pattern matching (`/^Meter [0-9]+$/`), scoped to the function's `team_id`.
 
-### Coverage Requirements
-Job functions can be flagged `lunch_coverage_required` and/or `break_coverage_required` (Team Setup → Job Functions → Edit: "Keep covered during 15-minute breaks" / "Keep covered through lunch"). **By default the builder does not treat a hole during a break or lunch window as a gap** — the floor does not expect every function staffed through a 15-minute break. For a flagged function those shortfalls count, closing one earns an extra reward, and one that remains is reported as a thing to fix. Wired up Sep 2026; the columns existed since migration 006 but nothing read them. Detail in [SCHEDULE-BUILDER.md](./SCHEDULE-BUILDER.md).
+### Training Matrix (Team Setup)
+For each active job and each hour covered by an active shift: how many people trained on
+that job are on shift then, from everyone's **regular** shift (`employees.shift_id`), so
+time off, breaks and swaps don't come into it. It answers "is our training deep enough?",
+not "can we cover Tuesday?" (a build's result window answers that). Each job has a
+**training target** (`job_functions.training_target`, typed into the matrix): the fewest
+trained people wanted on shift in any hour the job is worked. Hours below it show red.
+An hour counts as "worked" when the job has a staffing target then; a job with no
+staffing targets at all (TL, coordinator) is checked in every hour. `Meter N` rows are
+left out as in the Staffing Targets grid. The hour rule is `utils/shiftHours.ts`, shared
+with that grid's "On shift" row. Informational only: the builder never reads it.
+It replaced a dated coverage preview (spare trained people after time off and breaks for
+one day, on Create Schedule) in Sep 2026.
 
-### Exclude From Targets
-Job functions flagged `exclude_from_targets` are hidden from the staffing-targets grid (used for functions that shouldn't be driven by per-hour headcount demand).
+### Breaks and lunch
+**The builder does not treat a hole during a break or lunch window as a gap** — the floor does not expect every function staffed through a 15-minute break. The per-job "Keep covered" flags (`lunch_coverage_required` / `break_coverage_required`) and `exclude_from_targets` were taken off the Edit Job Function form in Sep 2026, because none of them changed what the builder did, and nothing reads those columns now. Detail in [SCHEDULE-BUILDER.md](./SCHEDULE-BUILDER.md).
 
 ### Automated Schedule Builder
 
-One pipeline in `utils/scheduleEngineV2/` (pure, DB-free) driven by
-`composables/useScheduleBuilderV2.ts`, with two placement engines the Create
-Schedule page offers as two cards: the **slot engine** (15-minute runs) and the
-**period engine** ("Builder V2": one function per stretch between breaks, added
-Sep 2026 because the floor was being bounced between jobs). Deterministic — no
-LLM, no solver. Treats per-hour `staffing_targets` as a **MINIMUM, not a cap**,
-and writes via `POST /api/schedule/replace`.
+One engine in `utils/scheduleEngineV2/` (pure, DB-free) driven by
+`composables/useScheduleBuilderV2.ts` from the Create Schedule page's **Automated
+Schedule Builder** card. Deterministic — no LLM, no solver. Treats per-hour
+`staffing_targets` as a **MINIMUM, not a cap**, and writes via
+`POST /api/schedule/replace`, asking first when the date already has a schedule.
 
-A second engine ("V1", `composables/useAIScheduleBuilder.ts`) was **deleted in
-Aug 2026** after the team lead confirmed this one schedules better.
+Two earlier engines are gone: "V1" (`composables/useAIScheduleBuilder.ts`),
+**deleted Aug 2026** after the team lead confirmed this one schedules better, and a
+"period engine" (the "Builder V2" card), **removed Sep 2026** because it let
+high-priority functions go short.
 
 **→ How to validate an engine change: [TESTING.md](./TESTING.md).**
 
@@ -400,6 +419,21 @@ The app is **self-bootstrapping** (`server/plugins/bootstrap.ts`): on every cont
 
 This means **no manual SQL on deploy or update** — new migrations ship in the image and apply on next boot. See `RANCHER-DEPLOYMENT.md` for the full guide.
 
+**Nitro does not wait for this plugin** — the server takes requests while it runs. So
+the plugin first **waits for the database** (retrying until it answers — after a node
+drain the app pod usually starts first), and until setup finishes every `/api/*` call
+gets a **503 "starting up"** (`server/middleware/0.startup.ts`, state in
+`server/utils/startup.ts`). If setup fails in a built app, the process **exits** so the
+pod restarts and the failure shows as a crashloop; under `npm run dev` it stays up and
+the 503 quotes the error. `/api/health` is 503 until setup is done, and reports
+`"tables": "missing"` (still 200 — see `RANCHER-DEPLOYMENT.md`) if the database is
+emptied under a running app.
+
+Until Sep 2026 none of this existed: a failed first connection was logged as an
+unhandled rejection and the app kept serving a database with no tables —
+`relation "pto_days" does not exist` on every kiosk refresh — until someone restarted it.
+The kiosk (`display.vue`) now shows a banner when a refresh fails, instead of going blank.
+
 ### Migrations (`sql-schema/migrations/`)
 | File | Adds |
 |------|------|
@@ -425,6 +459,7 @@ This means **no manual SQL on deploy or update** — new migrations ship in the 
 | 020-add-employee-upi | `employees.upi` (digits only, CHECK; unique per team via a partial index). Typed at the kiosk to look up one's own requests. Additive; multi-team safe. |
 | 022-add-audit-log | `audit_log` table — the change log: who approved / rejected / deleted a request, added or removed a PTO day, attendance point, note or error, with a plain-language summary and before/after snapshots. Written in the same transaction as the change; no update/delete route. Additive; multi-team safe. |
 | 021-add-team-lead-role | `user_profiles.is_team_lead` — the Team Lead / Coordinator role flag. No data change and no exclusivity CHECK on purpose: existing accounts keep their flags, so nobody is locked out on deploy; the user endpoints enforce one-role-per-account from here on. |
+| 023-add-job-function-training-target | `job_functions.training_target` (integer, nullable, CHECK ≥ 0) — the Training Matrix goal: the fewest trained people wanted on shift in any hour the job is worked. Informational; the builder never reads it. NULL for every existing row, so it changes nothing on deploy. Additive; multi-team safe. |
 
 ---
 
@@ -437,7 +472,7 @@ This means **no manual SQL on deploy or update** — new migrations ship in the 
 | `DATABASE_SSL_REJECT_UNAUTHORIZED` | no | `false` to allow self-signed DB certs |
 | `JWT_SECRET` | yes | JWT signing secret (must be ≥ 32 chars) |
 | `NODE_ENV` | recommended | `production` enables `secure` cookies |
-| `APP_URL` | no | Base URL for password reset links |
+| `APP_URL` | no | Base URL for password reset links, read at run time (e.g. `https://scheduling.yourcompany.com`). Before Sep 2026 only the build-time value counted, so reset emails linked to `http://localhost:3000` |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | no | First-boot admin seed (only when `user_profiles` is empty) |
 | `SMTP_HOST/PORT/USER/PASS/FROM` | no | Email sending configuration (password resets) |
 

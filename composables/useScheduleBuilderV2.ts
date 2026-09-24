@@ -1,26 +1,17 @@
 /**
- * Schedule Builder V2 (Beta) — composable wrapper.
+ * The Automated Schedule Builder — composable wrapper.
  *
- * Fetches the same inputs V1 does, runs the pure slot engine in
- * utils/scheduleEngineV2/, and returns V1's EXACT output contract so the existing
- * review modal and the transactional apply path are reused unchanged.
+ * Fetches the team's inputs, runs the pure engine in utils/scheduleEngineV2/
+ * (prepare() then runEngine()), and returns the schedule plus what the review
+ * modal shows. applyV2Schedule() writes it through the transactional replace.
  *
- * V1 is not touched. Switching engines is a matter of which composable the page
- * calls, and reverting is removing a button.
+ * The "V2" in these names is history: an hourly V1 engine was deleted in Aug
+ * 2026, and a second "period" engine was tried in Sep 2026 and removed.
  */
 import { prepare } from '~/utils/scheduleEngineV2/prepare'
 import { runEngine } from '~/utils/scheduleEngineV2/engine'
-import { runPeriodEngine } from '~/utils/scheduleEngineV2/periodEngine'
 import { slotToTime } from '~/utils/scheduleEngineV2/slots'
-import type { EngineResult } from '~/utils/scheduleEngineV2/types'
-
-/**
- * Which placement strategy to run. Both share prepare(), pins, weights, gap
- * explanations and the write path; they differ only in how they place people.
- *  - 'slot'   — the original 15-minute-run engine (the "Automated Schedule Builder" card)
- *  - 'period' — one function per stretch between breaks (the "... Builder V2" card)
- */
-export type BuilderEngine = 'slot' | 'period'
+import type { EngineAction, EngineGap, EngineResult, GapCause } from '~/utils/scheduleEngineV2/types'
 
 export interface V2ScheduleAssignment {
   employee_id: string
@@ -32,30 +23,120 @@ export interface V2ScheduleAssignment {
   shift_id?: string | null
 }
 
+/** One "Still short" row: a job, why it went short, and when. */
+export interface ShortRow {
+  functionName: string
+  cause: GapCause
+  /** Headcount-hours short, every 15 minutes added up. */
+  hours: number
+  /** "08:00–08:45", or "16:30–18:00 (2 people)" where more than one person was missing. */
+  windows: string[]
+}
+
+/**
+ * Everything the build-result window shows, shaped here so the page only renders.
+ * An empty `schedule` means nothing was built, and `fixes` then says why.
+ */
+export interface BuildOutcome {
+  schedule: V2ScheduleAssignment[]
+  /** Things a person must fix, each with where to fix it. */
+  fixes: EngineAction[]
+  /** Informational leftovers. Rare. */
+  notes: string[]
+  /** People scheduled, off all day, and scheduled but given no work. */
+  people: number
+  offAllDay: number
+  noWork: number
+  /** Gaps a person can act on (priority, training, a cap), one row per job and reason. */
+  short: ShortRow[]
+  /** Headcount-hours no schedule could cover — more work than people on shift — and when. */
+  unavoidable: { hours: number; windows: string[] }
+  /** Headcount-hours over target per job, most first. */
+  extra: { functionName: string; hours: number }[]
+}
+
+const notBuilt = (fixes: EngineAction[]): BuildOutcome => ({
+  schedule: [],
+  fixes,
+  notes: [],
+  people: 0,
+  offAllDay: 0,
+  noWork: 0,
+  short: [],
+  unavoidable: { hours: 0, windows: [] },
+  extra: [],
+})
+
+/** "employees", "employees and shifts", "employees, shifts and time off". */
+const listOf = (items: string[]): string =>
+  items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
+
+/** Merge overlapping or touching gaps into "HH:MM–HH:MM" windows, earliest first. */
+const mergedWindows = (gaps: EngineGap[]): string[] => {
+  const spans = gaps.map((g) => [g.startSlot, g.endSlot] as [number, number]).sort((a, b) => a[0] - b[0])
+  const merged: [number, number][] = []
+  for (const [start, end] of spans) {
+    const last = merged[merged.length - 1]
+    if (last && start <= last[1]) last[1] = Math.max(last[1], end)
+    else merged.push([start, end])
+  }
+  return merged.map(([start, end]) => `${slotToTime(start)}–${slotToTime(end)}`)
+}
+
 export const useScheduleBuilderV2 = () => {
-  const { fetchEmployees, getAllEmployeeTraining } = useEmployees()
-  const { jobFunctions, fetchJobFunctions } = useJobFunctions()
+  const { fetchEmployees, error: employeesError } = useEmployees()
+  const { jobFunctions, fetchJobFunctions, error: jobFunctionsError } = useJobFunctions()
   // `error` carries the server's real failure message; replaceScheduleForDate only
   // returns null, so without this a DB rejection surfaces as "Failed to save".
   const { fetchShifts, replaceScheduleForDate, error: scheduleError } = useSchedule()
-  const { fetchPreferredAssignments, getPreferredAssignmentsMap } = usePreferredAssignments()
-  const { fetchTargets: fetchStaffingTargets } = useStaffingTargets()
+  const { fetchPreferredAssignments, getPreferredAssignmentsMap, error: preferredError } = usePreferredAssignments()
+  const { fetchTargets: fetchStaffingTargets, error: targetsError } = useStaffingTargets()
 
   /** Last engine result, so the UI can show V2-only diagnostics. */
   const lastResult = ref<EngineResult | null>(null)
 
-  const generateV2Schedule = async (scheduleDate: string = '', engine: BuilderEngine = 'slot') => {
-    const warnings: string[] = []
-    const errors: string[] = []
-
+  const generateV2Schedule = async (scheduleDate: string = ''): Promise<BuildOutcome> => {
     try {
-      const [employeesData, jobFunctionsData, shiftsData, targetsData] = await Promise.all([
-        fetchEmployees(),
-        fetchJobFunctions(),
-        fetchShifts(),
-        fetchStaffingTargets(),
-      ])
-      await fetchPreferredAssignments()
+      // Training, shift swaps and time off are fetched directly. The shared loaders
+      // turn a failed request into an empty list, and an empty list builds the day
+      // as if nobody were trained, swapped or off — so a failure must stop the build.
+      const notLoaded: string[] = []
+      const fetchOrNote = async <T>(url: string, what: string): Promise<T | null> => {
+        try {
+          return (await $fetch(url)) as T
+        } catch {
+          notLoaded.push(what)
+          return null
+        }
+      }
+      const [employeesData, jobFunctionsData, shiftsData, targetsData, , trainingRows, swaps, ptoDays] =
+        await Promise.all([
+          fetchEmployees(),
+          fetchJobFunctions(),
+          fetchShifts(),
+          fetchStaffingTargets(),
+          fetchPreferredAssignments(),
+          fetchOrNote<{ employee_id: string; job_function_id: string }[]>('/api/employees/training', 'training'),
+          scheduleDate ? fetchOrNote<any[]>(`/api/shift-swaps/${scheduleDate}`, 'shift swaps') : [],
+          scheduleDate ? fetchOrNote<any[]>(`/api/pto/${scheduleDate}`, 'time off') : [],
+        ])
+      // The same for the shared loaders: they record the failure in their `error`.
+      // Unchecked, a failure read as "No active shifts found", or quietly built the
+      // day without anybody's required assignments.
+      notLoaded.unshift(
+        ...[
+          employeesError.value && 'employees',
+          jobFunctionsError.value && 'job functions',
+          scheduleError.value && 'shifts',
+          targetsError.value && 'staffing targets',
+          preferredError.value && 'required assignments',
+        ].filter((what): what is string => !!what)
+      )
+      if (notLoaded.length) {
+        return notBuilt([
+          { message: `Couldn't load ${listOf(notLoaded)}, so nothing was built. Try again; if it keeps happening, sign out and back in.` },
+        ])
+      }
 
       const employees = Array.isArray(employeesData) ? employeesData : []
       const jobFunctionsList = Array.isArray(jobFunctionsData) ? jobFunctionsData : []
@@ -63,57 +144,28 @@ export const useScheduleBuilderV2 = () => {
       const staffingTargets = Array.isArray(targetsData) ? targetsData : []
 
       const activeEmployees = employees.filter((e: any) => e && e.is_active !== false)
-      if (!activeEmployees.length) errors.push('No active employees found.')
-      if (!shifts.filter((s: any) => s && s.is_active !== false).length) errors.push('No active shifts found.')
-      if (!jobFunctionsList.length) errors.push('No job functions configured.')
-      if (!staffingTargets.length) {
-        errors.push('No staffing targets configured. Please set up staffing targets in the admin page.')
-      }
-      if (errors.length) {
-        return { schedule: [], warnings, actions: [], errors, gaps: [], overTarget: [], feasibility: [], stats: null }
-      }
+      const setup: EngineAction[] = []
+      if (!activeEmployees.length) setup.push({ message: 'There are no active employees.', fix: 'employees' })
+      if (!shifts.some((s: any) => s && s.is_active !== false)) setup.push({ message: 'There are no active shifts.', fix: 'shifts' })
+      if (!jobFunctionsList.length) setup.push({ message: 'There are no job functions.', fix: 'job-functions' })
+      if (!staffingTargets.length) setup.push({ message: 'No staffing targets are set.', fix: 'rules-and-targets' })
+      if (setup.length) return notBuilt(setup)
 
-      let training: Record<string, string[]> = {}
-      try {
-        training = (await getAllEmployeeTraining(activeEmployees.map((e: any) => e.id))) || {}
-      } catch (e: any) {
-        errors.push(`Error loading employee training: ${e?.message || 'Unknown error'}`)
-        return { schedule: [], warnings, actions: [], errors, gaps: [], overTarget: [], feasibility: [], stats: null }
-      }
+      const training: Record<string, string[]> = {}
+      for (const r of trainingRows ?? []) (training[r.employee_id] ??= []).push(r.job_function_id)
 
       // Shift swaps for the date. A swap replaces the employee's shift for that
       // day only, and the builder must both SCHEDULE against it and STAMP it —
       // the display groups swapped people by the swapped shift, so an assignment
       // carrying the original shift is dropped from the board.
       const swappedShiftByEmployee: Record<string, string | null> = {}
-      if (scheduleDate) {
-        try {
-          const swaps = await $fetch<any[]>(`/api/shift-swaps/${scheduleDate}`)
-          if (Array.isArray(swaps)) {
-            for (const sw of swaps) {
-              if (sw?.employee_id && sw?.swapped_shift_id) {
-                swappedShiftByEmployee[sw.employee_id] = sw.swapped_shift_id
-              }
-            }
-          }
-        } catch (e: any) {
-          warnings.push(`Could not load shift swaps: ${e?.message || 'Unknown error'}`)
-        }
+      for (const sw of swaps ?? []) {
+        if (sw?.employee_id && sw?.swapped_shift_id) swappedShiftByEmployee[sw.employee_id] = sw.swapped_shift_id
       }
 
-      let ptoByEmployee: Record<string, any> = {}
-      if (scheduleDate) {
-        try {
-          const ptoDays = await $fetch<any[]>(`/api/pto/${scheduleDate}`)
-          if (Array.isArray(ptoDays)) {
-            for (const p of ptoDays) if (p?.employee_id) ptoByEmployee[p.employee_id] = p
-          }
-        } catch (e: any) {
-          warnings.push(`Could not load PTO data: ${e?.message || 'Unknown error'}`)
-        }
-      }
-
-      const actions: string[] = []
+      // Every absence per person — someone can arrive late AND leave early.
+      const ptoByEmployee: Record<string, any[]> = {}
+      for (const p of ptoDays ?? []) if (p?.employee_id) (ptoByEmployee[p.employee_id] ??= []).push(p)
 
       const prepared = prepare({
         employees: activeEmployees,
@@ -125,8 +177,6 @@ export const useScheduleBuilderV2 = () => {
         ptoByEmployee,
         swappedShiftByEmployee,
       })
-      warnings.push(...prepared.warnings)
-      actions.push(...prepared.actions)
 
       const engineInput = {
         employees: prepared.employees,
@@ -134,10 +184,9 @@ export const useScheduleBuilderV2 = () => {
         preferred: prepared.preferred,
         requiredPins: prepared.requiredPins,
       }
-      const result = engine === 'period' ? runPeriodEngine(engineInput) : runEngine(engineInput)
+      const result = runEngine(engineInput)
       lastResult.value = result
-      warnings.push(...result.warnings)
-      actions.push(...result.actions)
+      const fixes = [...prepared.actions, ...result.actions]
 
       const nameById = new Map(prepared.employees.map((e) => [e.id, e.name]))
       const shiftById = new Map(prepared.employees.map((e) => [e.id, e.shiftId]))
@@ -153,55 +202,53 @@ export const useScheduleBuilderV2 = () => {
         shift_id: shiftById.get(a.employeeId) || null,
       }))
 
-      if (!schedule.length) errors.push('No schedule assignments could be created.')
+      if (!schedule.length) {
+        return {
+          ...notBuilt(fixes.length ? fixes : [{ message: 'Nobody could be placed on this day.' }]),
+          offAllDay: prepared.offAllDay,
+        }
+      }
 
-      // Map to V1's gap/overTarget shape so the review modal renders unchanged.
-      //
-      // Split the list first. On a normal day ~90% of gap rows are windows where
-      // a whole shift is on break or lunch, or hours past the last shift — real,
-      // but unfixable by any schedule. Showing 42 undifferentiated rows buries
-      // the two or three a supervisor could actually act on.
-      const structural = result.gaps.filter((g) => g.cause === 'no-one-trained-on-shift')
-      const actionable = result.gaps.filter((g) => g.cause !== 'no-one-trained-on-shift')
+      // Gaps a person can act on get a row per job and reason. The whole-floor ones
+      // (more work asked for than people on shift) become ONE line: on a normal day
+      // they are most of the list, and only more people or smaller targets change
+      // them, so listing each window buried the few rows anyone could act on.
+      const rows = new Map<string, ShortRow>()
+      const wholeFloor: EngineGap[] = []
+      for (const g of result.gaps) {
+        if (g.cause === 'floor-short') { wholeFloor.push(g); continue }
+        const key = `${g.functionName}|${g.cause}`
+        const row = rows.get(key) ?? { functionName: g.functionName, cause: g.cause, hours: 0, windows: [] }
+        row.hours += g.hours
+        row.windows.push(g.shortfall > 1 ? `${g.time} (${g.shortfall} people)` : g.time)
+        rows.set(key, row)
+      }
 
-      const gaps = actionable.map((g) => ({
-        job_function_name: g.functionName,
-        hour: g.time,
-        shortfall: g.shortfall,
-        cause: g.cause,
-        detail: g.detail,
-      }))
-      const overTarget = result.overTarget.map((o) => ({
-        job_function_name: o.functionName,
-        hour: o.time,
-        surplus: o.surplus,
-      }))
-
-      // Summarise the structural ones rather than listing every window.
-      // Plain language on purpose. This line is read by supervisors at sites that
-      // did not build the app, so "headcount-hours" and "shortfalls" are out.
-      const structuralHours = Math.round((structural.reduce((s, g) => s + g.shortfall, 0) / 4) * 10) / 10
-      const structuralSummary = structural.length
-        ? [
-            `About ${structuralHours} hours of your targets could not be covered by anyone — the people were on break or at lunch, or the hours fall outside every shift. Rebuilding will not change this; staggering a break or trimming a target will.`,
-          ]
-        : []
+      // Hours are every 15 minutes added up, not a peak: the old summary added
+      // each gap's peak shortfall and read "about 3.8 hours" on a day 17.5 short.
+      const extraByFunction = new Map<string, number>()
+      for (const o of result.overTarget) {
+        extraByFunction.set(o.functionName, (extraByFunction.get(o.functionName) ?? 0) + o.hours)
+      }
 
       return {
         schedule,
-        warnings,
-        actions,
-        errors,
-        gaps,
-        overTarget,
-        structuralSummary,
-        structuralCount: structural.length,
-        feasibility: result.feasibility,
-        stats: result.stats,
+        fixes,
+        notes: [...prepared.warnings, ...result.warnings],
+        people: prepared.employees.length,
+        offAllDay: prepared.offAllDay,
+        noWork: result.stats.employeesWithNoWork,
+        short: [...rows.values()].sort((a, b) => b.hours - a.hours),
+        unavoidable: {
+          hours: wholeFloor.reduce((sum, g) => sum + g.hours, 0),
+          windows: mergedWindows(wholeFloor),
+        },
+        extra: [...extraByFunction]
+          .map(([functionName, hours]) => ({ functionName, hours }))
+          .sort((a, b) => b.hours - a.hours),
       }
     } catch (e: any) {
-      errors.push(`Error occurred: ${e?.message || 'Unknown error'}`)
-      return { schedule: [], warnings, actions: [], errors, gaps: [], overTarget: [], feasibility: [], stats: null }
+      return notBuilt([{ message: `Something went wrong while building: ${e?.message || 'unknown error'}` }])
     }
   }
 

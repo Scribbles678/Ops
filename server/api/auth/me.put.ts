@@ -1,6 +1,6 @@
 import { query } from '../../utils/db'
 import { requireAuth } from '../../utils/authorize'
-import { signToken, COOKIE_NAME, sessionMaxAge } from '../../utils/jwt'
+import { setSessionCookie } from '../../utils/jwt'
 
 /**
  * Change which team the caller works in.
@@ -12,9 +12,10 @@ import { signToken, COOKIE_NAME, sessionMaxAge } from '../../utils/jwt'
  * team's data. **Super admin only** — an admin who could reassign themselves
  * could walk into another site's data at will, which defeats team isolation.
  *
- * The team also lives in the signed JWT, so the token is re-issued here.
- * Updating only the database row left the OLD team in the cookie: the change
- * appeared to do nothing, then silently took effect at the next login.
+ * The team is read from the database on every request (server/middleware/auth.ts),
+ * so the change applies to the very next call. The cookie is re-issued anyway so
+ * its claims match. (Before Sep 2026 the team lived only in the token, and
+ * updating just the row appeared to do nothing until the next login.)
  */
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
@@ -39,15 +40,8 @@ export default defineEventHandler(async (event) => {
     [team_id ?? null, user.id]
   )
 
-  // Re-issue the session so the new team applies to the very next request.
   const updated = { ...user, team_id: team_id ?? null }
-  setCookie(event, COOKIE_NAME, signToken(updated), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: sessionMaxAge(updated),
-    path: '/',
-  })
+  setSessionCookie(event, updated)
 
   return { ok: true, user: updated }
 })

@@ -47,6 +47,10 @@
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-red-200 border border-red-400 inline-block"></span> Blocked (no requests allowed)</span>
       </div>
 
+      <p v-if="calendarError" role="alert" class="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+        {{ calendarError }}
+      </p>
+
       <!-- Loading -->
       <div v-if="loading" class="text-center py-12 text-gray-500">Loading calendar data...</div>
 
@@ -660,15 +664,25 @@ const loadRequests = async () => {
   }
 }
 
+const calendarError = ref('')
 const loadCalendar = async () => {
-  const [calData] = await Promise.all([
-    $fetch<{ pto_days: any[]; requests: any[] }>('/api/pto-calendar', {
-      params: { date_from: dateFrom.value, date_to: dateTo.value },
-    }),
-    loadRequests(),
-    fetchBlockedDates(),
-  ])
-  calendarData.value = calData
+  calendarError.value = ''
+  try {
+    const [calData] = await Promise.all([
+      $fetch<{ pto_days: any[]; requests: any[] }>('/api/pto-calendar', {
+        params: { date_from: dateFrom.value, date_to: dateTo.value },
+      }),
+      loadRequests(),
+      fetchBlockedDates(),
+    ])
+    calendarData.value = calData
+  } catch (e: any) {
+    // Uncaught, this left a blank week that read as "nobody is off". A 401 is
+    // handled by the sign-in prompt (plugins/session.client.ts); say anything else.
+    if (e?.statusCode !== 401 && e?.status !== 401) {
+      calendarError.value = `Couldn't load the calendar: ${e?.data?.message || e?.message || 'unknown error'}`
+    }
+  }
 }
 
 // Admin actions

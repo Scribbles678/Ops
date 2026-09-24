@@ -1,9 +1,10 @@
 import { query } from '../../utils/db'
-import { requireAuth, getWriteTeamId } from '../../utils/authorize'
+import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
 import { normalizeUpi, isUpiTaken } from '../../utils/upi'
+import { assertShiftOnTeam } from '../../utils/teamOwnership'
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const { first_name, last_name, shift_id, is_active = true } = body
@@ -12,6 +13,7 @@ export default defineEventHandler(async (event) => {
   if (!first_name?.trim() || !last_name?.trim()) {
     throw createError({ statusCode: 400, message: 'first_name and last_name are required' })
   }
+  await assertShiftOnTeam(shift_id, teamId)
 
   try {
     const result = await query(

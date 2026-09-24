@@ -54,8 +54,11 @@ role with `roleOf()` — the **highest flag wins** — so an account that still 
 two flags from before Sep 2026 behaves as its stronger role until it is next edited,
 at which point it is normalised. No migration rewrote anyone's flags.
 
-The role travels in the signed JWT, so a change applies at the person's **next
-sign-in** (sessions last 8 hours; the kiosk's 30 days).
+A role change, a team move or a deactivation applies on the person's **next
+click**: the API reads the account from the database on every call
+(`server/middleware/auth.ts`). Until Sep 2026 the role travelled in the signed
+token, so a change waited for the next sign-in — up to 8 hours, and never for a
+kiosk, whose session renewed itself.
 
 ---
 
@@ -78,7 +81,7 @@ The migration (021) only adds the `is_team_lead` column. On deploy:
 2. The people who should be **Team Lead / Coordinator** (today's Admins who are
    really leads) need reassigning by hand in Settings → User Management: open the
    person, pick the role, save. Their password and team are untouched; it takes
-   effect at their next sign-in. What they lose is the Request Rules card.
+   effect immediately. What they lose is the Request Rules card.
 3. **Check for accounts with no flags before deploying** — after this change they
    cannot do anything until given a role:
 

@@ -53,7 +53,14 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
   }
 }
 
-/** Build the base URL for reset links (e.g. https://scheduler.example.com) */
+/**
+ * Build the base URL for reset links (e.g. https://scheduler.example.com).
+ *
+ * APP_URL is read at RUN time first. `config.appUrl` is fixed when the image is
+ * built (nuxt.config reads APP_URL then, which the build doesn't have), so it was
+ * always "http://localhost:3000" and every reset email linked there, whatever the
+ * deployment set. NUXT_APP_URL also works: Nuxt applies it to config.appUrl.
+ */
 export function getAppBaseUrl(): string {
-  return config.appUrl || process.env.APP_URL || 'http://localhost:3000'
+  return (process.env.APP_URL || config.appUrl || 'http://localhost:3000').replace(/\/+$/, '')
 }

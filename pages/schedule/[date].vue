@@ -14,11 +14,14 @@
           <div class="hidden md:flex gap-1.5 mt-1.5">
             <div class="rounded border border-gray-200 bg-white px-2 py-1 text-center">
               <div class="text-xs font-bold text-blue-600">{{ totalEmployees }}</div>
-              <div class="text-[10px] text-gray-600">Employees</div>
+              <div class="text-[10px] text-gray-600" title="People on a shift today who aren't off for all of it">Employees</div>
             </div>
             <div class="rounded border border-gray-200 bg-white px-2 py-1 text-center">
-              <div class="text-xs font-bold text-green-600">{{ totalLaborHours }}h</div>
-              <div class="text-[10px] text-gray-600">Labor Hours</div>
+              <div class="text-xs font-bold text-green-600">{{ fmtHours(laborHoursAvailable) }}h</div>
+              <div
+                class="text-[10px] text-gray-600"
+                title="Hours people are on the floor today: their shift minus lunch, breaks and time off"
+              >Labor Hours Available</div>
             </div>
             <div class="rounded border border-gray-200 bg-white px-2 py-1 text-center">
               <div class="text-xs font-bold text-purple-600">{{ totalShifts }}</div>
@@ -26,17 +29,20 @@
             </div>
             <div class="rounded border border-gray-200 bg-white px-2 py-1 text-center">
               <div class="text-xs font-bold text-orange-600">{{ unassignedEmployees }}</div>
-              <div class="text-[10px] text-gray-600">Unassigned</div>
+              <div class="text-[10px] text-gray-600" title="Working today with nothing assigned yet">Unassigned</div>
             </div>
             <div class="rounded border border-gray-200 bg-white px-2 py-1 text-center">
-              <div class="text-xs font-bold text-red-600">{{ totalPTOHours }}</div>
-              <div class="text-[10px] text-gray-600">PTO Hours</div>
+              <div class="text-xs font-bold text-red-600">{{ ptoUsed ? fmtHours(ptoUsed.used) : '—' }}</div>
+              <div
+                class="text-[10px] text-gray-600"
+                :title="ptoUsed?.cap ? `Paid hours off today, of the ${fmtHours(ptoUsed.cap)}h daily PTO cap` : 'Paid hours off today'"
+              >PTO Hours</div>
             </div>
           </div>
         </div>
         <div class="flex space-x-2">
           <button 
-            @click="saveSchedule" 
+            @click="saveSchedule()"
             :disabled="isSaving"
             class="btn-primary disabled:opacity-50 disabled:cursor-not-allowed flex items-center text-sm px-3 py-1.5"
           >
@@ -72,7 +78,8 @@
                 </label>
                 <input
                   id="schedule-date"
-                  v-model="scheduleDate"
+                  :value="scheduleDate"
+                  @change="onPickDate"
                   type="date"
                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
@@ -100,7 +107,7 @@
             </div>
             <div class="mt-2 p-2 bg-blue-50 rounded-lg">
               <p class="text-xs text-blue-800">
-                <strong>Selected:</strong> 
+                <strong class="mr-1">Selected:</strong>
                 <ClientOnly>
                   {{ formatDate(scheduleDate) }}
                   <span v-if="isWeekend" class="ml-1.5 text-orange-600 font-medium">(Weekend)</span>
@@ -112,8 +119,10 @@
           </div>
         </div>
 
-        <!-- Job Function Hours Breakdown / Dashboards (Right Side) -->
-        <div class="flex-1" :style="{ maxWidth: activeDashboard !== 'jobFunctions' ? `${112 + (meterTimeSlots.length * 24)}px` : 'none' }">
+        <!-- Job Function Hours Breakdown / Dashboards (Right Side).
+             min-w-0 keeps this card inside the page, level with the schedule below:
+             a long day scrolls inside the card instead of pushing the page wider. -->
+        <div class="flex-1 min-w-0">
           <div class="card mb-0 h-full">
             <div class="flex items-center mb-2 p-2">
               <div class="flex flex-wrap gap-1.5">
@@ -154,7 +163,7 @@
                 <!-- Header Row -->
                 <div class="flex border-b border-gray-200 mb-0.5 bg-gradient-to-b from-gray-50 to-white sticky top-0 z-20 shadow-sm">
                   <div class="w-28 px-1.5 py-1 text-[9px] font-semibold text-gray-700 bg-white border-r border-gray-200 sticky left-0 z-30">
-                    {{ activeDashboard === 'meter' ? 'Meter' : getDashboardLabel(activeDashboard) }}
+                    {{ activeDashboard === 'meter' ? 'Meter' : activeDashboard }}
                   </div>
                   <div 
                     v-for="timeSlot in meterTimeSlots" 
@@ -311,73 +320,13 @@
             :training-by-employee="trainingByEmployee"
             :pto-by-employee-id="ptoByEmployeeId"
             :shift-swaps-by-employee-id="swapByEmployeeId"
-            :preferred-assignments-map="getPreferredAssignmentsMap()"
+            :preferred-assignments-map="preferredBadgeMap"
             @add-assignment="handleAddAssignment"
-            @edit-assignment="handleEditAssignment"
-            @assign-break-coverage="handleBreakCoverage"
-            @schedule-data-updated="handleScheduleDataUpdated"
             @addPTO="openPTOModal"
             @addShiftSwap="openShiftSwapModal"
             @addCallIn="openCallInModal"
             @clearEmployee="handleClearEmployee"
           />
-        </div>
-      </div>
-
-      <!-- Job Function Assignment Modal -->
-      <div v-if="showEmployeeModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-          <h3 class="text-xl font-bold mb-4">
-            Assign Job Function to {{ selectedEmployee?.last_name || '' }}, {{ selectedEmployee?.first_name || '' }}
-            <span v-if="selectedShift"> - {{ selectedShift.name }}</span>
-          </h3>
-          
-          <!-- Available Job Functions -->
-          <div class="space-y-2 mb-4">
-            <h4 class="font-medium text-gray-700">Available Job Functions:</h4>
-            <p v-if="availableJobFunctions.length === 0 && Object.keys(trainingByEmployee || {}).length > 0" class="text-sm text-amber-600 py-2">
-              No trained job functions. Assign training in Team Setup → Employees & Training first.
-            </p>
-            <div v-else class="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
-              <div v-for="jobFunction in availableJobFunctions" :key="jobFunction" 
-                   class="flex items-center justify-between p-2 border border-gray-200 rounded hover:bg-gray-50">
-                <div class="flex items-center space-x-2">
-                  <div class="w-4 h-4 rounded border border-gray-300" 
-                       :style="{ backgroundColor: getJobFunctionColor(jobFunction) }"></div>
-                  <span class="text-sm">{{ jobFunction }}</span>
-                </div>
-                <button @click="assignJobFunction(jobFunction)" 
-                        class="px-3 py-1 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition text-sm">
-                  Assign
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Current Assignments -->
-          <div v-if="selectedEmployee && selectedShift && getEmployeeAssignments(selectedEmployee.id, selectedShift.id).length > 0" class="space-y-2">
-            <h4 class="font-medium text-gray-700">Current Assignments:</h4>
-            <div class="space-y-1">
-              <div v-for="assignment in getEmployeeAssignments(selectedEmployee.id, selectedShift.id)" :key="assignment.id" 
-                   class="flex items-center justify-between p-2 bg-gray-50 rounded">
-                <div class="flex items-center space-x-2">
-                  <div class="w-4 h-4 rounded" 
-                       :style="{ backgroundColor: getJobFunctionColor(assignment.job_function) }"></div>
-                  <span class="text-sm">{{ assignment.job_function }}</span>
-                </div>
-                <button @click="removeAssignment(assignment.id)" 
-                        class="px-3 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200 transition text-sm">
-                  Remove
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div class="flex justify-end space-x-3 pt-4">
-            <button @click="closeEmployeeModal" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
-              Close
-            </button>
-          </div>
         </div>
       </div>
 
@@ -389,6 +338,10 @@
             <div v-if="resolvedPtoRecord" class="p-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800">
               Absence already exists for this employee on {{ formatDate(scheduleDate) }}.
               Update the details below or use Cancel PTO if they are working.
+            </div>
+            <div v-if="ptoModalCallIn" class="p-3 bg-orange-50 border border-orange-200 rounded-md text-sm text-orange-800">
+              Also marked as called in that day. The call-in stays as it is — use CI on their row
+              to change or remove it.
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
@@ -465,8 +418,9 @@
         </div>
       </div>
 
-      <!-- Notification Modal -->
-      <div v-if="showNotificationModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <!-- Notification Modal — above the other popups (z-60), so an error raised
+           while one is open (e.g. a failed shift swap) isn't hidden behind it. -->
+      <div v-if="showNotificationModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
         <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
           <div class="flex items-center justify-between mb-4">
             <h3 class="text-xl font-bold text-gray-800">{{ notificationType === 'success' ? '✅ Success' : '❌ Error' }}</h3>
@@ -534,6 +488,10 @@
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
               <textarea v-model="shiftSwapForm.notes" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-md"></textarea>
+            </div>
+            <div v-if="swapEmployeeHasAssignments" class="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800">
+              They already have assignments today. Changing or removing their swap clears those,
+              so you can assign them on the right shift afterwards.
             </div>
             <div class="flex justify-end gap-2 pt-2">
               <button @click="closeShiftSwapModal" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">Cancel</button>
@@ -619,9 +577,11 @@
 
 <script setup lang="ts">
 // Import the component explicitly
-import { onBeforeRouteLeave } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import ShiftGroupedSchedule from '~/components/schedule/ShiftGroupedSchedule.vue'
-import { toLocalISO, getTZISODate } from '~/utils/localDate'
+import { toLocalISO, addDays } from '~/utils/localDate'
+import { describePto, formatTimeOfDay, MINUTES_IN_DAY } from '~/utils/ptoDisplay'
+import { workableSlots, type WorkableSlots } from '~/utils/workableSlots'
 
 // Use real composables instead of mock data
 const { 
@@ -753,9 +713,30 @@ const {
 
 // Preferred Assignments composable
 const {
-  fetchPreferredAssignments,
-  getPreferredAssignmentsMap
+  preferredAssignments,
+  fetchPreferredAssignments
 } = usePreferredAssignments()
+
+/**
+ * Required / Preferred badges in the assign popup: employee → job function → pin.
+ *
+ * A pin made of time blocks (X4 in the morning, EM9 after lunch) badges EVERY
+ * block's function. getPreferredAssignmentsMap() keys only on the pin's base
+ * function — the first block's — so the afternoon function showed no badge. That
+ * map feeds the builder and is left alone; this one is for display only.
+ */
+const preferredBadgeMap = computed(() => {
+  const map: Record<string, Record<string, any>> = {}
+  for (const pa of preferredAssignments.value || []) {
+    const fnIds = [pa.job_function_id, ...(pa.blocks || []).map((b: any) => b.job_function_id)]
+    for (const id of fnIds) {
+      if (!id) continue
+      // Rows arrive highest priority first; keep that pin when two share a function.
+      ;(map[pa.employee_id] ||= {})[id] ??= pa
+    }
+  }
+  return map
+})
 
 // Ensure scheduleAssignments is always an array
 const scheduleAssignments = computed(() => (scheduleAssignmentsRef.value || []) as any[])
@@ -778,23 +759,27 @@ const scheduleData = computed(() => {
   }))
 })
 
-// Data loading
-const loading = computed(() => 
-  employeesLoading.value || functionsLoading.value || shiftsLoading.value || assignmentsLoading.value
-)
+/** The shift someone actually works on this date — their swap's shift, if they have one. */
+const shiftForEmployee = (employeeId: string): any | null => {
+  const emp = employees.value?.find((e: any) => e.id === employeeId)
+  const shiftId = swapByEmployeeId.value?.[employeeId]?.swapped_shift_id ?? emp?.shift_id
+  return shiftId ? shifts.value?.find((s: any) => s.id === shiftId) ?? null : null
+}
 
-const error = computed(() => 
+// Data loading. The full-page "Loading…" and "Error loading…" states are for the
+// FIRST load only. Later fetches — after a save, a call-in, a swap — refresh the
+// grid in place. They used to swap it for the loading message, which unmounted it
+// and threw the page back to the top, and a failed save's error replaced the grid.
+const firstLoadDone = ref(false)
+const loadError = computed(() =>
   employeesError.value || functionsError.value || shiftsError.value || assignmentsError.value
 )
+const error = computed(() => (firstLoadDone.value ? null : loadError.value))
+const loading = computed(() => !firstLoadDone.value && !error.value)
 
 // Training data: employee_id -> job_function_id[]
 const trainingByEmployee = ref<Record<string, string[]>>({})
 
-// Modal state
-const showEmployeeModal = ref(false)
-const selectedEmployee = ref<any>(null)
-const selectedShift = ref<any>(null)
-const selectedJobFunction = ref('')
 const scheduleAssignmentsData = ref<Record<string, any>>({})
 
 // --- Unsaved-change tracking --------------------------------------------------
@@ -852,76 +837,49 @@ const dashboardPills = computed<{ key: string; label: string }[]>(() => {
 })
 const meterBookings = ref<Record<string, number>>({}) // Changed to number to track count of bookings
 
-// Get route params - use client-only for date to avoid hydration mismatch
+// The date comes from the URL and is fixed for the life of the page: every date
+// change is a navigation, and Nuxt builds a fresh page for each /schedule/<date>.
 const route = useRoute()
 const scheduleDate = ref('')
 
-// Initialize date on client side to avoid hydration mismatch
-onMounted(async () => {
-  if (!scheduleDate.value) {
-    scheduleDate.value = (route.params.date as string) || getTZISODate('America/Chicago')
-  }
-  // Load shift swaps for the initial date
-  if (scheduleDate.value) {
-    await fetchShiftSwapsForDate(scheduleDate.value)
-  }
-})
-
-// Date navigation functions
-const goToToday = () => {
-  scheduleDate.value = getTZISODate('America/Chicago')
-  navigateTo(`/schedule/${scheduleDate.value}`)
+/**
+ * Go to another date. Always through the router, so the URL, the browser's Back
+ * button and the unsaved-changes prompt (onBeforeRouteUpdate, below) all follow.
+ * The picker used to change the date in place — no prompt, URL left behind — and
+ * the buttons set it before navigating, so either way unsaved edits vanished.
+ */
+const goToDate = async (date: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date === scheduleDate.value) return
+  await navigateTo(`/schedule/${date}`)
 }
 
-const goToYesterday = () => {
-  const d = new Date()
-  d.setDate(d.getDate() - 1)
-  scheduleDate.value = toLocalISO(d)
-  navigateTo(`/schedule/${scheduleDate.value}`)
+// "Today" is the browser's own calendar day — the same one the home page links to.
+// It used to be pinned to America/Chicago, wrong for a site in any other timezone.
+const goToToday = () => goToDate(toLocalISO(new Date()))
+const goToYesterday = () => goToDate(toLocalISO(addDays(new Date(), -1)))
+const goToTomorrow = () => goToDate(toLocalISO(addDays(new Date(), 1)))
+
+const onPickDate = async (e: Event) => {
+  const input = e.target as HTMLInputElement
+  const date = input.value
+  // Typing a year digit by digit passes through dates like 0002-09-24 — ignore those.
+  if (!/^(19|20)\d{2}-\d{2}-\d{2}$/.test(date)) return
+  await goToDate(date)
+  // Still on this page (they chose to keep their edits): put the picker back.
+  if (route.params.date !== date) input.value = scheduleDate.value
 }
 
-const goToTomorrow = () => {
-  const d = new Date()
-  d.setDate(d.getDate() + 1)
-  scheduleDate.value = toLocalISO(d)
-  navigateTo(`/schedule/${scheduleDate.value}`)
-}
-
-// Date status computed properties - make them hydration-safe
+// YYYY-MM-DD strings compare correctly as text. These used `new Date('YYYY-MM-DD')`,
+// which is midnight UTC — the previous evening in the US — so today read "(Past)"
+// and "(Weekend)" landed on Sunday and Monday.
+const todayISO = toLocalISO(new Date())
+const isFuture = computed(() => !!scheduleDate.value && scheduleDate.value > todayISO)
+const isPast = computed(() => !!scheduleDate.value && scheduleDate.value < todayISO)
 const isWeekend = computed(() => {
   if (!scheduleDate.value) return false
-  const date = new Date(scheduleDate.value)
-  const day = date.getDay()
+  const [y, m, d] = scheduleDate.value.split('-').map(Number)
+  const day = new Date(y!, m! - 1, d!).getDay()
   return day === 0 || day === 6 // Sunday or Saturday
-})
-
-const isFuture = computed(() => {
-  if (!scheduleDate.value) return false
-  const selectedDate = new Date(scheduleDate.value)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return selectedDate > today
-})
-
-const isPast = computed(() => {
-  if (!scheduleDate.value) return false
-  const selectedDate = new Date(scheduleDate.value)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return selectedDate < today
-})
-
-// Watch for date changes to reload schedule data
-watch(scheduleDate, async (newDate) => {
-  if (newDate) {
-    await fetchScheduleForDate(newDate)
-    await fetchPTOForDate(newDate)
-    await fetchShiftSwapsForDate(newDate)
-    await fetchPreferredAssignments()
-    await loadTargetHours()
-    await nextTick()
-    initializeScheduleData()
-  }
 })
 
 // Reload target hours when page becomes active (for SPA navigation)
@@ -989,11 +947,6 @@ const generateTimeSlots = (startTime: string, endTime: string): string[] => {
 
 // Initialize schedule data from existing assignments
 const initializeScheduleData = () => {
-  console.log('Initializing schedule data...')
-  console.log('Schedule assignments:', scheduleAssignments.value)
-  console.log('Employees:', employees.value.length)
-  console.log('Job functions:', jobFunctions.value.length)
-  
   const initialData: Record<string, any> = {}
   
   // Initialize data for each employee
@@ -1033,219 +986,108 @@ const initializeScheduleData = () => {
     }
   })
   
-  console.log('Initialized schedule data:', initialData)
   scheduleAssignmentsData.value = initialData
   // The grid now mirrors the server, so this is the baseline for "unsaved".
   markGridSaved()
-  console.log('scheduleAssignmentsData after initialization:', scheduleAssignmentsData.value)
 }
 
-// Load data on mount
+// Load everything once, in parallel. Two onMounted hooks and a date watcher used
+// to overlap here, so the day's assignments, PTO, swaps, pins and target hours
+// were each fetched twice on every visit.
 onMounted(async () => {
+  scheduleDate.value = (route.params.date as string) || toLocalISO(new Date())
   try {
     await Promise.all([
       fetchEmployees(),
       fetchJobFunctions(),
       fetchShifts(),
       fetchScheduleForDate(scheduleDate.value),
-      fetchPreferredAssignments() // Load preferred assignments
+      fetchPTOForDate(scheduleDate.value),
+      fetchShiftSwapsForDate(scheduleDate.value),
+      fetchPreferredAssignments(),
+      loadTargetHours(),
+      loadPtoUsed(),
+      getAllEmployeeTraining().then((training) => { trainingByEmployee.value = training || {} }),
     ])
-    const training = await getAllEmployeeTraining()
-    trainingByEmployee.value = training || {}
-    await fetchPTOForDate(scheduleDate.value)
-    // Load target hours from database
-    await loadTargetHours()
-    
-    // Initialize schedule data from existing assignments
-    // Use nextTick to ensure all reactive data is updated
     await nextTick()
     initializeScheduleData()
-    
-    // Sync meter bookings after schedule data is initialized
     syncMeterBookings()
-    
   } catch (error) {
     console.error('Error loading schedule data:', error)
   }
+  firstLoadDone.value = !loadError.value
 })
 
-// Helper function to check if a shift is the part-time shift (4-8:30 PM)
-const isPartTimeShift = (shift: any): boolean => {
-  if (!shift) return false
-  // Check if shift starts at 4:00 PM (16:00) and ends at 8:30 PM (20:30)
-  const startTime = shift.start_time?.substring(0, 5) || '' // "HH:MM" format
-  const endTime = shift.end_time?.substring(0, 5) || ''
-  return startTime === '16:00' && endTime === '20:30'
+// --- KPI strip -----------------------------------------------------------------
+// Everyone counts as one person, and the figures follow the grid as you edit. The
+// old tiles counted a hardcoded 4:00–8:30 PM shift as half a person (and halved its
+// HOURS too), took Labor Hours from shift lengths rather than the schedule, and
+// priced PTO themselves.
+
+/** Each person with a shift today: their working slots, and what's left after time off. */
+const dayShapes = computed(() => {
+  const out: Record<string, WorkableSlots> = {}
+  for (const e of employees.value || []) {
+    const shift = shiftForEmployee(e.id)
+    const w = shift ? workableSlots(shift, ptoByEmployeeId.value?.[e.id] || []) : null
+    if (w) out[e.id] = w
+  }
+  return out
+})
+
+/** On a shift today and not off for all of it. */
+const workingToday = computed(() =>
+  Object.keys(dayShapes.value).filter((id) => dayShapes.value[id]!.free.includes(1))
+)
+
+/** Slot numbers (minute / 15) with something assigned on the grid. */
+const assignedSlots = (employeeId: string): number[] =>
+  Object.entries(scheduleAssignmentsData.value?.[employeeId] || {})
+    .filter(([, slot]: [string, any]) => slot?.assignment)
+    .map(([time]) => Math.floor(timeToMinutes(time) / 15))
+
+const totalEmployees = computed(() => workingToday.value.length)
+
+/**
+ * Labor Hours Available: the hours people are on the floor today — each person's
+ * shift minus lunch, breaks and time off (utils/workableSlots.ts, the same rule the
+ * builder schedules into).
+ */
+const laborHoursAvailable = computed(() => {
+  let slots = 0
+  for (const w of Object.values(dayShapes.value)) for (const v of w.free) slots += v
+  return slots / 4
+})
+
+const totalShifts = computed(() => shifts.value.length)
+
+/** Working today with nothing on the grid yet. Someone off all day isn't "unassigned". */
+const unassignedEmployees = computed(() =>
+  workingToday.value.filter((id) => assignedSlots(id).length === 0).length
+)
+
+/**
+ * Today's time off in paid hours, from the server: the figure the daily PTO cap
+ * measures (server/utils/ptoHours.ts). Never priced here — this tile used to do its
+ * own sums and read an arrive-late as starting at midnight (34h for a real 18h).
+ */
+const ptoUsed = ref<{ used: number; cap: number } | null>(null)
+const loadPtoUsed = async () => {
+  try {
+    const res = await $fetch<any>('/api/pto/availability', {
+      params: { date_from: scheduleDate.value, date_to: scheduleDate.value },
+    })
+    const day = res?.days?.[0]
+    ptoUsed.value = day ? { used: Number(day.used) || 0, cap: Number(day.cap) || 0 } : null
+  } catch {
+    ptoUsed.value = null
+  }
 }
 
-// Helper function to check if an employee is part-time (in 4-8:30 PM shift)
-const isPartTimeEmployee = (employee: any): boolean => {
-  if (!employee) return false
-  
-  // Account for shift swaps
-  const swap = swapByEmployeeId.value?.[employee.id]
-  const actualShiftId = swap ? swap.swapped_shift_id : employee.shift_id
-  
-  if (!actualShiftId) return false
-  
-  const shift = scheduleData.value.find((s: any) => s.id === actualShiftId)
-  return isPartTimeShift(shift)
-}
+/** Re-read the day's absences after one changes — the rows and the paid hours. */
+const refreshAbsences = () => Promise.all([fetchPTOForDate(scheduleDate.value), loadPtoUsed()])
 
-// Helper function to get employee count (0.5 for part-time, 1 for full-time)
-const getEmployeeCount = (employee: any): number => {
-  return isPartTimeEmployee(employee) ? 0.5 : 1
-}
-
-// Computed properties
-const totalEmployees = computed(() => {
-  if (!employees.value) return 0
-  
-  // Sum up employee counts: 0.5 for part-time (4-8:30 PM), 1 for full-time
-  return employees.value.reduce((total: number, employee: any) => {
-    return total + getEmployeeCount(employee)
-  }, 0)
-})
-
-const totalLaborHours = computed(() => {
-  if (!employees.value || !scheduleData.value) return 0
-  
-  // Calculate total working hours based on shift hours, excluding PTO and lunch
-  let totalHours = 0
-  
-  employees.value.forEach((employee: any) => {
-    // Skip employees on PTO for this day
-    if (ptoByEmployeeId.value && ptoByEmployeeId.value[employee.id] && ptoByEmployeeId.value[employee.id].length > 0) {
-      return // Skip this employee
-    }
-    
-    // Get employee's shift (accounting for shift swaps)
-    const swap = swapByEmployeeId.value?.[employee.id]
-    const actualShiftId = swap ? swap.swapped_shift_id : employee.shift_id
-    
-    if (!actualShiftId) return // Skip employees without a shift
-    
-    const shift = scheduleData.value.find((s: any) => s.id === actualShiftId)
-    if (!shift || !shift.start_time || !shift.end_time) return
-    
-    // Calculate shift hours from start_time to end_time
-    const shiftStartMinutes = timeToMinutes(shift.start_time.substring(0, 5))
-    const shiftEndMinutes = timeToMinutes(shift.end_time.substring(0, 5))
-    let shiftTotalMinutes = shiftEndMinutes - shiftStartMinutes
-    
-    // Subtract lunch time (unpaid) if it exists
-    if (shift.lunch_start && shift.lunch_end) {
-      const lunchStartMinutes = timeToMinutes(shift.lunch_start.substring(0, 5))
-      const lunchEndMinutes = timeToMinutes(shift.lunch_end.substring(0, 5))
-      
-      // Only subtract lunch if it falls within the shift
-      if (lunchStartMinutes >= shiftStartMinutes && lunchEndMinutes <= shiftEndMinutes) {
-        shiftTotalMinutes -= (lunchEndMinutes - lunchStartMinutes)
-      }
-    }
-    
-    // Convert minutes to hours
-    const employeeHours = shiftTotalMinutes / 60
-    
-    // Factor in part-time multiplier (0.5 for part-time employees)
-    const multiplier = isPartTimeEmployee(employee) ? 0.5 : 1
-    totalHours += employeeHours * multiplier
-  })
-  
-  return Math.round(totalHours * 10) / 10
-})
-
-const totalShifts = computed(() => {
-  return shifts.value.length
-})
-
-const unassignedEmployees = computed(() => {
-  if (!scheduleAssignments.value || !employees.value) return 0
-  
-  const assignedEmployeeIds = new Set(scheduleAssignments.value.map((a: any) => a.employee_id))
-  
-  // Sum up unassigned employee counts: 0.5 for part-time, 1 for full-time
-  return employees.value
-    .filter((e: any) => !assignedEmployeeIds.has(e.id))
-    .reduce((total: number, employee: any) => {
-      return total + getEmployeeCount(employee)
-    }, 0)
-})
-
-const totalPTOHours = computed(() => {
-  if (!ptoRecords.value || ptoRecords.value.length === 0 || !employees.value || !scheduleData.value) return 0
-
-  let totalHours = 0
-
-  // Process each PTO record
-  ptoRecords.value.forEach((ptoRecord: any) => {
-    const employee = employees.value.find((e: any) => e.id === ptoRecord.employee_id)
-    if (!employee) return
-    
-    // Get employee's shift (accounting for shift swaps)
-    const swap = swapByEmployeeId.value?.[employee.id]
-    const actualShiftId = swap ? swap.swapped_shift_id : employee.shift_id
-    
-    if (!actualShiftId) return
-    
-    const shift = scheduleData.value.find((s: any) => s.id === actualShiftId)
-    if (!shift) return
-    
-    let ptoHours = 0
-    
-    // Check if it's full day PTO (no start_time or end_time)
-    if (!ptoRecord.start_time && !ptoRecord.end_time) {
-      // Full day PTO: use shift hours (excluding lunch)
-      const shiftStartMinutes = timeToMinutes(shift.start_time.substring(0, 5))
-      const shiftEndMinutes = timeToMinutes(shift.end_time.substring(0, 5))
-      let shiftTotalMinutes = shiftEndMinutes - shiftStartMinutes
-      
-      // Subtract lunch time (unpaid) if it exists
-      if (shift.lunch_start && shift.lunch_end) {
-        const lunchStartMinutes = timeToMinutes(shift.lunch_start.substring(0, 5))
-        const lunchEndMinutes = timeToMinutes(shift.lunch_end.substring(0, 5))
-        
-        // Only subtract lunch if it falls within the shift
-        if (lunchStartMinutes >= shiftStartMinutes && lunchEndMinutes <= shiftEndMinutes) {
-          shiftTotalMinutes -= (lunchEndMinutes - lunchStartMinutes)
-        }
-      }
-      
-      ptoHours = shiftTotalMinutes / 60
-    } else {
-      // Partial day PTO: calculate hours between start_time and end_time
-      const ptoStartMinutes = ptoRecord.start_time ? timeToMinutes(ptoRecord.start_time.substring(0, 5)) : 0
-      const ptoEndMinutes = ptoRecord.end_time ? timeToMinutes(ptoRecord.end_time.substring(0, 5)) : 0
-      
-      if (ptoStartMinutes >= 0 && ptoEndMinutes > ptoStartMinutes) {
-        let ptoTotalMinutes = ptoEndMinutes - ptoStartMinutes
-        
-        // Subtract lunch time if it falls within the PTO period
-        if (shift.lunch_start && shift.lunch_end) {
-          const lunchStartMinutes = timeToMinutes(shift.lunch_start.substring(0, 5))
-          const lunchEndMinutes = timeToMinutes(shift.lunch_end.substring(0, 5))
-          
-          // Calculate overlap between PTO period and lunch period
-          const overlapStart = Math.max(ptoStartMinutes, lunchStartMinutes)
-          const overlapEnd = Math.min(ptoEndMinutes, lunchEndMinutes)
-          
-          if (overlapEnd > overlapStart) {
-            // There's overlap - subtract the overlapping lunch time
-            ptoTotalMinutes -= (overlapEnd - overlapStart)
-          }
-        }
-        
-        ptoHours = ptoTotalMinutes / 60
-      }
-    }
-    
-    // Factor in part-time multiplier (0.5 for part-time employees)
-    const multiplier = isPartTimeEmployee(employee) ? 0.5 : 1
-    totalHours += ptoHours * multiplier
-  })
-  
-  return Math.round(totalHours * 10) / 10
-})
+const fmtHours = (h: number) => String(Math.round(h * 10) / 10)
 
 const jobFunctionHours = computed(() => {
   if (!jobFunctions.value || !scheduleAssignmentsData.value) return []
@@ -1367,167 +1209,6 @@ const formatDate = (dateString: string) => {
   }
 }
 
-const getEmployeeAssignment = (employeeId: string, timeBlock: string) => {
-  if (!scheduleAssignments.value) return null
-  return scheduleAssignments.value.find((a: any) => 
-    a.employee_id === employeeId && a.shift_id === timeBlock
-  )
-}
-
-const getEmployeeAssignments = (employeeId: string, shiftId: string) => {
-  if (!scheduleAssignments.value) return []
-  return scheduleAssignments.value.filter((a: any) => 
-    a.employee_id === employeeId && a.shift_id === shiftId
-  )
-}
-
-const getEmployeesForShiftAndJob = (shiftId: string, jobFunction: string) => {
-  if (!scheduleAssignments.value || !employees.value) return []
-  const assignments = scheduleAssignments.value.filter((a: any) => 
-    a.shift_id === shiftId && a.job_function === jobFunction
-  )
-  return assignments.map((assignment: any) => 
-    employees.value.find((e: any) => e.id === assignment.employee_id)
-  ).filter(Boolean)
-}
-
-const getTotalEmployeesForShift = (shiftId: string) => {
-  if (!scheduleAssignments.value) return 0
-  return scheduleAssignments.value.filter((a: any) => a.shift_id === shiftId).length
-}
-
-const getJobFunctionColor = (jobFunctions: string) => {
-  const colors: Record<string, string> = {
-    'RT Pick': '#FFA500',
-    'Pick': '#FFFF00',
-    'Meter': '#87CEEB',
-    'Locus': '#FFD700', // Gold color for better visibility
-    'Helpdesk': '#FFD700',
-    'Coordinator': '#C0C0C0',
-    'Team Lead': '#000080'
-  }
-  return colors[jobFunctions] || '#3B82F6'
-}
-
-const addAssignmentToEmployee = (employeeId: string, shiftId: string) => {
-  selectedEmployee.value = employees.value.find((e: any) => e.id === employeeId) || null
-  selectedShift.value = scheduleData.value.find((s: any) => s.id === shiftId) || null
-  showEmployeeModal.value = true
-}
-
-const addEmployeeToShift = (shiftId: string, jobFunction: string) => {
-  selectedShift.value = scheduleData.value.find((s: any) => s.id === shiftId) || null
-  selectedJobFunction.value = jobFunction
-  showEmployeeModal.value = true
-}
-
-const availableJobFunctions = computed(() => {
-  if (!selectedEmployee.value || !jobFunctions.value?.length) return []
-  
-  const trainedIds = trainingByEmployee.value?.[(selectedEmployee.value as any).id] ?? []
-  const hasTraining = trainedIds.length > 0
-  
-  if (!hasTraining && Object.keys(trainingByEmployee.value || {}).length === 0) {
-    return jobFunctions.value
-      .filter((jf: any) => jf.is_active && !jf.name.startsWith('Meter '))
-      .map((jf: any) => jf.name)
-  }
-  if (!hasTraining) return []
-  
-  const meterParent = jobFunctions.value.find((jf: any) => jf.name === 'Meter')
-  const meterParentId = meterParent?.id
-  const meterNIds = jobFunctions.value
-    .filter((jf: any) => jf.name && /^Meter \d+$/.test(jf.name))
-    .map((jf: any) => jf.id)
-  const isTrainedForMeter =
-    (meterParentId && trainedIds.includes(meterParentId)) ||
-    meterNIds.some((id: string) => trainedIds.includes(id))
-  
-  const names: string[] = []
-  jobFunctions.value.forEach((jf: any) => {
-    if (!jf.is_active || jf.name.startsWith('Meter ') || jf.name === 'Meter') return
-    if (trainedIds.includes(jf.id)) names.push(jf.name)
-  })
-  if (isTrainedForMeter) names.push('Meter')
-  return names
-})
-
-const isEmployeeTrainedForJobFunctionName = (employeeId: string, jobFunctionName: string): boolean => {
-  const trainedIds = trainingByEmployee.value?.[employeeId] ?? []
-  if (!trainedIds.length || !jobFunctions.value?.length) return false
-  const jf = jobFunctions.value.find((j: any) => j.name === jobFunctionName)
-  if (!jf) return false
-  if (jobFunctionName === 'Meter') {
-    const meterParent = jobFunctions.value.find((j: any) => j.name === 'Meter')
-    const meterNIds = jobFunctions.value.filter((j: any) => /^Meter \d+$/.test(j.name || '')).map((j: any) => j.id)
-    return !!(meterParent && trainedIds.includes(meterParent.id)) || meterNIds.some((id: string) => trainedIds.includes(id))
-  }
-  return trainedIds.includes(jf.id)
-}
-
-const availableEmployees = computed(() => {
-  if (!selectedShift.value || !selectedJobFunction.value || !scheduleAssignments.value || !employees.value) return []
-  
-  const assignedEmployeeIds = scheduleAssignments.value
-    .filter((a: any) => a.shift_id === (selectedShift.value as any).id)
-    .map((a: any) => a.employee_id)
-  
-  return employees.value.filter((employee: any) => 
-    !assignedEmployeeIds.includes(employee.id) && 
-    isEmployeeTrainedForJobFunctionName(employee.id, selectedJobFunction.value)
-  )
-})
-
-const assignJobFunction = (jobFunction: string) => {
-  if (!scheduleAssignments.value || !selectedEmployee.value || !selectedShift.value) return
-  
-  scheduleAssignments.value.push({
-    id: Date.now().toString(), // Simple ID generation
-    employee_id: (selectedEmployee.value as any).id,
-    shift_id: (selectedShift.value as any).id,
-    job_function: jobFunction
-  })
-}
-
-const removeAssignment = (assignmentId: string) => {
-  if (!scheduleAssignments.value) return
-  const index = scheduleAssignments.value.findIndex((a: any) => a.id === assignmentId)
-  if (index > -1) {
-    scheduleAssignments.value.splice(index, 1)
-  }
-}
-
-const assignEmployee = (employeeId: string) => {
-  if (!scheduleAssignments.value || !selectedShift.value) return
-  
-  scheduleAssignments.value.push({
-    id: Date.now().toString(),
-    employee_id: employeeId,
-    shift_id: (selectedShift.value as any).id,
-    job_function: selectedJobFunction.value
-  })
-}
-
-const removeEmployee = (employeeId: string) => {
-  if (!scheduleAssignments.value || !selectedShift.value) return
-  
-  const index = scheduleAssignments.value.findIndex((a: any) => 
-    a.employee_id === employeeId && 
-    a.shift_id === (selectedShift.value as any).id &&
-    a.job_function === selectedJobFunction.value
-  )
-  if (index > -1) {
-    scheduleAssignments.value.splice(index, 1)
-  }
-}
-
-const closeEmployeeModal = () => {
-  showEmployeeModal.value = false
-  selectedEmployee.value = null
-  selectedShift.value = null
-  selectedJobFunction.value = ''
-}
-
 // Time utility functions
 const timeToMinutes = (timeStr: string): number => {
   const [hours, minutes] = timeStr.split(':').map(Number)
@@ -1540,31 +1221,22 @@ const minutesToTime = (minutes: number): string => {
   return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`
 }
 
-/** Returns true when the schedule is safely persisted, false if the save failed. */
-const saveSchedule = async (): Promise<boolean> => {
+/**
+ * Returns true when the schedule is safely persisted, false if the save failed.
+ * `quiet` skips the success message — for saves folded into another action
+ * (call-in, swap, Clear All), which say "Your changes were saved." in their own.
+ */
+const saveSchedule = async (quiet = false): Promise<boolean> => {
+  const assignmentsToSave: any[] = []
   try {
     isSaving.value = true
     saveProgress.value = 'Preparing to save schedule...'
-    
+
     // Convert scheduleAssignmentsData into contiguous ranges and save (atomic replace)
     saveProgress.value = 'Processing schedule data (merging ranges)...'
-    const assignmentsToSave: any[] = []
 
-    // Build a unified ordered list of 15-minute time slots across all active shifts
-    const allSlots: string[] = (() => {
-      if (!shifts.value || shifts.value.length === 0) return []
-      const minStart = shifts.value
-        .map((s: any) => timeToMinutes(s.start_time.substring(0, 5)))
-        .reduce((a: number, b: number) => Math.min(a, b))
-      const maxEnd = shifts.value
-        .map((s: any) => timeToMinutes(s.end_time.substring(0, 5)))
-        .reduce((a: number, b: number) => Math.max(a, b))
-      const slots: string[] = []
-      for (let m = minStart; m < maxEnd; m += 15) {
-        slots.push(minutesToTime(m))
-      }
-      return slots
-    })()
+    // Every 15-minute slot of the day, across all active shifts
+    const allSlots: string[] = daySlots.value
 
     Object.entries(scheduleAssignmentsData.value).forEach(([employeeId, employeeSchedule]) => {
       let currentLabel = ''
@@ -1663,21 +1335,50 @@ const saveSchedule = async (): Promise<boolean> => {
     saveProgress.value = ''
     // What's on screen is now what's on the server.
     markGridSaved()
-    showNotification(`Schedule saved successfully! ${assignmentsToSave.length} assignments created.`, 'success')
+    if (!quiet) showNotification(`Schedule saved successfully! ${assignmentsToSave.length} assignments created.`, 'success')
     return true
 
   } catch (error: any) {
     console.error('Error saving schedule:', error)
     isSaving.value = false
     saveProgress.value = ''
-    showNotification(`Error saving schedule: ${error.message || 'Unknown error'}. Please try again.`, 'error')
-    // Refetch to show last saved state (previous schedule preserved due to atomic rollback)
-    await fetchScheduleForDate(scheduleDate.value)
-    await nextTick()
-    initializeScheduleData()
+    // The replace is one transaction, so nothing changed on the server — and the
+    // edits are still on screen. Leave them there to be fixed and saved again. This
+    // used to reload the day from the server, throwing every unsaved edit away.
+    saveError.value = describeSaveError(error, assignmentsToSave)
+    if (!quiet) {
+      showNotification(
+        `Your changes were not saved. ${saveError.value} Your edits are still on screen — fix that and press Save again.`,
+        'error'
+      )
+    }
     return false
   }
 }
+
+/** Why the last save failed, in words a lead can act on. */
+const saveError = ref('')
+
+/**
+ * The server names a refused row only by its position ("Assignment 12 of 175
+ * failed: Employee is not trained for this job function"). Turn that into the
+ * person, function and time it was.
+ */
+const describeSaveError = (err: any, sent: any[]): string => {
+  const msg = String(err?.message || 'Unknown error').trim()
+  const m = /Assignment (\d+)(?: of \d+)?(?: failed)?: ([\s\S]*)$/.exec(msg)
+  const row = m ? sent[Number(m[1]) - 1] : null
+  if (!m || !row) return /[.!?]$/.test(msg) ? msg : `${msg}.`
+  const who = employees.value.find((e: any) => e.id === row.employee_id)
+  const fn = jobFunctions.value.find((j: any) => j.id === row.job_function_id)
+  const when = `${formatTimeOfDay(timeToMinutes(row.start_time))}–${formatTimeOfDay(timeToMinutes(row.end_time))}`
+  const reason = m[2]!.trim().replace(/\.$/, '')
+  return `${who ? `${who.last_name}, ${who.first_name}` : 'Someone'} — ${fn?.name ?? 'a job function'} ${when}: ${reason}.`
+}
+
+/** For actions that save pending edits first: that save failed, why, and that nothing was lost. */
+const saveFailedMessage = (whatDidNotHappen: string) =>
+  `Could not save your changes, so ${whatDidNotHappen}. ${saveError.value} Nothing was lost — your edits are still on screen.`
 
 /**
  * Persist pending edits before an action that would otherwise blow them away.
@@ -1686,34 +1387,12 @@ const saveSchedule = async (): Promise<boolean> => {
  */
 const saveIfDirty = async (): Promise<boolean> => {
   if (!hasUnsavedChanges.value) return true
-  return await saveSchedule()
+  return await saveSchedule(true)
 }
 
 // Event handler: ShiftGroupedSchedule emits this after completing an assignment in its own modal.
 // Do NOT open the parent's modal - the assignment is already done. Just sync (e.g. meter bookings).
 const handleAddAssignment = (_employeeId: string, _timeSlot: string) => {
-  syncMeterBookings()
-}
-
-const handleEditAssignment = (employeeId: string, timeSlot: string) => {
-  const assignment = getEmployeeAssignment(employeeId, timeSlot)
-  if (assignment) {
-    selectedEmployee.value = employees.value.find((e: any) => e.id === employeeId) || null
-    selectedShift.value = { id: timeSlot, name: `${timeSlot} Slot` }
-    selectedJobFunction.value = (assignment as any).job_function
-    showEmployeeModal.value = true
-  }
-}
-
-const handleBreakCoverage = (employeeId: string, timeSlot: any) => {
-  // Handle break coverage assignment
-  console.log('Assigning break coverage:', employeeId, timeSlot)
-  // You can implement break coverage logic here
-}
-
-const handleScheduleDataUpdated = (newScheduleData: Record<string, any>) => {
-  scheduleAssignmentsData.value = newScheduleData
-  // Sync meter bookings when schedule data is updated
   syncMeterBookings()
 }
 
@@ -1751,41 +1430,85 @@ const toYMD = (d: any): string => {
   return String(d).slice(0, 10)
 }
 
+/**
+ * The absence this popup edits. Never a call-in: those belong to the CI button.
+ * This used to pick up a call-in as "the existing absence", so Save PTO or
+ * Cancel PTO silently deleted the call-in record.
+ */
 const resolvedPtoRecord = computed(() => {
   if (!showPTOModal.value || !ptoForm.value.employee_id) return null
   const recs = ptoByEmployeeId.value?.[ptoForm.value.employee_id] || []
   const target = toYMD(ptoForm.value.pto_date || scheduleDate.value)
-  return recs.find((r: any) => toYMD(r.pto_date) === target) || null
+  return recs.find((r: any) => toYMD(r.pto_date) === target && r.pto_type !== 'call_in') || null
 })
 
-const openPTOModal = (employee: any) => {
-  ptoForm.value.employee_id = employee?.id || ''
-  ptoForm.value.pto_date = scheduleDate.value
-  const recs = ptoByEmployeeId.value?.[employee?.id || ''] || []
-  const target = toYMD(scheduleDate.value)
-  const existingRecord = recs.find((r: any) => toYMD(r.pto_date) === target) || null
+/** A call-in the same day — shown as a note so it isn't mistaken for this absence. */
+const ptoModalCallIn = computed(() => {
+  if (!showPTOModal.value || !ptoForm.value.employee_id) return null
+  const recs = ptoByEmployeeId.value?.[ptoForm.value.employee_id] || []
+  const target = toYMD(ptoForm.value.pto_date || scheduleDate.value)
+  return recs.find((r: any) => toYMD(r.pto_date) === target && r.pto_type === 'call_in') || null
+})
 
-  if (existingRecord) {
-    const isFullDay = !existingRecord.start_time && !existingRecord.end_time
-    ptoForm.value.full_day = isFullDay
-    ptoForm.value.start_time = existingRecord.start_time
-      ? existingRecord.start_time.substring(0, 5)
-      : '08:00'
-    ptoForm.value.end_time = existingRecord.end_time
-      ? existingRecord.end_time.substring(0, 5)
-      : '17:00'
+/** This person's shift hours as "HH:MM" — the default for a partial day. */
+const shiftWindowFor = (employeeId: string): { start: string; end: string } => {
+  const sh = shiftForEmployee(employeeId)
+  return sh?.start_time && sh?.end_time
+    ? { start: sh.start_time.substring(0, 5), end: sh.end_time.substring(0, 5) }
+    : { start: '08:00', end: '17:00' }
+}
+
+const openPTOModal = (employee: any) => {
+  const id = employee?.id || ''
+  ptoForm.value.employee_id = id
+  ptoForm.value.pto_date = scheduleDate.value
+  const recs = ptoByEmployeeId.value?.[id] || []
+  const target = toYMD(scheduleDate.value)
+  const existing = recs.find((r: any) => toYMD(r.pto_date) === target && r.pto_type !== 'call_in') || null
+  const shiftWin = shiftWindowFor(id)
+  const d = existing ? describePto(existing) : null
+
+  if (d && !d.allDay) {
+    // Arrive-late / leave-early are stored as running from or to midnight; show
+    // that open end as the person's shift start / end instead.
+    ptoForm.value.full_day = false
+    ptoForm.value.start_time = d.startMin === 0 ? shiftWin.start : minutesToTime(d.startMin)
+    ptoForm.value.end_time = d.endMin === MINUTES_IN_DAY ? shiftWin.end : minutesToTime(d.endMin)
   } else {
     ptoForm.value.full_day = true
-    ptoForm.value.start_time = '08:00'
-    ptoForm.value.end_time = '17:00'
+    ptoForm.value.start_time = shiftWin.start
+    ptoForm.value.end_time = shiftWin.end
   }
   showPTOModal.value = true
+}
+
+/**
+ * The pto_days fields for what the popup says (storage conventions:
+ * utils/ptoDisplay.ts). Always writes a real type — this popup used to be the
+ * one place that wrote untyped rows. An arrive-late / leave-early whose fixed end
+ * is left where it was stays that type, so the board still reads "LEAVES 2:00 PM".
+ */
+const ptoFieldsFromForm = (prior: any) => {
+  const f = ptoForm.value
+  if (f.full_day) return { pto_type: 'full_day', start_time: null, end_time: null }
+  const win = shiftWindowFor(f.employee_id)
+  if (prior?.pto_type === 'leave_early' && f.end_time === win.end) {
+    return { pto_type: 'leave_early', start_time: f.start_time + ':00', end_time: null }
+  }
+  if (prior?.pto_type === 'arrive_late' && f.start_time === win.start) {
+    return { pto_type: 'arrive_late', start_time: '00:00:00', end_time: f.end_time + ':00' }
+  }
+  return { pto_type: 'partial', start_time: f.start_time + ':00', end_time: f.end_time + ':00' }
 }
 
 const savePTO = async () => {
   if (!ptoForm.value.employee_id || !ptoForm.value.pto_date) return
   if (!ptoForm.value.full_day && (!ptoForm.value.start_time || !ptoForm.value.end_time)) {
     showNotification('Please provide start and end times for partial-day PTO.', 'error')
+    return
+  }
+  if (!ptoForm.value.full_day && ptoForm.value.end_time <= ptoForm.value.start_time) {
+    showNotification('The end time must be after the start time.', 'error')
     return
   }
   const prior = resolvedPtoRecord.value
@@ -1798,18 +1521,12 @@ const savePTO = async () => {
   }
   const record: any = {
     employee_id: ptoForm.value.employee_id,
-    pto_date: ptoForm.value.pto_date
-  }
-  if (!ptoForm.value.full_day) {
-    record.start_time = ptoForm.value.start_time + ':00'
-    record.end_time = ptoForm.value.end_time + ':00'
-  } else {
-    record.start_time = null
-    record.end_time = null
+    pto_date: ptoForm.value.pto_date,
+    ...ptoFieldsFromForm(prior),
   }
   const ok = await createPTO(record)
   if (ok) {
-    await fetchPTOForDate(scheduleDate.value)
+    await refreshAbsences()
     showPTOModal.value = false
     showNotification('PTO saved successfully.', 'success')
   } else {
@@ -1826,7 +1543,7 @@ const deleteCurrentPTO = async () => {
   if (!rec?.id) return
   const ok = await deletePTO(rec.id)
   if (ok) {
-    await fetchPTOForDate(scheduleDate.value)
+    await refreshAbsences()
     showPTOModal.value = false
     showNotification('PTO removed.', 'success')
   } else {
@@ -1875,6 +1592,24 @@ const clearEmployeeAssignmentsForDate = async (employeeId: string, date: string)
   return mine.length
 }
 
+/**
+ * Delete every assignment one person has on `date`, and blank their row if that
+ * is the day on screen — everyone else's rows are left exactly as they are.
+ * Call-in, Clear All Functions and shift swaps all go through here. Callers run
+ * saveIfDirty() first: the refetch below rebuilds the grid from the server.
+ */
+const wipeEmployeeDay = async (employeeId: string, date: string): Promise<number> => {
+  const cleared = await clearEmployeeAssignmentsForDate(employeeId, date)
+  if (toYMD(date) === toYMD(scheduleDate.value)) {
+    await fetchScheduleForDate(scheduleDate.value)
+    scheduleAssignmentsData.value = { ...scheduleAssignmentsData.value, [employeeId]: {} }
+    markGridSaved()
+    await nextTick()
+    syncMeterBookings()
+  }
+  return cleared
+}
+
 const saveCallIn = async () => {
   if (!callInForm.value.employee_id || !callInForm.value.pto_date) return
 
@@ -1883,7 +1618,7 @@ const saveCallIn = async () => {
   // saved yet. Folding the save into this action keeps it one click.
   const hadPendingEdits = hasUnsavedChanges.value
   if (!(await saveIfDirty())) {
-    showNotification('Could not save your changes, so the call-in was not recorded. Nothing was lost.', 'error')
+    showNotification(saveFailedMessage('the call-in was not recorded'), 'error')
     return
   }
 
@@ -1905,21 +1640,8 @@ const saveCallIn = async () => {
   })
   if (ok) {
     // A call-in clears that employee's entire day — wipe all their assignments.
-    const cleared = await clearEmployeeAssignmentsForDate(callInForm.value.employee_id, callInForm.value.pto_date)
-    await fetchPTOForDate(scheduleDate.value)
-    // Only that one employee is affected, so clear their row in place rather than
-    // rebuilding the whole grid from the server. Everyone else's rows are left
-    // exactly as they are on screen.
-    if (toYMD(callInForm.value.pto_date) === toYMD(scheduleDate.value)) {
-      await fetchScheduleForDate(scheduleDate.value)
-      scheduleAssignmentsData.value = {
-        ...scheduleAssignmentsData.value,
-        [callInForm.value.employee_id]: {},
-      }
-      markGridSaved()
-      await nextTick()
-      syncMeterBookings()
-    }
+    const cleared = await wipeEmployeeDay(callInForm.value.employee_id, callInForm.value.pto_date)
+    await refreshAbsences()
     showCallInModal.value = false
     showNotification(
       [
@@ -1946,16 +1668,11 @@ const handleClearEmployee = async (employee: any) => {
   // unsaved work for everyone else. Save first, then clear just this row.
   const hadPendingEdits = hasUnsavedChanges.value
   if (!(await saveIfDirty())) {
-    showNotification(`Could not save your changes, so ${name} was not cleared. Nothing was lost.`, 'error')
+    showNotification(saveFailedMessage(`${name} was not cleared`), 'error')
     return
   }
 
-  const cleared = await clearEmployeeAssignmentsForDate(employee.id, scheduleDate.value)
-  await fetchScheduleForDate(scheduleDate.value)
-  scheduleAssignmentsData.value = { ...scheduleAssignmentsData.value, [employee.id]: {} }
-  markGridSaved()
-  await nextTick()
-  syncMeterBookings()
+  const cleared = await wipeEmployeeDay(employee.id, scheduleDate.value)
   showNotification(
     [
       hadPendingEdits ? 'Your changes were saved.' : null,
@@ -1970,7 +1687,7 @@ const deleteCurrentCallIn = async () => {
   if (!rec?.id) return
   const ok = await deletePTO(rec.id)
   if (ok) {
-    await fetchPTOForDate(scheduleDate.value)
+    await refreshAbsences()
     showCallInModal.value = false
     showNotification('Call-in removed.', 'success')
   } else {
@@ -2004,40 +1721,83 @@ const openShiftSwapModal = (employee: any) => {
   showShiftSwapModal.value = true
 }
 
+/** Does the person in the swap popup have anything assigned on the day on screen? */
+const swapEmployeeHasAssignments = computed(() => {
+  const row = scheduleAssignmentsData.value?.[shiftSwapForm.value.employee_id] || {}
+  return Object.values(row).some((slot: any) => slot?.assignment)
+})
+
+const swapMessage = (what: string, cleared: number, hadPendingEdits: boolean, reassignOn: string) =>
+  [
+    hadPendingEdits ? 'Your changes were saved.' : null,
+    what,
+    cleared > 0 ? `${cleared} assignment(s) were cleared — assign them on ${reassignOn}.` : null,
+  ].filter(Boolean).join(' ')
+
+/**
+ * A swap moves someone to another shift's hours, so assignments made for their
+ * old shift are cleared for that day, the same as a call-in. Left in place they
+ * sat hidden outside the new shift's window and were still saved. A save that only
+ * changes the notes leaves the day alone.
+ */
 const saveShiftSwap = async () => {
-  if (!shiftSwapForm.value.employee_id || !shiftSwapForm.value.swap_date || !shiftSwapForm.value.swapped_shift_id) return
-  
-  try {
-    await createShiftSwap({
-      employee_id: shiftSwapForm.value.employee_id,
-      swap_date: shiftSwapForm.value.swap_date,
-      original_shift_id: shiftSwapForm.value.original_shift_id,
-      swapped_shift_id: shiftSwapForm.value.swapped_shift_id,
-      notes: shiftSwapForm.value.notes || null
-    })
-    await fetchShiftSwapsForDate(scheduleDate.value)
-    showShiftSwapModal.value = false
-  } catch (e: any) {
+  const f = shiftSwapForm.value
+  if (!f.employee_id || !f.swap_date || !f.swapped_shift_id) return
+
+  const shiftChanges =
+    toYMD(f.swap_date) !== toYMD(scheduleDate.value) ||
+    existingShiftSwap.value?.swapped_shift_id !== f.swapped_shift_id
+  const hadPendingEdits = hasUnsavedChanges.value
+  if (shiftChanges && !(await saveIfDirty())) {
+    showNotification(saveFailedMessage('the shift swap was not saved'), 'error')
+    return
+  }
+
+  const saved = await createShiftSwap({
+    employee_id: f.employee_id,
+    swap_date: f.swap_date,
+    original_shift_id: f.original_shift_id,
+    swapped_shift_id: f.swapped_shift_id,
+    notes: f.notes || null
+  })
+  // createShiftSwap reports failure by returning null, not by throwing — this
+  // used to close the popup as if it had worked.
+  if (!saved) {
     showNotification('Failed to save shift swap. Please try again.', 'error')
-    console.error('Error saving shift swap:', e)
+    return
+  }
+
+  const cleared = shiftChanges ? await wipeEmployeeDay(f.employee_id, f.swap_date) : 0
+  // A swap changes which shift their time off is priced against, so re-read the hours too.
+  await Promise.all([fetchShiftSwapsForDate(scheduleDate.value), loadPtoUsed()])
+  showShiftSwapModal.value = false
+  if (shiftChanges) {
+    showNotification(swapMessage('Shift swap saved.', cleared, hadPendingEdits, 'the new shift'), 'success')
   }
 }
 
+/** Removing a swap puts them back on their own shift — clear the swapped-shift day too. */
 const deleteShiftSwap = async () => {
-  if (!existingShiftSwap.value?.id) return
-  
-  try {
-    const ok = await deleteShiftSwapAction(existingShiftSwap.value.id)
-    if (ok) {
-      await fetchShiftSwapsForDate(scheduleDate.value)
-      showShiftSwapModal.value = false
-    } else {
-      showNotification('Failed to delete shift swap. Please try again.', 'error')
-    }
-  } catch (e: any) {
-    showNotification('Failed to delete shift swap. Please try again.', 'error')
-    console.error('Error deleting shift swap:', e)
+  const swap = existingShiftSwap.value
+  if (!swap?.id) return
+
+  const hadPendingEdits = hasUnsavedChanges.value
+  if (!(await saveIfDirty())) {
+    showNotification(saveFailedMessage('the shift swap was not removed'), 'error')
+    return
   }
+
+  const ok = await deleteShiftSwapAction(swap.id)
+  if (!ok) {
+    showNotification('Failed to delete shift swap. Please try again.', 'error')
+    return
+  }
+
+  const cleared = await wipeEmployeeDay(swap.employee_id, scheduleDate.value)
+  // A swap changes which shift their time off is priced against, so re-read the hours too.
+  await Promise.all([fetchShiftSwapsForDate(scheduleDate.value), loadPtoUsed()])
+  showShiftSwapModal.value = false
+  showNotification(swapMessage('Shift swap removed.', cleared, hadPendingEdits, 'their usual shift'), 'success')
 }
 
 const closeShiftSwapModal = () => {
@@ -2049,27 +1809,29 @@ const getShiftName = (shiftId: string) => {
   return shift?.name || 'Unknown Shift'
 }
 
-// Meter dashboard functions
-const meterTimeSlots = computed(() => {
-  const slots = []
-  // Generate time slots from 8 AM to 8 PM (08:00 to 20:00) to conserve space
-  for (let hour = 8; hour <= 20; hour++) {
-    for (let quarter = 0; quarter < 4; quarter++) {
-      const minutes = quarter * 15
-      const timeString = `${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`
-      
-      // Stop at 8:00 PM (20:00) - only show up to 8pm, not 8:30pm
-      if (hour === 20 && minutes > 0) break
-      
-      slots.push({
-        time: timeString,
-        hour,
-        minutes
-      })
-    }
+/**
+ * The day's 15-minute slots ("HH:MM"), from the earliest active shift start to the
+ * latest shift end, as entered in Team Setup → Shift Management. Add a 6AM shift and
+ * the day starts at 6AM everywhere on this page.
+ *
+ * Save and the dashboards both read this one list. The dashboards used to run a
+ * hardcoded 8AM–8PM, which hid the 7AM shift's first hour and the last half hour of
+ * the 8:30PM shifts.
+ */
+const daySlots = computed<string[]>(() => {
+  const list = (shifts.value || []).filter((s: any) => s?.start_time && s?.end_time)
+  if (list.length === 0) return []
+  const minStart = Math.min(...list.map((s: any) => timeToMinutes(s.start_time.substring(0, 5))))
+  const maxEnd = Math.max(...list.map((s: any) => timeToMinutes(s.end_time.substring(0, 5))))
+  const slots: string[] = []
+  for (let m = minStart; m < maxEnd; m += 15) {
+    slots.push(minutesToTime(m))
   }
   return slots
 })
+
+// Dashboard columns — the same slots as Save, so the two can't disagree.
+const meterTimeSlots = computed(() => daySlots.value.map((time) => ({ time })))
 
 const formatTimeForMeterDashboard = (time: string): string => {
   const [hours, minutes] = time.split(':').map(Number)
@@ -2153,46 +1915,11 @@ const getMeterSlotStyle = (meterNumber: number, timeSlot: string): Record<string
   }
 }
 
-// Helper function to get dashboard label
-const getDashboardLabel = (dashboard: string): string => {
-  const labels: Record<string, string> = {
-    'locus': 'Locus',
-    'pick': 'Pick',
-    'x4': 'X4',
-    'em9': 'EM9',
-    'speedcell': 'Speedcell',
-    'helpdesk': 'Helpdesk',
-    'rtPick': 'RT Pick',
-    'projects': 'Projects',
-    'dgPick': 'DG Pick',
-    'runner': 'Runner'
-  }
-  return labels[dashboard] || dashboard
-}
-
-// Helper function to normalize job function names for matching
-const normalizeJobFunctionName = (name: string): string => {
-  // Convert dashboard key to job function name format
-  const mapping: Record<string, string> = {
-    'locus': 'Locus',
-    'pick': 'Pick',
-    'x4': 'X4',
-    'em9': 'EM9',
-    'speedcell': 'Speedcell',
-    'helpdesk': 'Helpdesk',
-    'rtpick': 'RT Pick',
-    'projects': 'Projects',
-    'dgpick': 'DG Pick',
-    'runner': 'Runner'
-  }
-  return mapping[name.toLowerCase()] || name
-}
-
 // Get employees assigned to a specific job function
 const getEmployeesForJobFunction = (jobFunctionKey: string) => {
   if (!employees.value || !scheduleAssignmentsData.value) return []
   
-  const jobFunctionName = normalizeJobFunctionName(jobFunctionKey)
+  const jobFunctionName = jobFunctionKey
   const assignedEmployees = new Set<string>()
   
   // Find all employees who have assignments to this job function
@@ -2236,9 +1963,7 @@ const getEmployeesForJobFunction = (jobFunctionKey: string) => {
 // the assignment data — so breaks always show in the dashboard even when an
 // assignment block happens to span them.
 const isEmployeeOnBreak = (employeeId: string, timeSlot: string): boolean => {
-  const emp = employees.value?.find((e: any) => e.id === employeeId)
-  if (!emp?.shift_id) return false
-  const shift = shifts.value?.find((s: any) => s.id === emp.shift_id)
+  const shift = shiftForEmployee(employeeId)
   if (!shift) return false
   const t = timeToMinutesHelper(timeSlot)
   const within = (start: any, end: any) =>
@@ -2263,7 +1988,7 @@ const isEmployeeAssignedToJobFunction = (employeeId: string, timeSlot: string, j
 
   if (!assignment || !assignment.assignment) return false
   
-  const jobFunctionName = normalizeJobFunctionName(jobFunctionKey)
+  const jobFunctionName = jobFunctionKey
   const assignmentName = String(assignment.assignment).toLowerCase().trim()
   const targetName = jobFunctionName.toLowerCase().trim()
   
@@ -2295,7 +2020,7 @@ const getJobFunctionSlotStyle = (employeeId: string, timeSlot: string, jobFuncti
   if (!isAssigned) return {}
   
   // Get the job function color
-  const jobFunctionName = normalizeJobFunctionName(jobFunctionKey)
+  const jobFunctionName = jobFunctionKey
   const jobFunction = jobFunctions.value?.find(jf => 
     jf.name.toLowerCase() === jobFunctionName.toLowerCase()
   )
@@ -2310,8 +2035,6 @@ const getJobFunctionSlotStyle = (employeeId: string, timeSlot: string, jobFuncti
 
 // Sync meter bookings with actual schedule assignments
 const syncMeterBookings = () => {
-  console.log('🔄 Syncing meter bookings...')
-  console.log('Schedule assignments data:', scheduleAssignmentsData.value)
   
   // Clear existing bookings
   meterBookings.value = {}
@@ -2366,8 +2089,6 @@ const syncMeterBookings = () => {
       
       // Now process each unique assignment range exactly once
       assignmentRanges.forEach((range, rangeKey) => {
-        console.log(`📊 Processing meter assignment: Meter ${range.meterNumber} at ${range.startTime} until ${range.endTime}`)
-        
         // Generate all 15-minute slots between start and end time
         const startMinutes = timeToMinutes(range.startTime)
         const endMinutes = timeToMinutes(range.endTime)
@@ -2389,8 +2110,6 @@ const syncMeterBookings = () => {
   if (doubleBookings.length > 0) {
     console.warn('⚠️ Double-booked meters detected:', doubleBookings)
   }
-  
-  console.log('📋 Final meter bookings:', meterBookings.value)
 }
 
 
@@ -2430,11 +2149,14 @@ onUnmounted(() => {
   window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 
-// In-app navigation (Back to Home, date change) bypasses beforeunload entirely.
-onBeforeRouteLeave(() => {
-  if (!hasUnsavedChanges.value) return true
-  return window.confirm('You have unsaved schedule changes. Leave without saving?')
-})
+// In-app navigation bypasses beforeunload entirely, so the router asks instead.
+// Leaving the page (Back to Home) is a route LEAVE; switching dates (picker, Today /
+// Yesterday / Tomorrow, the browser's Back between days) is a route UPDATE — same
+// page, new date — which the old leave-only guard never saw.
+const confirmDiscard = () =>
+  !hasUnsavedChanges.value || window.confirm('You have unsaved schedule changes. Leave without saving?')
+onBeforeRouteLeave(confirmDiscard)
+onBeforeRouteUpdate((to, from) => to.params.date === from.params.date || confirmDiscard())
 
 </script>
 

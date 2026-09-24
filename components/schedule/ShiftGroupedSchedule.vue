@@ -114,6 +114,24 @@
               </div>
 
             </div>
+
+            <!-- Time off: the hours they're out, greyed out OVER the row. It's see-through,
+                 so an assignment that clashes with the absence still shows underneath. -->
+            <div
+              v-if="getAbsenceRanges(employee.id, shift).length"
+              class="pointer-events-none absolute inset-0 grid"
+              :style="{ gridTemplateColumns: getGridTemplateColumns(shift) }"
+            >
+              <div
+                v-for="absence in getAbsenceRanges(employee.id, shift)"
+                :key="`absence-${employee.id}-${shift.id}-${absence.start}-${absence.end}`"
+                class="absence-span"
+                :style="{ gridColumn: `${absence.start} / ${absence.end}` }"
+                :title="absence.label"
+              >
+                <span class="absence-label">{{ absence.label }}</span>
+              </div>
+            </div>
           </div>
         </div>
         
@@ -157,7 +175,11 @@
           Assign Task to {{ selectedEmployee?.last_name }}, {{ selectedEmployee?.first_name }}
         </h3>
         <p class="text-sm text-gray-600 mb-3">
-          Time: {{ selectedTimeBlock?.display }} ({{ selectedTimeBlock?.time }})
+          <template v-if="selectedTimeBlock && selectedShift">
+            {{ formatTimeOfDay(timeToMinutes(selectedTimeBlock.time)) }}
+            · {{ selectedShift.name }} shift runs
+            {{ formatTimeOfDay(shiftBounds(selectedShift).start) }}–{{ formatTimeOfDay(shiftBounds(selectedShift).end) }}
+          </template>
         </p>
         
         <!-- Job Function Selection -->
@@ -264,6 +286,10 @@
           </div>
         </div>
 
+        <p v-if="modalError" class="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+          {{ modalError }}
+        </p>
+
         <!-- Action Buttons -->
         <div class="flex items-center justify-between space-x-2">
           <button
@@ -302,14 +328,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
-
-const { getEmployeeTraining } = useEmployees()
-const { getGroupedJobFunctions, isMeterJobFunction } = useJobFunctions()
-const { isPreferredAssignment, getAssignmentPriority, isRequiredAssignment } = usePreferredAssignments()
+import { ref, computed } from 'vue'
+import { describePto, formatTimeOfDay, ptoTimeLabel } from '~/utils/ptoDisplay'
 
 const BLOCK_WIDTH = 24
-const EMPLOYEE_COLUMN_WIDTH = 176
 
 // Optimize meter job functions with computed property to avoid repeated filtering
 const allIndividualMeters = computed(() => {
@@ -341,9 +363,6 @@ const props = defineProps<{
 // Emits
 const emit = defineEmits<{
   addAssignment: [employeeId: string, timeSlot: string]
-  editAssignment: [employeeId: string, timeSlot: string]
-  assignBreakCoverage: [employeeId: string, timeSlot: string]
-  scheduleDataUpdated: [scheduleData: Record<string, any>]
   addPTO: [employee: any]
   addShiftSwap: [employee: any]
   addCallIn: [employee: any]
@@ -351,10 +370,7 @@ const emit = defineEmits<{
 }>()
 
 // Use the passed scheduleAssignmentsData directly instead of local state
-const scheduleData = computed(() => {
-  console.log('Using scheduleAssignmentsData:', props.scheduleAssignmentsData)
-  return props.scheduleAssignmentsData || {}
-})
+const scheduleData = computed(() => props.scheduleAssignmentsData || {})
 
 // Assignment modal state
 const showAssignmentModal = ref(false)
@@ -365,6 +381,14 @@ const selectedJobFunction = ref<any>(null)
 const assignmentStartTime = ref('')
 const assignmentEndTime = ref('')
 const selectedMeterNumber = ref('')
+/** Why "Assign Task" was refused, shown inside the popup (these used to be alert() boxes). */
+const modalError = ref('')
+
+/** A shift's start and end in minutes, with the same fallbacks the grid draws with. */
+const shiftBounds = (shift: any) => ({
+  start: timeToMinutes(String(shift?.start_time || '06:00').substring(0, 5)),
+  end: timeToMinutes(String(shift?.end_time || '14:30').substring(0, 5)),
+})
 
 
 // Group employees by their assigned shifts
@@ -465,44 +489,10 @@ const availableJobFunctions = computed(() => {
   })
 })
 
-// Initialize schedule data for each employee
-const initializeScheduleData = () => {
-  props.employees.forEach(employee => {
-    if (!scheduleData.value[employee.id]) {
-      scheduleData.value[employee.id] = {
-        '06:00': { assignment: '', until: '', break1: { assignment: '', until: '' }, assignment2: '', until2: '' },
-        '08:00': { assignment: '', until: '', break1: { assignment: '', until: '' }, assignment2: '', until2: '' },
-        '10:00': { assignment: '', until: '', break1: { assignment: '', until: '' }, assignment2: '', until2: '' },
-        '12:00': { assignment: '', until: '', break2: { assignment: '', until: '' }, assignment2: '', until2: '' },
-        '16:30': { assignment: '', until: '', break2: { assignment: '', until: '' }, assignment2: '', until2: '' }
-      }
-    }
-  })
-}
-
-// Get assignment for employee at specific time
-const getAssignment = (employeeId: string, timeSlot: string, segment: number = 1) => {
-  const employeeData = scheduleData.value[employeeId]
-  if (!employeeData) {
-    console.log(`No employee data for ${employeeId}`)
-    return ''
-  }
-  
-  if (!employeeData[timeSlot]) {
-    console.log(`No assignment for ${employeeId} at ${timeSlot}. Available slots:`, Object.keys(employeeData))
-    return ''
-  }
-  
-  const assignment = segment === 1 ? 
-    (employeeData[timeSlot].assignment || '') : 
-    (employeeData[timeSlot].assignment2 || '')
-  
-  if (assignment) {
-    console.log(`Found assignment for ${employeeId} at ${timeSlot}:`, assignment)
-  }
-  
-  return assignment
-}
+// The job function in one 15-minute slot, or ''. Called for every cell on every
+// render — it used to log each call, ~17,000 console lines per page load.
+const getAssignment = (employeeId: string, timeSlot: string): string =>
+  scheduleData.value[employeeId]?.[timeSlot]?.assignment || ''
 
 // Get until time for employee at specific time
 const getUntil = (employeeId: string, timeSlot: string, segment: number = 1) => {
@@ -514,24 +504,6 @@ const getUntil = (employeeId: string, timeSlot: string, segment: number = 1) => 
   } else {
     return employeeData[timeSlot].until2 || ''
   }
-}
-
-// Get break assignment
-const getBreakAssignment = (employeeId: string, timeSlot: string, breakNumber: number) => {
-  const employeeData = scheduleData.value[employeeId]
-  if (!employeeData || !employeeData[timeSlot]) return ''
-  
-  const breakKey = `break${breakNumber}`
-  return employeeData[timeSlot][breakKey]?.assignment || ''
-}
-
-// Get break until time
-const getBreakUntil = (employeeId: string, timeSlot: string, breakNumber: number) => {
-  const employeeData = scheduleData.value[employeeId]
-  if (!employeeData || !employeeData[timeSlot]) return ''
-  
-  const breakKey = `break${breakNumber}`
-  return employeeData[timeSlot][breakKey]?.until || ''
 }
 
 // Update assignment
@@ -564,40 +536,6 @@ const updateUntil = (employeeId: string, timeSlot: string, value: string, segmen
   } else {
     scheduleData.value[employeeId][timeSlot].until2 = value
   }
-}
-
-// Update break assignment
-const updateBreakAssignment = (employeeId: string, timeSlot: string, breakNumber: number, value: string) => {
-  if (!scheduleData.value[employeeId]) {
-    scheduleData.value[employeeId] = {}
-  }
-  if (!scheduleData.value[employeeId][timeSlot]) {
-    scheduleData.value[employeeId][timeSlot] = {}
-  }
-  
-  const breakKey = `break${breakNumber}`
-  if (!scheduleData.value[employeeId][timeSlot][breakKey]) {
-    scheduleData.value[employeeId][timeSlot][breakKey] = {}
-  }
-  
-  scheduleData.value[employeeId][timeSlot][breakKey].assignment = value
-}
-
-// Update break until time
-const updateBreakUntil = (employeeId: string, timeSlot: string, breakNumber: number, value: string) => {
-  if (!scheduleData.value[employeeId]) {
-    scheduleData.value[employeeId] = {}
-  }
-  if (!scheduleData.value[employeeId][timeSlot]) {
-    scheduleData.value[employeeId][timeSlot] = {}
-  }
-  
-  const breakKey = `break${breakNumber}`
-  if (!scheduleData.value[employeeId][timeSlot][breakKey]) {
-    scheduleData.value[employeeId][timeSlot][breakKey] = {}
-  }
-  
-  scheduleData.value[employeeId][timeSlot][breakKey].until = value
 }
 
 // Get job function color
@@ -648,12 +586,6 @@ const getGridTemplateColumns = (shift: any) => {
   const cols = getShiftTimeBlocks(shift).length
   // Fixed column width for crisp alignment and predictable wrapping
   return `repeat(${cols}, minmax(${BLOCK_WIDTH}px, 1fr))`
-}
-
-const timeToColumnIndex = (time: string, shift: any) => {
-  const blocks = getShiftTimeBlocks(shift)
-  const index = blocks.findIndex(b => b.time === time)
-  return index >= 0 ? index + 1 : 1 // CSS grid columns are 1-based
 }
 
 // Build contiguous assignment ranges to render a single span per block
@@ -712,6 +644,45 @@ const hasCallIn = (employeeId: string) => {
   const recs = props.ptoByEmployeeId?.[employeeId]
   if (!Array.isArray(recs) || recs.length === 0) return false
   return recs.some((r: any) => r.pto_type === 'call_in')
+}
+
+/**
+ * Time off to shade on one row: a span per pto_days record, in this shift's grid
+ * columns. Read through describePto (utils/ptoDisplay.ts), the one place that
+ * knows arrive-late is stored from midnight and leave-early to midnight. A
+ * 15-minute column the absence only partly covers is shaded whole — the same
+ * rule the assign popup's overlap check uses.
+ */
+const getAbsenceRanges = (employeeId: string, shift: any) => {
+  const records = props.ptoByEmployeeId?.[employeeId] || []
+  if (records.length === 0) return []
+  const blocks = getShiftTimeBlocks(shift)
+  const ranges: Array<{ start: number; end: number; label: string }> = []
+  for (const record of records) {
+    const d = describePto(record)
+    if (!d) continue
+    let first = -1
+    let last = -1
+    blocks.forEach((b, i) => {
+      const m = timeToMinutes(b.time)
+      if (m + 15 > d.startMin && m < d.endMin) {
+        if (first < 0) first = i
+        last = i
+      }
+    })
+    if (first < 0) continue // entirely outside this shift's hours
+    ranges.push({ start: first + 1, end: last + 2, label: absenceLabel(record, d.allDay) })
+  }
+  return ranges
+}
+
+/** "PTO", "Call-in", "Arrives 9:38 AM", "Leaves 4:02 PM", "PTO 8:00 AM – 10:00 AM". */
+const absenceLabel = (record: any, allDay: boolean): string => {
+  if (record.pto_type === 'call_in') return 'Call-in'
+  if (allDay) return 'PTO'
+  const when = ptoTimeLabel(record)
+  if (when.startsWith('arrives') || when.startsWith('leaves')) return when.charAt(0).toUpperCase() + when.slice(1)
+  return `PTO ${when}`
 }
 
 const isOverlappingPTO = (employeeId: string, startMinutes: number, endMinutes: number) => {
@@ -852,105 +823,6 @@ const isHourlyMarker = (time: string): boolean => {
   return minutes === 0
 }
 
-// Check if a time slot should be blocked out as break time
-const isBreakTime = (timeSlot: string, shift: any) => {
-  // Convert time slot to minutes for comparison
-  const timeMinutes = timeToMinutes(timeSlot)
-  
-  // Helper function to safely convert database time strings to minutes
-  const convertTimeToMinutes = (timeStr: string | null | undefined): number | null => {
-    if (!timeStr) return null
-    
-    // Handle different time formats from database
-    let cleanTime = timeStr.toString().trim()
-    
-    // Remove seconds if present (HH:MM:SS -> HH:MM)
-    if (cleanTime.includes(':')) {
-      const parts = cleanTime.split(':')
-      if (parts.length === 3) {
-        cleanTime = `${parts[0]}:${parts[1]}`
-      }
-    }
-    
-    return timeToMinutes(cleanTime)
-  }
-  
-  // Get break times from shift data
-  const break1Start = convertTimeToMinutes(shift.break_1_start)
-  const break1End = convertTimeToMinutes(shift.break_1_end)
-  const break2Start = convertTimeToMinutes(shift.break_2_start)
-  const break2End = convertTimeToMinutes(shift.break_2_end)
-  const lunchStart = convertTimeToMinutes(shift.lunch_start)
-  const lunchEnd = convertTimeToMinutes(shift.lunch_end)
-  
-  // Check Break 1
-  if (break1Start !== null && break1End !== null) {
-    if (timeMinutes >= break1Start && timeMinutes < break1End) {
-      return true
-    }
-  }
-  
-  // Check Break 2
-  if (break2Start !== null && break2End !== null) {
-    if (timeMinutes >= break2Start && timeMinutes < break2End) {
-      return true
-    }
-  }
-  
-  // Check Lunch
-  if (lunchStart !== null && lunchEnd !== null) {
-    if (timeMinutes >= lunchStart && timeMinutes < lunchEnd) {
-      return true
-    }
-  }
-  
-  return false
-}
-
-// Get the type of break for a time slot
-const getBreakType = (timeSlot: string, shift: any) => {
-  const timeMinutes = timeToMinutes(timeSlot)
-  
-  // Helper function to convert time string to minutes (handles both HH:MM and HH:MM:SS formats)
-  const convertTimeToMinutes = (timeStr: string | null | undefined): number | null => {
-    if (!timeStr) return null
-    // Remove seconds if present (HH:MM:SS -> HH:MM)
-    const cleanTime = timeStr.toString().trim()
-    if (cleanTime.includes(':')) {
-      const parts = cleanTime.split(':')
-      if (parts.length === 3) {
-        return timeToMinutes(`${parts[0]}:${parts[1]}`)
-      }
-    }
-    return timeToMinutes(cleanTime)
-  }
-  
-  // Check if time slot falls within any configured break periods
-  const break1Start = convertTimeToMinutes(shift.break_1_start)
-  const break1End = convertTimeToMinutes(shift.break_1_end)
-  const break2Start = convertTimeToMinutes(shift.break_2_start)
-  const break2End = convertTimeToMinutes(shift.break_2_end)
-  const lunchStart = convertTimeToMinutes(shift.lunch_start)
-  const lunchEnd = convertTimeToMinutes(shift.lunch_end)
-  
-  // Check if time slot is within break 1 period
-  if (break1Start !== null && break1End !== null && timeMinutes >= break1Start && timeMinutes < break1End) {
-    return 'BREAK'
-  }
-  
-  // Check if time slot is within break 2 period
-  if (break2Start !== null && break2End !== null && timeMinutes >= break2Start && timeMinutes < break2End) {
-    return 'BREAK'
-  }
-  
-  // Check if time slot is within lunch period
-  if (lunchStart !== null && lunchEnd !== null && timeMinutes >= lunchStart && timeMinutes < lunchEnd) {
-    return 'LUNCH'
-  }
-  
-  return 'BREAK'
-}
-
 
 // Modal functions
 const openAssignmentModal = (employee: any, timeBlock: any, shift: any) => {
@@ -958,11 +830,12 @@ const openAssignmentModal = (employee: any, timeBlock: any, shift: any) => {
   selectedTimeBlock.value = timeBlock
   selectedShift.value = shift
   selectedJobFunction.value = null
-  
-  // Set default times based on the clicked time block
+  modalError.value = ''
+
+  // Default to an hour from the clicked slot — but never past the end of their shift.
   assignmentStartTime.value = timeBlock.time
-  assignmentEndTime.value = minutesToTime(timeToMinutes(timeBlock.time) + 60) // Default to 1 hour
-  
+  assignmentEndTime.value = minutesToTime(Math.min(timeToMinutes(timeBlock.time) + 60, shiftBounds(shift).end))
+
   // If there's an existing assignment, populate the form
   const existingAssignment = getAssignment(employee.id, timeBlock.time)
   if (existingAssignment) {
@@ -991,6 +864,7 @@ const closeAssignmentModal = () => {
   assignmentStartTime.value = ''
   assignmentEndTime.value = ''
   selectedMeterNumber.value = ''
+  modalError.value = ''
 }
 
 // Hard reset: wipe every assignment for this employee on this day. The parent
@@ -1017,19 +891,34 @@ const selectMeterNumber = (meter: any) => {
 const saveAssignment = () => {
   if (!selectedEmployee.value || !selectedTimeBlock.value || !selectedJobFunction.value || !assignmentStartTime.value || !assignmentEndTime.value) return
   
+  modalError.value = ''
+
   // For meter assignments, require meter number selection
   if ((selectedJobFunction.value.id === 'meter-group' || selectedJobFunction.value.name === 'Meter') && !selectedMeterNumber.value) {
-    alert('Please select a meter number')
+    modalError.value = 'Pick a meter number.'
     return
   }
-  
+
   // Snap to 15-minute increments to ensure perfect alignment
   const roundToQuarter = (mins: number) => Math.round(mins / 15) * 15
   const startMinutes = roundToQuarter(timeToMinutes(assignmentStartTime.value))
   const endMinutes = roundToQuarter(timeToMinutes(assignmentEndTime.value))
+  if (endMinutes <= startMinutes) {
+    modalError.value = 'The end time must be after the start time.'
+    return
+  }
+  // The grid only draws someone's own shift, so time outside it would be saved but
+  // never shown — the default end used to run an hour past the last slot.
+  const bounds = shiftBounds(selectedShift.value)
+  if (startMinutes < bounds.start || endMinutes > bounds.end) {
+    modalError.value =
+      `${selectedEmployee.value.first_name}'s shift runs ${formatTimeOfDay(bounds.start)}–${formatTimeOfDay(bounds.end)}. ` +
+      'Keep the assignment inside it, or give them a shift swap for different hours.'
+    return
+  }
   // PTO overlap check
   if (props.ptoByEmployeeId && isOverlappingPTO(selectedEmployee.value.id, startMinutes, endMinutes)) {
-    alert('This employee has PTO during the selected time. Adjust the range or remove PTO.')
+    modalError.value = 'They have time off during this time. Change the times, or remove the time off first.'
     return
   }
   
@@ -1067,57 +956,49 @@ const saveAssignment = () => {
   closeAssignmentModal()
 }
 
+/**
+ * Remove the clicked function wherever it carries on across a break or lunch —
+ * e.g. coordinator 7:00–8:45, break, coordinator 9:00–11:30 goes as one.
+ *
+ * Break slots are stepped over whatever they hold, and the walk stops at the first
+ * working slot with anything else in it. Only slots holding the removed function
+ * are cleared, so a neighbouring block is never trimmed. That includes break slots
+ * carrying it: a hand-made block that runs through a break keeps its label there,
+ * and the old walk stopped at the break and left it behind — Save then turned it
+ * into a stray row starting at the break.
+ */
 const removeAssignment = () => {
-  if (!selectedEmployee.value || !selectedTimeBlock.value || !selectedShift.value) return
-  
-  // Get the current assignment at the clicked time
-  const currentAssignment = getAssignment(selectedEmployee.value.id, selectedTimeBlock.value.time)
-  
-  if (!currentAssignment) {
-    // No assignment to remove
+  const emp = selectedEmployee.value
+  const shift = selectedShift.value
+  const clicked = selectedTimeBlock.value
+  if (!emp || !shift || !clicked) return
+
+  const label = getAssignment(emp.id, clicked.time)
+  if (!label) {
     closeAssignmentModal()
     return
   }
-  
-  // Find the entire contiguous assignment range that contains the clicked time
-  const blocks = getShiftTimeBlocks(selectedShift.value)
-  const clickedTime = selectedTimeBlock.value.time
-  const clickedMinutes = timeToMinutes(clickedTime)
-  
-  // Find the start of the contiguous assignment
-  let rangeStartMinutes = clickedMinutes
-  let rangeEndMinutes = clickedMinutes + 15 // Default to just the clicked block
-  
-  // Walk backwards to find the start of the contiguous range
-  let checkMinutes = clickedMinutes
-  while (checkMinutes >= timeToMinutes(blocks[0]?.time || '00:00')) {
-    const checkTime = minutesToTime(checkMinutes)
-    const assignment = getAssignment(selectedEmployee.value.id, checkTime)
-    if (assignment === currentAssignment && !isBreakTime(checkTime, selectedShift.value)) {
-      rangeStartMinutes = checkMinutes
-      checkMinutes -= 15
-    } else {
-      break
+
+  const blocks = getShiftTimeBlocks(shift)
+  const at = blocks.findIndex((b) => b.time === clicked.time)
+  if (at < 0) {
+    closeAssignmentModal()
+    return
+  }
+  const continues = (i: number) => blocks[i]!.isBreakTime || getAssignment(emp.id, blocks[i]!.time) === label
+  let first = at
+  let last = at
+  while (first > 0 && continues(first - 1)) first--
+  while (last < blocks.length - 1 && continues(last + 1)) last++
+
+  for (let i = first; i <= last; i++) {
+    const time = blocks[i]!.time
+    if (getAssignment(emp.id, time) === label) {
+      updateAssignment(emp.id, time, '')
+      updateUntil(emp.id, time, '')
     }
   }
-  
-  // Walk forwards to find the end of the contiguous range
-  checkMinutes = clickedMinutes + 15
-  const shiftEndMinutes = timeToMinutes(selectedShift.value.end_time || '23:59')
-  while (checkMinutes < shiftEndMinutes) {
-    const checkTime = minutesToTime(checkMinutes)
-    const assignment = getAssignment(selectedEmployee.value.id, checkTime)
-    if (assignment === currentAssignment && !isBreakTime(checkTime, selectedShift.value)) {
-      rangeEndMinutes = checkMinutes + 15
-      checkMinutes += 15
-    } else {
-      break
-    }
-  }
-  
-  // Remove all assignments in the entire range
-  clearAssignmentsInRange(selectedEmployee.value.id, rangeStartMinutes, rangeEndMinutes)
-  
+
   closeAssignmentModal()
 }
 
@@ -1132,59 +1013,20 @@ const clearAssignmentsInRange = (employeeId: string, startMinutes: number, endMi
   }
 }
 
-// Helper functions to determine assignment position for visual merging
-const isAssignmentStart = (employeeId: string, timeSlot: string): boolean => {
-  const assignment = getAssignment(employeeId, timeSlot)
-  if (!assignment) return false
-  
-  const currentMinutes = timeToMinutes(timeSlot)
-  const prevMinutes = currentMinutes - 15
-  const prevTimeSlot = minutesToTime(prevMinutes)
-  const prevAssignment = getAssignment(employeeId, prevTimeSlot)
-  
-  return assignment !== prevAssignment
-}
-
-const isAssignmentEnd = (employeeId: string, timeSlot: string): boolean => {
-  const assignment = getAssignment(employeeId, timeSlot)
-  if (!assignment) return false
-  
-  const currentMinutes = timeToMinutes(timeSlot)
-  const nextMinutes = currentMinutes + 15
-  const nextTimeSlot = minutesToTime(nextMinutes)
-  const nextAssignment = getAssignment(employeeId, nextTimeSlot)
-  
-  return assignment !== nextAssignment
-}
-
-const isAssignmentMiddle = (employeeId: string, timeSlot: string): boolean => {
-  const assignment = getAssignment(employeeId, timeSlot)
-  if (!assignment) return false
-  
-  return !isAssignmentStart(employeeId, timeSlot) && !isAssignmentEnd(employeeId, timeSlot)
-}
-
-const isAssignmentSingle = (employeeId: string, timeSlot: string): boolean => {
-  const assignment = getAssignment(employeeId, timeSlot)
-  if (!assignment) return false
-  
-  return isAssignmentStart(employeeId, timeSlot) && isAssignmentEnd(employeeId, timeSlot)
-}
-
-// Initialize on mount
-initializeScheduleData()
 </script>
 
 <style scoped>
 .shift-grouped-schedule {
   @apply w-full;
+  /* Name column: fits "Smith, Christopher" beside the PTO / SS / CI buttons and a badge.
+     It was 176px, which cut most names to "Smith, Barba…". */
+  --name-col: 240px;
 }
 
 .shift-group {
   @apply bg-white rounded-xl border border-gray-200;
   padding: 12px 0 12px 16px; /* top right bottom left - only left/top/bottom padding, no right padding */
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
-  /* Width is set dynamically based on shift end_time via inline style */
   /* Content extends to the right edge of container (no right padding) */
 }
 
@@ -1208,9 +1050,9 @@ initializeScheduleData()
   @apply px-1.5 py-0.5 text-[10px] font-semibold text-gray-700 border-r border-gray-300 flex-shrink-0;
   background: linear-gradient(135deg, #f9fafb 0%, #f3f4f6 100%);
   box-shadow: inset 0 -1px 0 0 rgba(0, 0, 0, 0.06);
-  width: 176px;
-  min-width: 176px;
-  max-width: 176px;
+  width: var(--name-col);
+  min-width: var(--name-col);
+  max-width: var(--name-col);
   box-sizing: border-box;
 }
 
@@ -1248,7 +1090,6 @@ initializeScheduleData()
 
 .shift-employees {
   @apply divide-y divide-gray-200;
-  /* Remove min-w-max to allow proper flex alignment */
 }
 
 .employee-row {
@@ -1265,9 +1106,9 @@ initializeScheduleData()
 .employee-name {
   @apply px-1.5 py-0.5 text-[10px] font-medium text-gray-900 border-r border-gray-300 flex-shrink-0;
   background: rgba(249, 250, 251, 0.5);
-  width: 176px;
-  min-width: 176px;
-  max-width: 176px;
+  width: var(--name-col);
+  min-width: var(--name-col);
+  max-width: var(--name-col);
   box-sizing: border-box;
 }
 
@@ -1278,44 +1119,13 @@ initializeScheduleData()
   border-right: 1px solid rgba(229, 231, 235, 0.5);
 }
 
-/* Removed hourly-marker-content - was causing unnecessary blue vertical bars */
-
 /* Base container for every 15-minute block */
 .assignment-cell-full {
   @apply w-full h-full min-h-[28px] flex items-stretch;
 }
 
-.assignment-input,
-.until-input {
-  @apply w-full px-1.5 py-0.5 text-xs border-0 bg-transparent focus:bg-white focus:ring-1 focus:ring-blue-500 focus:outline-none;
-}
-
-.assignment-clickable {
-  @apply w-full px-1.5 py-0.5 text-xs border border-gray-300 cursor-pointer hover:bg-opacity-80 transition-all min-h-[24px] flex items-center justify-center;
-}
-
 .assignment-clickable-full {
   @apply w-full h-full px-0 py-0.5 text-[9px] border border-gray-300 cursor-pointer hover:bg-opacity-80 transition-all min-h-[18px] flex items-center justify-center;
-}
-
-.assignment-start {
-  @apply rounded-l-lg border-r-0;
-}
-
-.assignment-middle {
-  @apply border-r-0 border-l-0;
-}
-
-.assignment-end {
-  @apply rounded-r-lg border-l-0;
-}
-
-.assignment-single {
-  @apply rounded-lg;
-}
-
-.until-display {
-  @apply w-full px-1.5 py-0.5 text-xs border border-gray-200 min-h-[26px] flex items-center justify-center text-gray-500;
 }
 
 .break-cell-full {
@@ -1328,95 +1138,28 @@ initializeScheduleData()
   @apply w-full h-full rounded border border-gray-200 text-[8px] text-gray-400 flex items-center justify-center;
 }
 
-.break-blocked {
-  @apply text-white font-bold;
+/* Time off: hatched grey over the hours someone is out. See-through, so an
+   assignment that clashes with it still shows underneath; the label sits in a
+   solid pill so it stays readable over a coloured bar. */
+.absence-span {
+  @apply rounded-lg border flex items-center justify-center px-1 overflow-hidden;
+  border-color: rgba(107, 114, 128, 0.5);
+  background: repeating-linear-gradient(135deg, rgba(243, 244, 246, 0.8) 0 6px, rgba(209, 213, 219, 0.8) 6px 12px);
 }
 
-.break-blocked::placeholder {
-  @apply text-gray-400;
-}
-
-.break-cell {
-  @apply w-full px-2 py-1 text-xs font-bold text-center border-0 cursor-not-allowed;
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.empty-cell {
-  @apply w-full px-2 py-1 text-xs text-center border border-gray-200;
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.absence-label {
+  @apply px-1.5 rounded bg-white text-[10px] font-semibold text-gray-700 whitespace-nowrap overflow-hidden text-ellipsis;
+  max-width: 100%;
+  box-shadow: 0 0 0 1px rgba(107, 114, 128, 0.35);
 }
 
 .no-employees-message {
   @apply border-t border-gray-200 pt-4;
 }
 
-/* Color coding for different job functions */
-.assignment-input[value*="Pick"] {
-  @apply bg-yellow-100;
-}
-
-.assignment-input[value*="X4"] {
-  @apply bg-green-100;
-}
-
-.assignment-input[value*="EM9"] {
-  @apply bg-green-100;
-}
-
-.assignment-input[value*="RT-Pick"] {
-  @apply bg-orange-100;
-}
-
-.assignment-input[value*="Meter"] {
-  @apply bg-blue-100;
-}
-
-.assignment-input[value*="Training"] {
-  @apply bg-red-100;
-}
-
-.assignment-input[value*="Lunch"] {
-  @apply bg-red-100;
-}
-
-/* Responsive design - optimized for full-width layout */
 @media (max-width: 1400px) {
   .shift-grouped-schedule {
     @apply text-xs;
-  }
-  
-  .employee-name {
-    @apply w-40 px-2;
-  }
-  
-  .assignment-input,
-  .until-input,
-  .break-input,
-  .break-until-input {
-    @apply px-1 py-0.5 text-xs;
-  }
-}
-
-@media (max-width: 1200px) {
-  .shift-grouped-schedule {
-    @apply text-xs;
-  }
-  
-  .employee-name {
-    @apply w-36 px-1;
-  }
-  
-  .assignment-input,
-  .until-input,
-  .break-input,
-  .break-until-input {
-    @apply px-1 py-0.5 text-xs;
   }
 }
 </style>

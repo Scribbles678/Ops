@@ -2,13 +2,18 @@ export const useEmployees = () => {
   const employees = ref<any[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+  // Active-only unless told otherwise, and remembered: a save refreshes the same
+  // list it came from. (It always refetched active-only, so on a page listing
+  // inactive people too, saving anyone made the inactive ones disappear.)
+  let activeOnlyList = true
 
-  const fetchEmployees = async (activeOnly = true) => {
+  const fetchEmployees = async (activeOnly?: boolean) => {
+    if (typeof activeOnly === 'boolean') activeOnlyList = activeOnly
     loading.value = true
     error.value = null
     try {
       employees.value = await $fetch<any[]>('/api/employees', {
-        params: activeOnly ? { active: 'true' } : {},
+        params: activeOnlyList ? { active: 'true' } : {},
       })
       return employees.value
     } catch (e: any) {
@@ -57,7 +62,7 @@ export const useEmployees = () => {
       await fetchEmployees()
       return true
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return false
     } finally {
       loading.value = false

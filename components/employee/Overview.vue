@@ -445,8 +445,8 @@
               </div>
               <p class="text-xs text-gray-500 mb-3">Visible to admins only.</p>
 
-              <!-- Quick add: one click logs it against today. -->
-              <div class="bg-gray-50 border border-gray-200 rounded-md p-2.5 mb-3">
+              <!-- Quick add: one click logs it against today. Hidden for now (SHOW_QUICK_ADD). -->
+              <div v-if="SHOW_QUICK_ADD" class="bg-gray-50 border border-gray-200 rounded-md p-2.5 mb-3">
                 <div class="flex items-center justify-between mb-2">
                   <span class="text-[11px] font-medium text-gray-600 uppercase tracking-wide">Quick add · today</span>
                   <span v-if="quickToast" class="text-[11px] text-gray-600">
@@ -1136,6 +1136,12 @@ const noteRailClass = (c: string) => ({
 // One click logs the note against today. `tag` is what makes repeats countable —
 // free text can't be tallied, and "late from break x5" is what a review needs.
 // To change this list, edit here; making it team-configurable is a small follow-up.
+
+// The whole "Quick add · today" card is hidden until the button labels are
+// reworked (Sep 2026). Set to true to bring it back — nothing else changed, and
+// notes already logged through it still show in the notes list.
+const SHOW_QUICK_ADD = false
+
 const QUICK_NOTES = [
   { tag: 'early_to_break',  label: 'Early to break',    category: 'concern',  body: 'Left for break early.' },
   { tag: 'late_from_break', label: 'Late from break',   category: 'concern',  body: 'Returned from break late.' },

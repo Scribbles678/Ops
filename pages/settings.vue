@@ -42,11 +42,11 @@
               v-model="newPassword"
               type="password"
               required
-              minlength="6"
+              minlength="8"
               class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               :disabled="loading"
             />
-            <p class="mt-1 text-xs text-gray-500">Must be at least 6 characters</p>
+            <p class="mt-1 text-xs text-gray-500">Must be at least 8 characters</p>
           </div>
 
           <!-- Confirm New Password -->
@@ -59,15 +59,15 @@
               v-model="confirmPassword"
               type="password"
               required
-              minlength="6"
+              minlength="8"
               class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               :disabled="loading"
             />
           </div>
 
           <!-- Error Message -->
-          <div v-if="error" class="bg-red-50 border border-red-200 rounded-md p-3">
-            <p class="text-sm text-red-600">{{ error }}</p>
+          <div v-if="passwordError" class="bg-red-50 border border-red-200 rounded-md p-3">
+            <p class="text-sm text-red-600">{{ passwordError }}</p>
           </div>
 
           <!-- Success Message -->
@@ -574,7 +574,7 @@
             v-model="newUser.password"
             type="password"
             required
-            minlength="6"
+            minlength="8"
             class="w-full px-3 py-2 border border-gray-300 rounded-md"
           />
         </div>
@@ -771,7 +771,7 @@
                 v-model="newPasswordReset"
                 type="password"
                 required
-                minlength="6"
+                minlength="8"
                 placeholder="Enter new password"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md"
               />
@@ -783,7 +783,7 @@
                 v-model="confirmNewPasswordReset"
                 type="password"
                 required
-                minlength="6"
+                minlength="8"
                 placeholder="Confirm new password"
                 class="w-full px-3 py-2 border border-gray-300 rounded-md"
               />
@@ -866,6 +866,7 @@
 
 const route = useRoute()
 import { ROLES, roleOf, roleLabel, canManageTeam, type Role } from '~/utils/roles'
+import { announceAuthChange } from '~/composables/useAuth'
 
 const { user, fetchCurrentUser, changePassword: changePasswordApi } = useAuth()
 const { isSuperAdmin, checkIsSuperAdmin, fetchAllTeams, createTeam: createTeamFn, deleteTeam: deleteTeamFn } = useTeam()
@@ -1094,29 +1095,34 @@ const fetchUserProfile = async () => {
   }
 }
 
+// The Change Password card's own message. It used to share `error` with the
+// user-management modals, so a failure elsewhere (or "Unable to load user
+// session") showed up in this card and vice versa.
+const passwordError = ref('')
+
 // Handle password change
 const handleChangePassword = async () => {
-  error.value = ''
+  passwordError.value = ''
   success.value = ''
 
   // Validation
   if (!currentPassword.value || !newPassword.value || !confirmPassword.value) {
-    error.value = 'Please fill in all fields'
+    passwordError.value = 'Please fill in all fields'
     return
   }
 
   if (newPassword.value.length < 8) {
-    error.value = 'New password must be at least 8 characters'
+    passwordError.value = 'New password must be at least 8 characters'
     return
   }
 
   if (newPassword.value !== confirmPassword.value) {
-    error.value = 'New passwords do not match'
+    passwordError.value = 'New passwords do not match'
     return
   }
 
   if (currentPassword.value === newPassword.value) {
-    error.value = 'New password must be different from current password'
+    passwordError.value = 'New password must be different from current password'
     return
   }
 
@@ -1136,7 +1142,9 @@ const handleChangePassword = async () => {
       success.value = ''
     }, 3000)
   } catch (err: any) {
-    error.value = err.message || 'An unexpected error occurred'
+    // The server's own words ("Current password is incorrect"), not the raw
+    // `[POST] "/api/auth/change-password": 401 …` text.
+    passwordError.value = err.data?.message || err.message || 'An unexpected error occurred'
   } finally {
     loading.value = false
   }
@@ -1226,19 +1234,17 @@ const saveOwnTeam = async () => {
   if (!userProfile.value) return
   
   try {
-    await $fetch('/api/auth/me', {
+    const res = await $fetch<{ user: { id: string; team_id: string | null } }>('/api/auth/me', {
       method: 'PUT',
       body: { team_id: ownTeamData.value.team_id || null }
     })
-    // The team is carried in the session token, which the endpoint just
-    // re-issued. Re-read it before rendering, or the page keeps showing the
-    // previous team until the next login.
-    await fetchCurrentUser()
-    await fetchUserProfile()
-    await checkIsSuperAdmin()
-    showEditOwnTeamModal.value = false
-    ownTeamData.value.team_id = ''
-    error.value = ''
+    // Reload the whole page, and tell this browser's other tabs to reload too.
+    // Refreshing only the profile left the Request Rules and Blocked Dates of the
+    // PREVIOUS team on screen, and pressing Save Rules then copied them into the
+    // new team (Sep 2026). Other open tabs kept showing the old team while their
+    // saves landed in the new one.
+    announceAuthChange(res.user)
+    window.location.reload()
   } catch (err: any) {
     error.value = err.data?.message || err.message || 'Failed to update team'
   }
@@ -1334,8 +1340,10 @@ const handleResetPassword = async () => {
     return
   }
   
-  if (newPasswordReset.value.length < 6) {
-    error.value = 'Password must be at least 6 characters'
+  // Same minimum as the server (admin/users/reset-password.ts). This form said 6
+  // while the server required 8.
+  if (newPasswordReset.value.length < 8) {
+    error.value = 'Password must be at least 8 characters'
     return
   }
   

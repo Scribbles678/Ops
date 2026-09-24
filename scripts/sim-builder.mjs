@@ -1,9 +1,8 @@
 /**
- * Headless harness: replay REAL database inputs through the REAL builder engines
+ * Headless harness: replay REAL database inputs through the REAL builder engine
  * and print quality metrics. Read-only - it never writes to the database.
  *
- *   node scripts/sim-builder.mjs 2026-08-03                    # both engines, A/B
- *   node scripts/sim-builder.mjs 2026-08-03 --engine period    # just one
+ *   node scripts/sim-builder.mjs 2026-08-03
  *   node scripts/sim-builder.mjs 2026-08-03 --team "Site B"
  *
  * WHY IT LOOKS LIKE THIS: this file used to contain a hand-written second copy of
@@ -34,7 +33,6 @@ const flag = (name, fallback = null) => {
 }
 const DATE = argv.find((a) => /^\d{4}-\d{2}-\d{2}$/.test(a)) || new Date().toISOString().slice(0, 10)
 const TEAM_NAME = flag('team')
-const ENGINE = flag('engine', 'both')
 const CONN = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5433/scheduling'
 
 /** Bundle the real engine sources and import them. No copies, no drift. */
@@ -44,7 +42,6 @@ async function loadEngines() {
       contents: [
         "export { prepare } from './utils/scheduleEngineV2/prepare'",
         "export { runEngine } from './utils/scheduleEngineV2/engine'",
-        "export { runPeriodEngine } from './utils/scheduleEngineV2/periodEngine'",
       ].join('\n'),
       resolveDir: ROOT,
       loader: 'ts',
@@ -98,7 +95,7 @@ async function loadInputs() {
   const prefMap = {}
   for (const pa of prefs) (prefMap[pa.employee_id] ??= {})[pa.job_function_id] = pa
   const ptoByEmployee = {}
-  for (const p of pto) ptoByEmployee[p.employee_id] = p
+  for (const p of pto) (ptoByEmployee[p.employee_id] ??= []).push(p)
   const swappedShiftByEmployee = {}
   for (const sw of swaps) {
     if (sw.employee_id && sw.swapped_shift_id) swappedShiftByEmployee[sw.employee_id] = sw.swapped_shift_id
@@ -143,7 +140,7 @@ function score(label, assignments, prepared) {
   const fnDist = {}
   // Bouncing: a PERIOD is a maximal on-clock run between breaks/lunch/PTO (the
   // free grid straight out of prepare()). Count the periods that carry more than
-  // one function - the thing the period engine exists to keep small.
+  // one function - the team lead's complaint about people moved between jobs.
   let periods = 0
   let switchedPeriods = 0
   let peopleWhoSwitch = 0
@@ -189,8 +186,8 @@ function score(label, assignments, prepared) {
       const have = cov[s] ?? 0
       if (have < need) {
         const short = need - have
-        // A hole during a break/lunch on a function not flagged to stay covered
-        // through it is not a gap, by the floor's own rule (EngineFunction.mustCover).
+        // A hole during a break or lunch is not a gap, by the floor's own rule
+        // (EngineFunction.mustCover).
         if (fn.mustCover[s] !== 1) { notCounted += short; continue }
         unmet += short
         unmetByFn[fn.name] = (unmetByFn[fn.name] ?? 0) + short
@@ -203,7 +200,7 @@ function score(label, assignments, prepared) {
             break
           }
         }
-      } else if (need > 0 && have > need && !fn.excludeFromTargets) {
+      } else if (need > 0 && have > need) {
         over += have - need
         overByFn[fn.name] = (overByFn[fn.name] ?? 0) + (have - need)
       }
@@ -225,16 +222,15 @@ function score(label, assignments, prepared) {
     ' | IDLE ' + hrs(onClock - assignedSlots) + 'h'
   )
   console.log('distinct functions/person: ' + JSON.stringify(fnDist) + ' | employees with no work: ' + noWork)
-  console.log('UNMET ' + hrs(unmet) + 'h  |  OVER-target ' + hrs(over) + 'h  |  break/lunch holes not counted (function not flagged to stay covered): ' + hrs(notCounted) + 'h')
+  console.log('UNMET ' + hrs(unmet) + 'h  |  OVER-target ' + hrs(over) + 'h  |  break/lunch holes not counted: ' + hrs(notCounted) + 'h')
   console.log('  unmet by function: ' + top(unmetByFn))
   console.log('  over by function:  ' + top(overByFn))
   console.log("FIXABLE unmet (a trained person was free and idle): " + hrs(fixable) + "h  <-- the engine's own misses")
   console.log('BOUNCING: ' + switchedPeriods + ' of ' + periods + ' stretches between breaks carry more than one function | people who switch mid-stretch: ' + peopleWhoSwitch)
   for (const x of examples) console.log('    e.g. ' + x)
-  return { unmet, over, idle: onClock - assignedSlots, fixable, unmetByFn, switchedPeriods }
 }
 
-const { prepare, runEngine, runPeriodEngine } = await loadEngines()
+const { prepare, runEngine } = await loadEngines()
 const input = await loadInputs()
 
 const prepArgs = () => ({
@@ -257,43 +253,18 @@ console.log(
   input.swaps.length + ' shift swap(s)'
 )
 
-const engines = {
-  slot: ['Automated Schedule Builder (slot engine)', runEngine],
-  period: ['Automated Schedule Builder V2 (period engine)', runPeriodEngine],
-}
-const selected = ENGINE === 'both' ? Object.keys(engines) : [ENGINE]
-if (selected.some((k) => !engines[k])) throw new Error('--engine must be slot, period or both')
-
-const scored = {}
-for (const key of selected) {
-  const [label, run] = engines[key]
-  const prepared = prepare(prepArgs())
-  const result = run({
-    employees: prepared.employees,
-    functions: prepared.functions,
-    preferred: prepared.preferred,
-    requiredPins: prepared.requiredPins,
-  })
-  scored[key] = score(label, result.assignments, prepare(prepArgs()))
-  console.log(
-    '  gaps: ' + result.gaps.length +
-    ' | feasibility issues: ' + result.feasibility.length +
-    ' | things to fix: ' + result.actions.length +
-    ' | notes: ' + result.warnings.length
-  )
-  for (const a of result.actions) console.log('    FIX: ' + a)
-}
-
-// A/B: which functions each engine leaves shorter. "Zero functions made worse"
-// is the bar for an engine change - read this, not the headline.
-if (selected.length === 2) {
-  const [a, b] = selected.map((k) => scored[k])
-  const names = new Set([...Object.keys(a.unmetByFn), ...Object.keys(b.unmetByFn)])
-  console.log('\n===== slot -> period, unmet by function (only where they differ) =====')
-  for (const n of [...names].sort()) {
-    const ua = (a.unmetByFn[n] ?? 0) / 4
-    const ub = (b.unmetByFn[n] ?? 0) / 4
-    if (ua === ub) continue
-    console.log('  ' + n.padEnd(14) + ua.toFixed(2).padStart(6) + 'h -> ' + ub.toFixed(2).padStart(6) + 'h  ' + (ub > ua ? 'worse +' : 'better -') + Math.abs(ub - ua).toFixed(2))
-  }
-}
+const prepared = prepare(prepArgs())
+const result = runEngine({
+  employees: prepared.employees,
+  functions: prepared.functions,
+  preferred: prepared.preferred,
+  requiredPins: prepared.requiredPins,
+})
+score('Automated Schedule Builder', result.assignments, prepare(prepArgs()))
+console.log(
+  '  gaps: ' + result.gaps.length +
+  ' | feasibility issues: ' + result.feasibility.length +
+  ' | things to fix: ' + (prepared.actions.length + result.actions.length) +
+  ' | notes: ' + (prepared.warnings.length + result.warnings.length)
+)
+for (const a of [...prepared.actions, ...result.actions]) console.log('    FIX: ' + a.message + (a.fix ? '  [' + a.fix + ']' : ''))

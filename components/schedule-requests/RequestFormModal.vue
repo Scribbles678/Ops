@@ -526,6 +526,7 @@ const emit = defineEmits<{
 const { submitRequest } = useScheduleRequests()
 
 const { user, login: authLogin, fetchCurrentUser } = useAuth()
+const route = useRoute()
 
 const employees = ref<any[]>([])
 const shifts = ref<any[]>([])
@@ -868,7 +869,9 @@ const handleLogin = async () => {
   loggingIn.value = true
   loginError.value = ''
   try {
-    await authLogin(loginEmail.value, loginPassword.value)
+    // On the wall display, only the kiosk account: a supervisor signing in here used
+    // to leave the board running as them indefinitely.
+    await authLogin(loginEmail.value, loginPassword.value, { kioskOnly: route.path === '/display' })
     await loadFormData()
   } catch (e: any) {
     loginError.value = e.data?.message || e.message || 'Login failed'

@@ -306,7 +306,12 @@ removed in Sep 2026 (the overview has its own home card).
 ever disagree again, that is the signal something bypassed the shared module.
 
 **Builder integration:** the builder reads `/api/pto/[date]` (`pto_days` only, not
-pending requests), so only approved PTO affects schedule generation.
+pending requests), so only approved PTO affects schedule generation. The engine's
+`prepare()` reads every row for a person through `describePto`, as Copy and the
+display board do. Until Sep 2026 `prepare()` kept one row per person and read it
+itself: an arrive-late plus a
+leave-early on the same day honoured only one of them, and an untyped row the board
+shows as off all day was scheduled all day.
 
 **Copy Today's Schedule** (`POST /api/schedule/copy`) trims each copied block
 against the target date's absences with `describePto` + `subtractPto`, collecting

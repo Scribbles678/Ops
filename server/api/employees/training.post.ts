@@ -1,8 +1,10 @@
-import { query, transaction } from '../../utils/db'
-import { requireAuth, getWriteTeamId } from '../../utils/authorize'
+import { transaction } from '../../utils/db'
+import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
+import { assertEmployeeOnTeam, assertJobFunctionsOnTeam } from '../../utils/teamOwnership'
 
+/** Replace one employee's training with exactly this set of job functions. */
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const { employee_id, job_function_ids } = body
@@ -10,6 +12,11 @@ export default defineEventHandler(async (event) => {
   if (!employee_id || !Array.isArray(job_function_ids)) {
     throw createError({ statusCode: 400, message: 'employee_id and job_function_ids[] are required' })
   }
+
+  // The employee and every job must be on the writer's own team. This used to take
+  // any ids, so one team could overwrite — or wipe — another team's training.
+  await assertEmployeeOnTeam(employee_id, teamId)
+  await assertJobFunctionsOnTeam(job_function_ids, teamId)
 
   await transaction(async (client) => {
     // Remove training records not in the new list

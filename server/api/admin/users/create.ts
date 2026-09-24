@@ -55,7 +55,19 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'A user with this email already exists' })
   }
 
-  const username = normalizedEmail.split('@')[0]
+  // The username is the part of the email before the @, and it is unique across
+  // the whole install — so the second site's kiosk@… used to fail with a 500
+  // because the first site already had "kiosk". Sign-in is by email; the username
+  // is only shown, so take the next free "kiosk2", "kiosk3", …
+  const base = normalizedEmail.split('@')[0]
+  const taken = new Set(
+    (await query<{ username: string }>(
+      'SELECT username FROM user_profiles WHERE left(username, length($1)) = $1',
+      [base]
+    )).rows.map((r) => r.username)
+  )
+  let username = base
+  for (let n = 2; taken.has(username); n++) username = `${base}${n}`
   const password_hash = await bcrypt.hash(password, 12)
 
   const result = await query<{ id: string; username: string; email: string }>(

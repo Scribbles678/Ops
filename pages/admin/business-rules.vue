@@ -140,8 +140,9 @@
 
           <p class="mt-3 text-xs text-gray-500">
             <span class="font-medium text-gray-600">On shift</span> counts everyone whose shift covers
-            that hour. It ignores time off, breaks and lunch — for the real picture on a specific day,
-            use the Training &amp; Coverage Preview on the Create Schedule page.
+            that hour. It ignores time off, breaks and lunch, so a given day can be tighter than this.
+            How many of them are trained for each job:
+            <NuxtLink to="/details?tab=training-matrix" class="text-blue-600 hover:underline">Team Setup → Training Matrix</NuxtLink>.
           </p>
           <p class="mt-1.5 text-xs text-gray-500">
             Columns follow your active shifts, set in
@@ -352,6 +353,9 @@
 </template>
 
 <script setup lang="ts">
+import { shiftHours } from '~/utils/shiftHours'
+
+const route = useRoute()
 const { jobFunctions, fetchJobFunctions } = useJobFunctions()
 const { employees, fetchEmployees } = useEmployees()
 const { shifts, fetchShifts } = useSchedule()
@@ -389,34 +393,15 @@ const showSavedIcon = ref(false)
 const gridData = ref<Record<string, number>>({})
 const originalGridData = ref<Record<string, number>>({})
 
-/** "HH:MM[:SS]" -> minutes past midnight, or null. */
-const timeToMinutes = (t: string | null | undefined): number | null => {
-  if (!t) return null
-  const parts = String(t).split(':')
-  const h = Number(parts[0])
-  const m = Number(parts[1] ?? 0)
-  if (Number.isNaN(h) || Number.isNaN(m)) return null
-  return h * 60 + m
-}
-
 /**
- * Hours covered by at least one ACTIVE shift.
- *
- * An hour column is included when any part of it is worked: a 07:00-14:30 shift
- * covers 7AM through 2PM, because the 2PM column means 14:00-15:00 and half of it
- * is staffed.
+ * Hours covered by at least one ACTIVE shift. "Covered" is `shiftHours()`, shared
+ * with Team Setup → Training Matrix: any part of the hour is worked.
  */
 const staffedHours = computed<Set<number>>(() => {
   const set = new Set<number>()
   for (const sh of shifts.value || []) {
     if (!sh || sh.is_active === false) continue
-    const start = timeToMinutes(sh.start_time)
-    let end = timeToMinutes(sh.end_time)
-    if (start == null || end == null) continue
-    if (end <= start) end += 24 * 60 // crosses midnight
-    for (let h = Math.floor(start / 60); h <= Math.ceil(end / 60) - 1; h++) {
-      set.add(((h % 24) + 24) % 24)
-    }
+    for (const h of shiftHours(sh)) set.add(h)
   }
   return set
 })
@@ -460,28 +445,21 @@ const gridHours = computed(() => {
  *
  * Counts a person once per hour their shift overlaps, matching how the grid treats
  * an hourly target. Deliberately ignores time off: this is a planning template, not
- * a specific date, so there is no PTO to apply. It also ignores breaks and lunch —
- * for the real, dated picture (breaks, lunch, PTO and the worst 15 minutes) use the
- * Training & Coverage Preview on the Create Schedule page.
+ * a specific date, so there is no PTO to apply. It also ignores breaks and lunch.
  */
 const staffOnShiftByHour = computed<Record<string, number>>(() => {
   const out: Record<string, number> = {}
-  const activeShifts = new Map(
-    (shifts.value || []).filter((sh: any) => sh && sh.is_active !== false).map((sh: any) => [sh.id, sh])
+  const hoursByShift = new Map(
+    (shifts.value || [])
+      .filter((sh: any) => sh && sh.is_active !== false)
+      .map((sh: any) => [sh.id, new Set(shiftHours(sh))])
   )
   for (const h of gridHours.value) {
-    const hourStart = Number(h.value.slice(0, 2)) * 60
-    const hourEnd = hourStart + 60
+    const hour = Number(h.value.slice(0, 2))
     let n = 0
     for (const e of employees.value || []) {
       if (!e || e.is_active === false || !e.shift_id) continue
-      const sh: any = activeShifts.get(e.shift_id)
-      if (!sh) continue
-      const start = timeToMinutes(sh.start_time)
-      let end = timeToMinutes(sh.end_time)
-      if (start == null || end == null) continue
-      if (end <= start) end += 24 * 60 // crosses midnight
-      if (start < hourEnd && end > hourStart) n++
+      if (hoursByShift.get(e.shift_id)?.has(hour)) n++
     }
     out[h.value] = n
   }
@@ -513,13 +491,14 @@ const spareClass = (n: number) =>
 /** Columns shown only because a stale target sits there. */
 const unstaffedHours = computed(() => gridHours.value.filter((h) => !h.staffed))
 
-// Job functions for the grid (active, exclude individual Meter N — use parent Meter,
-// and exclude any functions marked as exclude_from_targets)
+// Job functions for the grid: every active one except the individual Meter N
+// (targets go on the parent Meter). There used to be an "Exclude from staffing
+// targets grid" setting as well; it only hid the row — any targets the job had were
+// still staffed, just no longer visible — so it was removed in Sep 2026.
 const gridJobFunctions = computed(() => {
   return [...(jobFunctions.value || [])]
     .filter(jf =>
       jf.is_active !== false &&
-      !jf.exclude_from_targets &&
       !/^Meter [0-9]+$/.test(jf.name || '')
     )
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
@@ -747,6 +726,8 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  // The build-result window links here to fix a required assignment.
+  if (route.query.open === 'required') await openPreferredAssignmentsModal()
 })
 
 onBeforeUnmount(() => {

@@ -16,7 +16,7 @@ A self-hosted, multi-tenant **distribution-center workforce scheduling app** (in
 | Doc | When |
 |---|---|
 | `docs/CONTEXT.md` | Architecture, directory map, data model, triggers, migrations ledger, env vars |
-| `docs/SCHEDULE-BUILDER.md` | **Anything touching either builder engine.** Both pipelines, the V2 cost function, `staffing_priority`, how to validate a change |
+| `docs/SCHEDULE-BUILDER.md` | **Anything touching the schedule builder.** The pipeline, the cost function, `staffing_priority`, required assignments, how to validate a change |
 | `docs/PTO-AND-REQUESTS.md` | **Anything touching PTO, requests, availability or the Employee Overview.** The hours model and the shared modules |
 | `docs/ROLES.md` | Permissions, team isolation |
 | `docs/TESTING.md` | **How to verify a change.** The four tiers, the engine harness, the browser smoke test, multi-tenancy checks |
@@ -59,8 +59,8 @@ Run the **smallest verification tier that applies**, then report what ran, what 
 
 | Change | Default check |
 |--------|---------------|
-| Server / TS / composable / type change | `npm run build` (this is the typecheck — there is no unit test suite) |
-| **Either builder engine** | `node scripts/sim-builder.mjs <date>` — replays real DB rows through BOTH real engines and A/Bs them. Compare before/after; **zero functions made worse** is the bar, and for the period engine also the BOUNCING line |
+| Server / TS / composable / type change | `npm run build`, then `vue-tsc` per `docs/TESTING.md` — **the build does not check types**, and ~220 type errors already exist, so check that yours add none. There is no unit test suite |
+| **The schedule builder** | `node scripts/sim-builder.mjs <date>` — replays real DB rows through the real engine and builds exactly what the app would. Run it before and after; **zero functions made worse** is the bar, and watch the BOUNCING line |
 | **UI / page / component** | `node scripts/ui-smoke.mjs` — drives the real browser, fails on any JS error, screenshots every screen. **Then look at the screenshots.** A build compiles a page that renders nonsense |
 | SQL / new migration | Apply `setup.sql` + every migration against a throwaway Postgres (below). A bad migration crashloops the pod on deploy |
 | Anything writing rows | Confirm `team_id` is stamped via `getWriteTeamId` and the right team can read it back |
@@ -69,8 +69,10 @@ Run the **smallest verification tier that applies**, then report what ran, what 
 **Point browser tests at a preview server you start (`node .output/server/index.mjs`
 on a spare port), never at the user's `npm run dev`** — a stale `docker compose` app
 usually holds port 3000 and pushes their dev server to 3001, and removing a
-composable leaves Vite serving 500s until it restarts. Exact commands in
-`docs/TESTING.md`.
+composable leaves Vite serving 500s until it restarts. **Another Claude session may
+be running its own preview in this repo:** check your port is free before starting,
+and stop your server by its port or PID, never by matching `server/index.mjs` (that
+kills theirs too). Exact commands in `docs/TESTING.md`.
 
 **→ `docs/TESTING.md` is the full guide.** Passing `npm run build` proves only that it
 compiles; it says nothing about whether the screen renders correctly or the schedule
@@ -86,10 +88,10 @@ There is **no SSH/PM2 and no unit tests** here. Changes reach prod only via git 
 
 ```bash
 npm run dev      # local dev server (localhost:3000, falls back to 3001 if taken)
-npm run build    # production build — ALSO your typecheck
+npm run build    # production build — does NOT check types (vue-tsc: docs/TESTING.md)
 docker compose up -d   # app + Postgres locally; app self-bootstraps schema + admin
 
-node scripts/sim-builder.mjs 2026-08-03   # engine harness: real data, real engines, quality metrics
+node scripts/sim-builder.mjs 2026-08-03   # engine harness: real data, the real engine, quality metrics
 node scripts/ui-smoke.mjs                 # browser smoke test (needs: npm i --no-save playwright-core)
 ```
 
@@ -111,7 +113,7 @@ docker exec -i throwaway-pg psql -v ON_ERROR_STOP=1 -U postgres -d scheduling
 - **Nuxt 4, SSR disabled** (`ssr: false`). Pages in `pages/`, shared logic in `composables/`, server in `server/`.
 - **Nitro file-based API**, method-suffixed: `server/api/<resource>/index.get.ts`, `[id].put.ts`, etc.
 - **Raw `pg`, no ORM.** All SQL hand-written and **parameterized** (`$1,$2…`) — never string-concatenate input into SQL. Pool + `query()` + `transaction()` in `server/utils/db.ts`.
-- **Auth:** custom JWT in an HttpOnly cookie. `server/middleware/auth.ts` populates `event.context.user`; routes gate with `requireAuth` / `requireTeamLead` / `requireSupervisor` / `requireSuperAdmin` from `server/utils/authorize.ts`. Four exclusive roles (Super Admin, Supervisor, Team Lead / Coordinator, Kiosk) defined once in `utils/roles.ts`; no role = no access. See `docs/ROLES.md`.
+- **Auth:** custom JWT in an HttpOnly cookie. `server/middleware/auth.ts` populates `event.context.user` **from `user_profiles` on every `/api` call** — the token only says who you are, so deactivation and team/role changes apply at once — and re-issues the cookie while it's in use (8 h idle; kiosk 30 d). The cookie's `Secure` flag follows the request's real protocol (`setSessionCookie` in `server/utils/jwt.ts`); never key it off `NODE_ENV`, which the build fixes to production. `plugins/session.client.ts` turns any 401 into a "sign in again" modal, so a 401 must mean "session gone" — return 400 for a wrong password. Routes gate with `requireAuth` / `requireTeamLead` / `requireSupervisor` / `requireSuperAdmin` from `server/utils/authorize.ts`. Four exclusive roles (Super Admin, Supervisor, Team Lead / Coordinator, Kiosk) defined once in `utils/roles.ts`; no role = no access. See `docs/ROLES.md`.
 - **Frontend talks to the API via `$fetch`** inside composables; components stay thin.
 
 ## ⚠️ Multi-tenancy: the #1 gotcha
@@ -127,7 +129,7 @@ Every data table has `team_id`. Two helpers, **not interchangeable**:
 
 ## Database & migrations
 
-- **Self-bootstrapping** (`server/plugins/bootstrap.ts`): on boot, under a Postgres advisory lock, applies `sql-schema/setup.sql` if absent, then every `sql-schema/migrations/*.sql` in filename order, then seeds the first super admin if `user_profiles` is empty.
+- **Self-bootstrapping** (`server/plugins/bootstrap.ts`): on boot, under a Postgres advisory lock, applies `sql-schema/setup.sql` if absent, then every `sql-schema/migrations/*.sql` in filename order, then seeds the first super admin if `user_profiles` is empty. **Nitro does not await it**, so it waits for the database itself, API calls get 503 until it finishes, and a failure in a built app `process.exit(1)`s — a plain `throw` there is only logged and the app keeps serving a database with no tables (the Sep 2026 `relation "pto_days" does not exist`). Details in `docs/CONTEXT.md`.
 - **Every migration must be idempotent** (`CREATE/ALTER ... IF NOT EXISTS`, `ON CONFLICT`, guarded `DO` blocks) — they re-run on every deploy.
 - **Adding a migration:** create `sql-schema/migrations/NNN-short-name.sql` (next zero-padded number). Ships in the image, auto-applies next deploy — no manual SQL. **Schema-first:** the migration that adds a column must ship in the same image as the code that writes it.
 - **Data-mutating migrations are high-stakes** (they run on every boot and a failure crashloops the pod). Guard one-time data changes with a marker so they can't re-run, and validate on the throwaway Postgres first.
@@ -137,11 +139,13 @@ Every data table has `team_id`. Two helpers, **not interchangeable**:
 ## Domain notes that bite
 
 - **"Meter" job functions:** parent `Meter` fans out to children `Meter 1`, `Meter 2`, …; training on parent `Meter` qualifies for any `Meter N`. Matched by regex `/^Meter [0-9]+$/`, scoped to the function's `team_id`. Implemented in BOTH the builder and the `validate_assignment_training` trigger — keep them in sync.
-- **Automated Schedule Builder — ONE pipeline, TWO placement engines.** `utils/scheduleEngineV2/` (pure, DB-free) + `composables/useScheduleBuilderV2.ts`. Deterministic — no LLM, no solver. 96 x 15-minute slots, cost function, `staffing_priority`. **Per-hour `staffing_targets` are a MINIMUM, not a cap**: after targets are met surplus labour is deployed and over-target is *reported*, not suppressed. Writes via `POST /api/schedule/replace` (transactional delete+insert). **Read `docs/SCHEDULE-BUILDER.md` before changing it.**
-  - `engine.ts` (slot engine, the "Automated Schedule Builder" card) places 15-minute runs; `periodEngine.ts` (the "... Builder V2" card, Sep 2026) gives each person one function per stretch between breaks. They share `prepare()`, pins, the weights, merge, gap explanation and stats — those live once in `engine.ts` and are imported by the period engine. **Do not copy them.**
-  - A much older engine ("V1", `composables/useAIScheduleBuilder.ts`) was **deleted Aug 2026**. The `V2` in the directory and composable names is that history; the UI's "V2" card is the period engine. The pre-flight "Build Schedule" checklist went with V1; the Coverage Preview supersedes it.
+- **Automated Schedule Builder — ONE engine.** `utils/scheduleEngineV2/` (pure, DB-free: `prepare.ts` then `engine.ts`) + `composables/useScheduleBuilderV2.ts`. Deterministic — no LLM, no solver. 96 x 15-minute slots, cost function, strict `staffing_priority` order. **Per-hour `staffing_targets` are a MINIMUM, not a cap**: after targets are met surplus labour is deployed and over-target is *reported*, not suppressed. Writes via `POST /api/schedule/replace` (transactional delete+insert); the page asks before replacing a day that already has a schedule. **Read `docs/SCHEDULE-BUILDER.md` before changing it.**
+  - Two engines are gone: "V1" (`composables/useAIScheduleBuilder.ts`, deleted Aug 2026) and a "period engine" (`periodEngine.ts`, the "Builder V2" card, removed Sep 2026 — it let priority 1–2 functions go short). The `V2` in the directory and composable names is that history. The pre-flight "Build Schedule" checklist went with V1, and its successor, a dated coverage preview, was removed in Sep 2026.
+  - **Required assignments:** each `preferred_assignment_blocks` row uses its OWN job function, and a block the builder cannot place is reported as a thing to fix, never dropped silently. Until Sep 2026 every block got the row's base function, which is why pins looked ignored.
+  - `prepare()` reads absences through `describePto()` (every row for the person, not one) and sorts its own inputs, so a build depends on the data alone, not on the order rows were fetched in.
   - Builds are scoped to the caller's current team (Aug 2026). Previously they read every team and wrote to one, which put another site's people on this site's board.
-  - The engine returns **`actions`** (a person must fix this) separately from **`warnings`** (context). The review modal leads with actions. Never classify by matching message text.
+  - The engine returns **`actions`** (a person must fix this) separately from **`warnings`** (context). Each action is `{ message, fix }` — `fix` names the page the build-result window links to. The window leads with actions. Never classify by matching message text.
+  - **A failed input load stops the build.** The shared loaders (`useEmployees` etc.) turn a failed request into an empty list, so `generateV2Schedule()` checks every one and refuses to build rather than schedule without anyone's training, required assignments or time off.
   - `scripts/sim-builder.mjs` bundles and calls the **real** engine. It holds no scheduling logic — keep it that way. See `docs/TESTING.md`.
 - **PTO hours have exactly one implementation** — `server/utils/ptoHours.ts` (with `ptoUsage.ts` and `requestRules.ts`). The approval rule and the availability strip both route through it. They used to compute hours separately and drifted, which made the displayed "hours left" disagree with what approval allowed. `utils/ptoDisplay.ts` is the same deal for *reading* a `pto_days` row — `leave_early` stores a NULL end and `arrive_late` stores `00:00:00` as its start, so anything reading those columns literally gets two of the four types wrong. See `docs/PTO-AND-REQUESTS.md`.
 - **Duplicate implementations are this repo's recurring failure mode.** The PTO strip, `ptoTimeLabel`, `sim-builder.mjs` and the two builder engines each drifted from their twin; all four have since been collapsed to one implementation. When you find one rule in two places, extract it — don't patch both.

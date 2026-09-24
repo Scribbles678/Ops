@@ -2,12 +2,19 @@ export const useJobFunctions = () => {
   const jobFunctions = ref<any[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+  // Whether this instance's list includes inactive jobs. Team Setup asks for them
+  // (so a deactivated job can be switched back on); every other page gets active
+  // only. Remembered so a save refreshes the same list it came from.
+  let includeInactive = false
 
-  const fetchJobFunctions = async () => {
+  const fetchJobFunctions = async (opts?: { includeInactive?: boolean }) => {
+    if (typeof opts?.includeInactive === 'boolean') includeInactive = opts.includeInactive
     loading.value = true
     error.value = null
     try {
-      jobFunctions.value = await $fetch<any[]>('/api/job-functions')
+      jobFunctions.value = await $fetch<any[]>('/api/job-functions', {
+        params: includeInactive ? { include_inactive: 'true' } : {},
+      })
       return jobFunctions.value
     } catch (e: any) {
       error.value = e.message
@@ -25,7 +32,7 @@ export const useJobFunctions = () => {
       await fetchJobFunctions()
       return result
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return null
     } finally {
       loading.value = false
@@ -40,7 +47,7 @@ export const useJobFunctions = () => {
       await fetchJobFunctions()
       return result
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return null
     } finally {
       loading.value = false
@@ -55,7 +62,7 @@ export const useJobFunctions = () => {
       await fetchJobFunctions()
       return true
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return false
     } finally {
       loading.value = false

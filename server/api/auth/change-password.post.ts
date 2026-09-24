@@ -26,9 +26,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, message: 'User not found' })
   }
 
+  // 400, not 401: a 401 means "your session ended" everywhere else, and the app
+  // answers it by asking you to sign in again — not the right response to a typo.
   const valid = await bcrypt.compare(current_password, profile.password_hash)
   if (!valid) {
-    throw createError({ statusCode: 401, message: 'Current password is incorrect' })
+    throw createError({ statusCode: 400, message: 'Current password is incorrect' })
   }
 
   const newHash = await bcrypt.hash(new_password, 12)

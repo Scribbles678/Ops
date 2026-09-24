@@ -52,7 +52,7 @@
       </div>
 
       <!-- Schedule Generation Options -->
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6 mb-8">
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
         <!-- Copy Today's Schedule -->
         <div class="card hover:shadow-lg transition-all cursor-pointer" @click="copyTodaySchedule">
           <div class="text-center py-8">
@@ -71,7 +71,7 @@
              (Aug 2026) after the team lead confirmed this one schedules better. -->
         <div
           class="card hover:shadow-lg transition-all cursor-pointer"
-          @click="generateSchedule('slot')"
+          @click="generateSchedule()"
           :class="{ 'opacity-50 cursor-not-allowed': generating }"
         >
           <div class="text-center py-8">
@@ -93,36 +93,6 @@
               {{ generating
                 ? 'Please wait while we create your optimized schedule…'
                 : 'Generate an optimized schedule based on staffing targets, training, and required assignments' }}
-            </p>
-          </div>
-        </div>
-
-        <!-- Automated Schedule Builder V2 — the period engine. Same inputs, but
-             each person keeps one job for each stretch between breaks. -->
-        <div
-          class="card hover:shadow-lg transition-all cursor-pointer"
-          @click="generateSchedule('period')"
-          :class="{ 'opacity-50 cursor-not-allowed': generating }"
-        >
-          <div class="text-center py-8">
-            <div class="bg-indigo-100 rounded-full p-6 mb-4 mx-auto w-20 h-20 flex items-center justify-center">
-              <svg v-if="!generating" class="w-10 h-10 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h10" />
-              </svg>
-              <div v-else class="w-10 h-10 text-indigo-600">
-                <svg class="animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-              </div>
-            </div>
-            <h3 class="text-xl font-bold text-gray-800 mb-2">
-              {{ generating ? '⏳ Generating Schedule…' : 'Automated Schedule Builder V2' }}
-            </h3>
-            <p class="text-gray-600">
-              {{ generating
-                ? 'Please wait while we create your optimized schedule…'
-                : 'Same targets and training, but each person keeps one job for each stretch between breaks' }}
             </p>
           </div>
         </div>
@@ -157,13 +127,37 @@
         </div>
       </div>
 
-      <!-- Coverage preview for the selected date. Shows demand vs the people
-           actually on the clock BEFORE building, so impossible targets and
-           break/lunch cliffs are visible up front rather than discovered after. -->
-      <div v-if="selectedDate" class="mt-8">
-        <ScheduleCoveragePreview :date="selectedDate" />
-      </div>
+      <!-- (A dated Training & Coverage Preview sat here until Sep 2026. It was
+           replaced by Team Setup → Training Matrix, which is not tied to a date.) -->
 
+      <!-- Replace an existing schedule? Building and Copy Today both replace the
+           whole day, so a day that may carry hand edits gets asked about first. -->
+      <div v-if="replacePrompt" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+          <h3 class="text-xl font-bold text-gray-800 mb-3">Replace the existing schedule?</h3>
+          <p class="text-sm text-gray-700 mb-2">
+            {{ formatDate(replacePrompt.date) }} already has
+            {{ replacePrompt.count }} assignment{{ replacePrompt.count === 1 ? '' : 's' }}.
+          </p>
+          <p class="text-sm text-gray-700 mb-5">
+            {{ replacePrompt.action }} replaces all of them, including any changes made by hand.
+          </p>
+          <div class="flex justify-end gap-3">
+            <button
+              @click="answerReplacePrompt(false)"
+              class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              @click="answerReplacePrompt(true)"
+              class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium"
+            >
+              Replace
+            </button>
+          </div>
+        </div>
+      </div>
 
       <!-- Loading Modal -->
       <div v-if="generating" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -216,142 +210,149 @@
         </div>
       </div>
 
-      <!-- Warnings Modal -->
-      <div v-if="showWarningsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-2xl font-bold text-gray-800">Schedule Generation Complete</h3>
-            <button @click="closeWarningsModal" class="text-gray-400 hover:text-gray-600">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <!-- Build result. One headline, then only what matters, most urgent first:
+           what a person must fix (each linked to where it is fixed), where the day
+           is still short and why, and where the spare people went. Short enough to
+           read whole, so there is no "Show details". Keyed off whether a schedule
+           was produced — never off message text. -->
+      <div v-if="buildResult" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg max-w-2xl w-full mx-4 shadow-xl max-h-[90vh] overflow-y-auto">
+          <!-- Headline -->
+          <div class="flex items-start gap-3 px-6 pt-6">
+            <span
+              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+              :class="buildResult.schedule.length ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'"
+            >
+              <svg v-if="buildResult.schedule.length" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
+              </svg>
+              <svg v-else class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </span>
+            <div class="flex-1 min-w-0">
+              <h3 class="text-xl font-bold text-gray-900">
+                {{ buildResult.schedule.length ? 'Schedule saved' : 'Schedule not built' }}
+              </h3>
+              <p class="text-sm text-gray-600 mt-0.5">
+                {{ resultHeadline }}<span v-if="buildResult.noWork" class="font-medium text-amber-700">
+                  · {{ buildResult.noWork }} with no work</span>
+              </p>
+            </div>
+            <button @click="closeBuildResult" class="text-gray-400 hover:text-gray-600" aria-label="Close">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
-          
-          <!-- Failure. Checked FIRST so a real failure is never masked, and keyed
-               off whether a schedule was actually produced rather than sniffing the
-               warning text: V2's own summary says "No schedule can fill these",
-               which used to trip the failure test and paint a perfect build red. -->
-          <div v-if="buildFailed" class="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-            <p class="text-red-800 font-medium">
-              Schedule could not be generated. Please review the issues below.
-            </p>
-          </div>
 
-          <!-- Success with gaps -->
-          <div v-else class="mb-5 p-4 rounded-lg border"
-            :class="scheduleGaps.length > 0 ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'">
-            <p class="font-semibold" :class="scheduleGaps.length > 0 ? 'text-amber-900' : 'text-green-900'">
-              Schedule created
-            </p>
-            <p class="text-sm mt-0.5" :class="scheduleGaps.length > 0 ? 'text-amber-800' : 'text-green-800'">
-              {{ resultSummary }}
-            </p>
-          </div>
-
-          <!-- What a person has to go and fix. First, and the only thing styled to
-               demand attention: everything else here is either good news or context.
-               These come from the engines as a separate `actions` list, not from
-               pattern-matching the notes. -->
-          <div v-if="resultActions.length > 0" class="mb-5">
-            <h4 class="text-base font-semibold text-gray-800 mb-2">
-              {{ resultActions.length }} thing{{ resultActions.length === 1 ? '' : 's' }} to fix
-            </h4>
-            <div class="space-y-2">
-              <div
-                v-for="(action, index) in resultActions"
-                :key="index"
-                class="flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded-lg"
+          <div class="px-6 py-5 space-y-6">
+            <!-- Things to fix: the only part styled to demand attention. Red when
+                 nothing was built, because then these are why. -->
+            <section v-if="buildResult.fixes.length">
+              <h4 v-if="buildResult.schedule.length" class="text-sm font-semibold text-amber-900 mb-2">
+                {{ buildResult.fixes.length }} thing{{ buildResult.fixes.length === 1 ? '' : 's' }} to fix
+              </h4>
+              <ul
+                class="rounded-lg border divide-y"
+                :class="buildResult.schedule.length
+                  ? 'border-amber-200 bg-amber-50 divide-amber-200 text-amber-900'
+                  : 'border-red-200 bg-red-50 divide-red-200 text-red-900'"
               >
-                <span class="text-amber-500 mt-px shrink-0">&#9888;</span>
-                <p class="text-sm text-amber-900">{{ action }}</p>
+                <li
+                  v-for="(fix, index) in buildResult.fixes"
+                  :key="index"
+                  class="flex flex-col gap-1 px-3 py-2.5 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-4"
+                >
+                  <span>{{ fix.message }}</span>
+                  <NuxtLink
+                    v-if="fix.fix"
+                    :to="FIX_LINKS[fix.fix].to"
+                    class="shrink-0 whitespace-nowrap font-medium underline underline-offset-2 hover:no-underline"
+                  >
+                    {{ FIX_LINKS[fix.fix].label }} →
+                  </NuxtLink>
+                </li>
+              </ul>
+            </section>
+
+            <!-- Still short: a row per job a person could do something about, then
+                 one whole-floor line for what no schedule can cover. -->
+            <section v-if="shortHours > 0">
+              <div class="flex items-baseline justify-between border-b border-gray-200 pb-1.5">
+                <h4 class="text-sm font-semibold text-gray-900">Still short</h4>
+                <span class="text-sm font-semibold tabular-nums text-gray-900">{{ formatHours(shortHours) }} h</span>
               </div>
-            </div>
-          </div>
+              <ul class="divide-y divide-gray-100">
+                <li v-for="row in buildResult.short" :key="row.functionName + row.cause" class="flex gap-4 py-2 text-sm">
+                  <span class="w-24 sm:w-28 shrink-0 font-medium text-gray-900">{{ row.functionName }}</span>
+                  <span class="flex-1 min-w-0">
+                    <span class="text-gray-700">
+                      <!-- One unbreakable span per window, so a narrow screen wraps
+                           between windows, never inside "19:15–20:00". -->
+                      <template v-for="(w, i) in row.windows" :key="w"><span v-if="i" class="text-gray-400"> · </span><span class="whitespace-nowrap">{{ w }}</span></template>
+                    </span>
+                    <span class="block text-xs text-gray-500">{{ SHORT_REASON[row.cause] }}</span>
+                  </span>
+                  <span class="shrink-0 tabular-nums text-gray-700">{{ formatHours(row.hours) }} h</span>
+                </li>
+                <!-- Not a job: the floor as a whole. Muted, because nobody can act
+                     on it from here. -->
+                <li v-if="buildResult.unavoidable.hours > 0" class="flex gap-4 py-2 text-sm">
+                  <span class="w-24 sm:w-28 shrink-0 font-medium text-gray-500">Whole floor</span>
+                  <span class="flex-1 min-w-0">
+                    <span class="text-gray-700">
+                      <template v-for="(w, i) in buildResult.unavoidable.windows" :key="w"><span v-if="i" class="text-gray-400"> · </span><span class="whitespace-nowrap">{{ w }}</span></template>
+                    </span>
+                    <span class="block text-xs text-gray-500">{{ SHORT_REASON['floor-short'] }}</span>
+                  </span>
+                  <span class="shrink-0 tabular-nums text-gray-700">{{ formatHours(buildResult.unavoidable.hours) }} h</span>
+                </li>
+              </ul>
+            </section>
 
-          <!-- Everything below is detail, hidden until asked for. On a normal day
-               it is all expected output, and showing it by default made a healthy
-               build look like a list of problems. -->
-          <button
-            v-if="hasResultDetails"
-            @click="showResultDetails = !showResultDetails"
-            class="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-3"
-          >
-            <span class="transition-transform" :class="showResultDetails ? 'rotate-90' : ''">&#9656;</span>
-            {{ showResultDetails ? 'Hide details' : 'Show details' }}
-          </button>
-
-          <div v-if="showResultDetails">
-
-          <!-- Staffing Gaps Table -->
-          <div v-if="scheduleGaps.length > 0" class="mb-6">
-            <h4 class="text-lg font-semibold text-gray-700 mb-3">Uncovered Staffing Gaps:</h4>
-            <div class="overflow-x-auto">
-              <table class="min-w-full text-sm border border-gray-200 rounded-lg">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Job Function</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Hour</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Short By</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">
-                  <tr v-for="(gap, index) in scheduleGaps" :key="index" class="bg-yellow-50">
-                    <td class="px-4 py-2 font-medium text-gray-900">{{ gap.job_function_name }}</td>
-                    <td class="px-4 py-2 text-gray-600">{{ gap.hour }}</td>
-                    <td class="px-4 py-2 text-yellow-700 font-semibold">{{ gap.shortfall }} {{ gap.shortfall === 1 ? 'person' : 'people' }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Over-target (surplus) summary -->
-          <div v-if="overTargetByFunction.length > 0" class="mb-6">
-            <h4 class="text-base font-semibold text-gray-800 mb-1">Extra coverage</h4>
-            <p class="text-xs text-gray-500 mb-2">
-              More staff were available than your targets asked for, so the spare people were put to work here.
-              This is normal, not a problem.
+            <p v-if="buildResult.schedule.length && shortHours === 0" class="text-sm text-green-800">
+              Every target is covered.
             </p>
-            <div class="flex flex-wrap gap-2">
-              <span
-                v-for="(o, index) in overTargetByFunction"
-                :key="index"
-                class="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-50 text-blue-700 border border-blue-200"
-              >
-                {{ o.job_function_name }}
-                <span class="ml-1.5 font-semibold">+{{ o.surplus }} hr{{ o.surplus === 1 ? '' : 's' }}</span>
-              </span>
-            </div>
-          </div>
 
-          <!-- Informational notes. Grey, not yellow: nothing here needs doing, and
-               colouring them as warnings is what made a clean build read as a list
-               of problems. -->
-          <div v-if="scheduleWarnings.length > 0" class="mb-6">
-            <h4 class="text-base font-semibold text-gray-800 mb-2">Notes</h4>
-            <div class="space-y-2">
-              <div
-                v-for="(warning, index) in scheduleWarnings"
-                :key="index"
-                :class="buildFailed
-                  ? 'p-3 bg-red-50 border border-red-200 rounded-lg'
-                  : 'p-3 bg-gray-50 border border-gray-200 rounded-lg'"
-              >
-                <p :class="buildFailed ? 'text-sm text-red-800' : 'text-sm text-gray-600'"
-                >{{ warning }}</p>
+            <!-- Extra coverage: targets are a minimum, so spare people keep working.
+                 Informational, so plain chips and no explanation. -->
+            <section v-if="buildResult.extra.length">
+              <div class="flex items-baseline justify-between border-b border-gray-200 pb-1.5 mb-2.5">
+                <h4 class="text-sm font-semibold text-gray-900">Extra coverage</h4>
+                <span class="text-sm font-semibold tabular-nums text-gray-900">{{ formatHours(extraHours) }} h</span>
               </div>
-            </div>
+              <div class="flex flex-wrap gap-1.5">
+                <span
+                  v-for="e in buildResult.extra"
+                  :key="e.functionName"
+                  class="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-xs text-blue-800"
+                >
+                  {{ e.functionName }}
+                  <span class="font-semibold tabular-nums">+{{ formatHours(e.hours) }} h</span>
+                </span>
+              </div>
+            </section>
+
+            <ul v-if="buildResult.notes.length" class="space-y-1 text-xs text-gray-500">
+              <li v-for="(note, index) in buildResult.notes" :key="index">{{ note }}</li>
+            </ul>
           </div>
 
-          </div><!-- /details -->
-
-          <div class="flex justify-end">
+          <div class="flex justify-end px-6 pb-6">
             <button
-              @click="closeWarningsModal"
+              v-if="buildResult.schedule.length"
+              @click="viewBuiltSchedule"
               class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
             >
-              View Schedule
+              View schedule
+            </button>
+            <button
+              v-else
+              @click="closeBuildResult"
+              class="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+            >
+              Close
             </button>
           </div>
         </div>
@@ -363,7 +364,8 @@
 
 <script setup lang="ts">
 import { toLocalISO, addDays } from '~/utils/localDate'
-import type { BuilderEngine } from '~/composables/useScheduleBuilderV2'
+import type { BuildOutcome } from '~/composables/useScheduleBuilderV2'
+import type { FixPlace, GapCause } from '~/utils/scheduleEngineV2/types'
 
 // `error` carries the copy endpoint's real message (which row, which rule).
 const { copySchedule, error: scheduleError } = useSchedule()
@@ -396,44 +398,52 @@ const isWeekend = computed(() => {
   return day === 0 || day === 6 // Sunday or Saturday
 })
 
-// AI Generation state
+// Builder state. `buildResult` is what the last build returned, plus the date it
+// was for, while its result window is open; null when closed. The date is kept so
+// "View schedule" opens the day that was built even if the picker has moved since.
 const generating = ref(false)
-const showWarningsModal = ref(false)
-const scheduleWarnings = ref<string[]>([])
-// True only when a build produced no schedule at all. The banner used to infer
-// this from the warning text, which broke as soon as a warning contained the
-// words "No schedule".
-const buildFailed = ref(false)
-// Things a person must go and fix, supplied by the engines as their own list.
-const resultActions = ref<string[]>([])
-// One plain-language line under the headline, e.g.
-// "204 assignments · everyone has work · all reachable targets met".
-const resultSummary = ref('')
-const showResultDetails = ref(false)
-const hasResultDetails = computed(
-  () => scheduleGaps.value.length > 0 || overTargetByFunction.value.length > 0 || scheduleWarnings.value.length > 0
-)
+const buildResult = ref<(BuildOutcome & { date: string }) | null>(null)
 
-/** Build the headline summary from counts, so a zero never gets its own line. */
-const summarise = (assignmentCount: number, noWork: number | null, gapCount: number): string => {
-  const parts = [`${assignmentCount} assignment${assignmentCount === 1 ? '' : 's'}`]
-  if (noWork != null) {
-    parts.push(noWork === 0 ? 'everyone has work' : `${noWork} ${noWork === 1 ? 'person has' : 'people have'} no work`)
-  }
-  parts.push(gapCount === 0 ? 'all reachable targets met' : `${gapCount} target${gapCount === 1 ? '' : 's'} still short`)
-  return parts.join(' · ')
+/** Where each kind of fix is made. The result window links straight there. */
+const FIX_LINKS: Record<FixPlace, { label: string; to: string }> = {
+  'rules-and-targets': { label: 'Rules & Targets', to: '/admin/business-rules' },
+  'required-assignments': { label: 'Required Assignments', to: '/admin/business-rules?open=required' },
+  employees: { label: 'Employees & Training', to: '/details?tab=employees' },
+  'job-functions': { label: 'Job Functions', to: '/details?tab=job-functions' },
+  shifts: { label: 'Shifts', to: '/details?tab=shifts' },
 }
-const scheduleGaps = ref<{ job_function_name: string; hour: string; shortfall: number }[]>([])
-const scheduleOverTarget = ref<{ job_function_name: string; hour: string; surplus: number }[]>([])
 
-// Surplus (over-target) staffing aggregated per function for a compact summary.
-const overTargetByFunction = computed(() => {
-  const map = new Map<string, number>()
-  for (const o of scheduleOverTarget.value) {
-    map.set(o.job_function_name, (map.get(o.job_function_name) || 0) + o.surplus)
-  }
-  return Array.from(map, ([job_function_name, surplus]) => ({ job_function_name, surplus }))
-    .sort((a, b) => b.surplus - a.surplus)
+/** Why a job went short, in a few words. */
+const SHORT_REASON: Record<GapCause, string> = {
+  'all-trained-busy': 'everyone trained was on other work',
+  capped: 'at its max headcount',
+  'no-availability': 'trained staff free for under 30 minutes',
+  'no-one-trained-on-shift': 'no one trained is on shift then',
+  'no-one-trained': 'no one is trained for it',
+  'floor-short': 'more work than people on shift',
+}
+
+const shortHours = computed(() =>
+  (buildResult.value?.short ?? []).reduce((sum, row) => sum + row.hours, 0) + (buildResult.value?.unavoidable.hours ?? 0)
+)
+const extraHours = computed(() => (buildResult.value?.extra ?? []).reduce((sum, e) => sum + e.hours, 0))
+
+/** 6.75 -> "6.75", 0.5 -> "0.5", 8 -> "8". */
+const formatHours = (h: number) => String(Math.round(h * 100) / 100)
+
+/** "2026-09-24" -> "Thu, Sep 24". A date-time with no offset parses as LOCAL time. */
+const shortDate = (iso: string): string =>
+  new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+
+/** "Thu, Sep 24 · 40 people scheduled · 2 off all day". Zeros are left out. */
+const resultHeadline = computed(() => {
+  const result = buildResult.value
+  if (!result) return ''
+  const parts = [shortDate(result.date)]
+  if (result.schedule.length) parts.push(`${result.people} ${result.people === 1 ? 'person' : 'people'} scheduled`)
+  else parts.push('nothing was saved')
+  if (result.offAllDay) parts.push(`${result.offAllDay} off all day`)
+  return parts.join(' · ')
 })
 
 // Notification modal state
@@ -484,6 +494,45 @@ const formatDate = (dateString: string) => {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
+// Building and Copy Today both REPLACE the whole day, and a day that already has
+// a schedule may carry hand edits. Both used to replace it without a word.
+const replaceCheckBusy = ref(false)
+const replacePrompt = ref<{ date: string; count: number; action: string; resolve: (ok: boolean) => void } | null>(null)
+
+/**
+ * Resolves true when it is fine to replace `date`: nothing is scheduled there yet,
+ * or the user said yes.
+ *
+ * Asks the API directly. useSchedule().fetchScheduleForDate turns a failed lookup
+ * into an empty list, and "empty" here would mean "overwrite without asking".
+ */
+const confirmReplace = async (date: string, action: string): Promise<boolean> => {
+  // A second click while the check or the question is open does nothing.
+  if (replaceCheckBusy.value) return false
+  replaceCheckBusy.value = true
+  try {
+    const existing = await $fetch<any[]>(`/api/schedule/${date}`)
+    if (!existing.length) return true
+    return await new Promise<boolean>((resolve) => {
+      replacePrompt.value = { date, count: existing.length, action, resolve }
+    })
+  } catch (e: any) {
+    showNotification(
+      `Could not check whether ${formatDate(date)} already has a schedule, so nothing was changed.\n${e?.data?.message || e?.message || ''}`,
+      'error'
+    )
+    return false
+  } finally {
+    replaceCheckBusy.value = false
+  }
+}
+
+const answerReplacePrompt = (ok: boolean) => {
+  const prompt = replacePrompt.value
+  replacePrompt.value = null
+  prompt?.resolve(ok)
+}
+
 const copyTodaySchedule = async () => {
   const target = selectedDate.value || ''
   if (!target) return
@@ -491,6 +540,7 @@ const copyTodaySchedule = async () => {
     showNotification('Pick a different date — this would copy today onto itself.', 'error')
     return
   }
+  if (!(await confirmReplace(target, "Copying today's schedule"))) return
 
   const result = await copySchedule(today.value, target)
 
@@ -525,42 +575,19 @@ const copyTodaySchedule = async () => {
   showNotification(lines.join('\n'), 'success')
 }
 
-// The schedule builder. Two placement engines share everything else; the card
-// chooses. See composables/useScheduleBuilderV2.ts for what each means.
-const generateSchedule = async (engine: BuilderEngine) => {
-  if (generating.value) return
+// The Automated Schedule Builder. See composables/useScheduleBuilderV2.ts.
+const generateSchedule = async () => {
+  if (generating.value || !selectedDate.value) return
+  if (!(await confirmReplace(selectedDate.value, 'Building a new schedule'))) return
+  const date = selectedDate.value
   try {
     generating.value = true
-    buildFailed.value = false
-    showResultDetails.value = false
-    resultActions.value = []
-    resultSummary.value = ''
-    scheduleWarnings.value = []
-    scheduleGaps.value = []
-    scheduleOverTarget.value = []
-
-    const { schedule, warnings, actions, errors, gaps, overTarget, structuralSummary, stats } =
-      await generateV2Schedule(selectedDate.value || '', engine)
-
-    if (schedule.length > 0) {
-      await applyV2Schedule(schedule, selectedDate.value || '')
-
-      // The headline carries the counts, so they are no longer repeated as notes.
-      // Only genuinely actionable gaps reach the table; the unfixable windows
-      // (whole shift on break, after-hours targets) are summarised in one line
-      // rather than listed as dozens of rows.
-      resultSummary.value = summarise(schedule.length, stats?.employeesWithNoWork ?? null, gaps?.length ?? 0)
-      resultActions.value = actions || []
-      scheduleWarnings.value = [...(structuralSummary || []), ...warnings]
-      scheduleGaps.value = gaps || []
-      scheduleOverTarget.value = overTarget || []
-      showWarningsModal.value = true
-    } else {
-      buildFailed.value = true
-      scheduleWarnings.value = errors.length ? errors : ['The builder produced no assignments.']
-      resultSummary.value = ''
-      showWarningsModal.value = true
-    }
+    buildResult.value = null
+    const outcome = await generateV2Schedule(date)
+    // Save first, then show what was saved. A build that produced nothing writes
+    // nothing, and its window says why.
+    if (outcome.schedule.length > 0) await applyV2Schedule(outcome.schedule, date)
+    buildResult.value = { ...outcome, date }
   } catch (error: any) {
     console.error('Error generating schedule:', error)
     showNotification(`❌ Error generating schedule: ${error?.message || 'unknown'}`, 'error')
@@ -569,10 +596,15 @@ const generateSchedule = async (engine: BuilderEngine) => {
   }
 }
 
-const closeWarningsModal = () => {
-  showWarningsModal.value = false
-  // Navigate to schedule view after closing modal
-  navigateTo(`/schedule/${selectedDate.value || ''}`)
+/** Close the result window and stay here, e.g. to fix something and build again. */
+const closeBuildResult = () => {
+  buildResult.value = null
+}
+
+const viewBuiltSchedule = () => {
+  const date = buildResult.value?.date
+  buildResult.value = null
+  if (date) navigateTo(`/schedule/${date}`)
 }
 
 const goToRulesAndTargets = () => {

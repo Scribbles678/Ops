@@ -97,6 +97,7 @@ try {
   for (const [name, path] of [
     ['settings', '/settings'],
     ['team setup - employees & training', '/details?tab=employees'],
+    ['team setup - training matrix', '/details?tab=training-matrix'],
     ['team setup - job functions', '/details?tab=job-functions'],
     ['old /training address redirects', '/training'],
     ['pto calendar', '/pto-calendar'],
@@ -118,11 +119,15 @@ try {
     await page.fill('#schedule-date', DATE)
     await page.waitForTimeout(2000)
     await page.getByText('Automated Schedule Builder', { exact: false }).first().click()
-    await page.waitForSelector('text=/Schedule Generation Complete|could not be generated/i', { timeout: 180000 })
+    // A date that already has a schedule asks before replacing it; --build means yes.
+    const prompt = page.getByText('Replace the existing schedule?')
+    const result = page.locator('h3', { hasText: /Schedule saved|Schedule not built/ })
+    await prompt.or(result).first().waitFor({ timeout: 180000 })
+    if (await prompt.isVisible()) await page.getByRole('button', { name: 'Replace' }).click()
+    await result.waitFor({ timeout: 180000 })
     await page.waitForTimeout(1500)
-    const modal = await page.locator('body').innerText()
-    const failed = /Schedule could not be generated/i.test(modal)
-    check('build succeeded', !failed, failed ? 'failure banner shown' : 'success banner shown')
+    const failed = (await result.innerText()).includes('not built')
+    check('build succeeded', !failed, failed ? '"Schedule not built" shown' : '"Schedule saved" shown')
     await shot('build-result')
   }
 } catch (e) {

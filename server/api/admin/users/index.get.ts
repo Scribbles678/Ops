@@ -26,6 +26,9 @@ export default defineEventHandler(async (event) => {
     const result = await query(sql, params)
     return result.rows
   } catch (e: any) {
+    // Keep a 401 or 403 as it is: turning "your session ended" into a 500 hid it
+    // from the app's sign-in-again prompt.
+    if (e?.statusCode) throw e
     const msg = e?.message || e?.data?.message || 'Failed to fetch users'
     throw createError({ statusCode: 500, message: msg })
   }

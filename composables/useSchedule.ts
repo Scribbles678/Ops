@@ -5,11 +5,19 @@ export const useSchedule = () => {
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  const fetchShifts = async () => {
+  // Whether this instance's shift list includes inactive shifts. Team Setup asks for
+  // them (so a deactivated shift can be switched back on); every other page gets
+  // active only. Remembered so a save refreshes the same list it came from.
+  let includeInactiveShifts = false
+
+  const fetchShifts = async (opts?: { includeInactive?: boolean }) => {
+    if (typeof opts?.includeInactive === 'boolean') includeInactiveShifts = opts.includeInactive
     loading.value = true
     error.value = null
     try {
-      shifts.value = await $fetch<any[]>('/api/shifts')
+      shifts.value = await $fetch<any[]>('/api/shifts', {
+        params: includeInactiveShifts ? { include_inactive: 'true' } : {},
+      })
       return shifts.value
     } catch (e: any) {
       error.value = e.message
@@ -27,7 +35,7 @@ export const useSchedule = () => {
       await fetchShifts()
       return data
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return null
     } finally {
       loading.value = false
@@ -42,7 +50,7 @@ export const useSchedule = () => {
       await fetchShifts()
       return data
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return null
     } finally {
       loading.value = false
@@ -57,7 +65,7 @@ export const useSchedule = () => {
       await fetchShifts()
       return true
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return false
     } finally {
       loading.value = false

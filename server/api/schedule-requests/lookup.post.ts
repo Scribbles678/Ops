@@ -9,7 +9,7 @@ import { normalizeUpi } from '../../utils/upi'
  *
  * Scoped to the caller's team (a kiosk account belongs to one site), so a UPI from
  * another site never resolves. Rate-limited per device in server/middleware/
- * rate-limit.ts so nobody can sit at the kiosk cycling through numbers.
+ * 1.rate-limit.ts so nobody can sit at the kiosk cycling through numbers.
  *
  * Returns: upcoming requests plus the last LOOKBACK_DAYS, newest first.
  */

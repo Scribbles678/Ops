@@ -1,13 +1,22 @@
 // Rate limiting middleware for API routes
 // Protects against API abuse and DoS attacks
+//
+// Named "1." so it runs before auth.ts (Nitro runs server middleware in filename
+// order): a flood is throttled before auth.ts looks the caller up in the database.
 
 import type { H3Event } from 'h3'
 
+/**
+ * The address to count against. X-Real-IP is set by the ingress (nginx overwrites
+ * whatever the browser sent). X-Forwarded-For is only trustworthy at its END — the
+ * hop the ingress appended — because a browser can put anything at its start; the
+ * first entry used to be taken, which let a caller pick their own bucket.
+ */
 function getClientIP(event: H3Event): string | undefined {
-  const xForwardedFor = getRequestHeader(event, 'x-forwarded-for')
-  if (xForwardedFor) return xForwardedFor.split(',')[0].trim()
   const xRealIp = getRequestHeader(event, 'x-real-ip')
-  if (xRealIp) return xRealIp
+  if (xRealIp) return xRealIp.trim()
+  const xForwardedFor = getRequestHeader(event, 'x-forwarded-for')
+  if (xForwardedFor) return xForwardedFor.split(',').pop()!.trim()
   return event.node?.req?.socket?.remoteAddress
 }
 
@@ -21,9 +30,11 @@ interface RateLimitStore {
 // In-memory store (for serverless, consider using a shared cache in production)
 const rateLimitStore: RateLimitStore = {}
 
-// Rate limit configuration
+// Rate limit configuration. Remember a whole site often reaches the app from ONE
+// address (its network's egress), so these are per site as much as per person.
 const RATE_LIMIT_CONFIG = {
-  // General API routes: 200 requests per minute per IP (settings/teams can make several on load)
+  // General API routes: 200 requests per minute per IP, counted separately for each
+  // area (/api/employees, /api/schedule, …)
   default: {
     maxRequests: 200,
     windowMs: 60 * 1000 // 1 minute
@@ -33,14 +44,26 @@ const RATE_LIMIT_CONFIG = {
     maxRequests: 100,
     windowMs: 60 * 1000 // 1 minute
   },
-  // User creation: 5 requests per hour per IP (very restrictive)
+  // Sign-in attempts: slows password guessing without getting in the way of a
+  // shift's worth of people signing in from one site.
+  login: {
+    maxRequests: 30,
+    windowMs: 60 * 1000 // 1 minute
+  },
+  // User creation (super admin only). Was 5 an hour, which stopped onboarding a
+  // new site after its fifth account.
   userCreation: {
-    maxRequests: 5,
+    maxRequests: 60,
     windowMs: 60 * 60 * 1000 // 1 hour
   },
-  // Password reset: 3 requests per hour per IP (very restrictive)
+  // A super admin resetting someone's password — an admin chore, not a public door.
+  adminPasswordReset: {
+    maxRequests: 60,
+    windowMs: 60 * 60 * 1000 // 1 hour
+  },
+  // Public "forgot password" / reset-link use: 10 per hour per IP (per site network).
   passwordReset: {
-    maxRequests: 3,
+    maxRequests: 10,
     windowMs: 60 * 60 * 1000 // 1 hour
   },
   // Kiosk "check my requests" by UPI: a soft gate, so keep guessing slow.
@@ -51,6 +74,7 @@ const RATE_LIMIT_CONFIG = {
     windowMs: 60 * 1000 // 1 minute
   }
 }
+type LimitName = keyof typeof RATE_LIMIT_CONFIG
 
 export default defineEventHandler(async (event) => {
   // Only apply rate limiting to API routes
@@ -60,31 +84,30 @@ export default defineEventHandler(async (event) => {
 
   // Get client IP address
   const clientIP = getClientIP(event) || 'unknown'
-  
-  // Determine which rate limit to apply based on route
-  let config = RATE_LIMIT_CONFIG.default
-  
-  if (event.path.includes('/admin/users/create')) {
-    config = RATE_LIMIT_CONFIG.userCreation
-  } else if (
-    event.path.includes('/admin/users/reset-password') ||
-    event.path.includes('/auth/forgot-password') ||
-    event.path.includes('/auth/reset-password')
-  ) {
-    config = RATE_LIMIT_CONFIG.passwordReset
-  } else if (event.path.includes('/admin/')) {
-    config = RATE_LIMIT_CONFIG.admin
-  } else if (event.path.includes('/schedule-requests/lookup')) {
-    config = RATE_LIMIT_CONFIG.upiLookup
-  }
 
-  // Create a unique key for this IP and route type
-  // Use route prefix as part of key. The UPI lookup gets its own bucket so its
-  // tight limit isn't consumed by ordinary /schedule-requests traffic (the PTO
-  // calendar's list + search) and vice versa.
-  const bucket = config === RATE_LIMIT_CONFIG.upiLookup ? 'upi-lookup' : (event.path.split('/')[2] || 'default')
-  const key = `${clientIP}:${bucket}`
-  
+  // Determine which rate limit to apply based on route
+  let limit: LimitName = 'default'
+  if (event.path.includes('/admin/users/create')) {
+    limit = 'userCreation'
+  } else if (event.path.includes('/admin/users/reset-password')) {
+    limit = 'adminPasswordReset'
+  } else if (event.path.includes('/auth/forgot-password') || event.path.includes('/auth/reset-password')) {
+    limit = 'passwordReset'
+  } else if (event.path.startsWith('/api/auth/login')) {
+    limit = 'login'
+  } else if (event.path.includes('/admin/')) {
+    limit = 'admin'
+  } else if (event.path.includes('/schedule-requests/lookup')) {
+    limit = 'upiLookup'
+  }
+  const config = RATE_LIMIT_CONFIG[limit]
+
+  // Every limit keeps its own count. They used to share one per path segment, so
+  // loading the user list used up the "create user" allowance, and a few sign-ins
+  // used up "forgot password". The two broad limits are still counted per area.
+  const area = limit === 'default' || limit === 'admin' ? `:${event.path.split('/')[2] || 'default'}` : ''
+  const key = `${clientIP}:${limit}${area}`
+
   const now = Date.now()
   const record = rateLimitStore[key]
 
@@ -92,7 +115,7 @@ export default defineEventHandler(async (event) => {
   if (record && now < record.resetTime) {
     // Increment count
     record.count++
-    
+
     // Check if limit exceeded
     if (record.count > config.maxRequests) {
       // Rate limit exceeded
@@ -129,4 +152,3 @@ export default defineEventHandler(async (event) => {
     setHeader(event, 'X-RateLimit-Reset', new Date(currentRecord.resetTime).toISOString())
   }
 })
-

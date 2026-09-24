@@ -67,6 +67,11 @@ docker exec -i t psql -v ON_ERROR_STOP=1 -U postgres -d scheduling
 | 016-add-note-tag | `performance_notes.tag` |
 | 017-lower-assignment-minimum | assignment CHECK 30 min → **15 min** |
 | 018-add-staffing-priority | `job_functions.staffing_priority` (1–5, default 3) |
+| 019-add-attendance-points | `attendance_points` |
+| 020-add-employee-upi | `employees.upi` (unique per team) |
+| 021-add-team-lead-role | `user_profiles.is_team_lead` |
+| 022-add-audit-log | `audit_log` |
+| 023-add-job-function-training-target | `job_functions.training_target` (Training Matrix goal; nullable, CHECK ≥ 0) |
 
 Full descriptions and rationale: [../docs/CONTEXT.md](../docs/CONTEXT.md#migrations-sql-schemamigrations).
 

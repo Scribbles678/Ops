@@ -160,14 +160,57 @@ WHERE setting_key IN ('max_leave_early_per_employee_per_day',
 **After** the first boot, in Settings → User Management:
 
 1. Open each team lead and change their role from Supervisor to **Team Lead /
-   Coordinator** (one dropdown each; applies at their next sign-in).
+   Coordinator** (one dropdown each; applies immediately).
 2. Give any no-role account from query 1 a role.
 3. Fill in **Full Name** on every account — the change log records names.
 
 Then in Team Setup → Employees & Training, add each employee's **UPI** so they
-can check their own requests at the kiosk. Optional, in Team Setup → Job
-Functions: tick "Keep covered during 15-minute breaks" on the few functions that
-must stay staffed through a break (the builder no longer chases the rest).
+can check their own requests at the kiosk.
+
+### Release notes — the builder update (late Sep 2026)
+
+One small migration, **023** (adds an empty `job_functions.training_target`). It
+applies itself on boot, so there is nothing to run by hand. What supervisors will
+notice:
+
+- The **Automated Schedule Builder V2** card is gone; one builder card remains.
+- **Required assignments are followed block by block.** "X4 mornings, EM9
+  afternoons" used to run X4 all day, so those people's schedules will change —
+  that is the fix.
+- The first builds may list **things to fix** that were silently skipped before: a
+  required block outside the person's shift (often after a shift swap), inside
+  their break, on an inactive job, or overlapping another. Each links to where it
+  is fixed.
+- Building or copying onto a day that already has a schedule **asks first**.
+- If anything the builder needs fails to load, it says so and builds nothing,
+  instead of building without it.
+- **Edit Job Function is shorter** and fits small screens: priority, max people at
+  once, "send spare people here first" and Active. Productivity rate, unit,
+  "exclude from staffing targets grid" and the two keep-covered boxes are gone
+  (none of them changed a build). Saved values stay in the database.
+- **TL, coordinator** and any other job that was hidden now appear in the Staffing
+  Targets grid, normally as a row of zeros. Hiding a job never stopped its targets
+  from being staffed.
+- Clearing **Max people at once** now saves as "no limit". It used to fail
+  silently while the form closed as if it had saved.
+- The **Training & Coverage Preview** is gone from Create Schedule. In its place,
+  **Team Setup → Training Matrix** shows how many people trained on each job are
+  on shift each hour, with a **training target** per job; hours below the target
+  show red. It is not tied to a date.
+- **Signing in works on `http://` addresses too.** It used to "succeed" and then
+  fail every screen with `401 Unauthorized` (the second site's first user). Still
+  ask IT for HTTPS on the ingress, and set `APP_URL` so reset emails link to it.
+- **Sessions last while you use the app** and end after 8 hours idle. When one
+  ends, a "Your session ended — sign in again" window appears over the page;
+  signing back in keeps anything unsaved on screen. No more raw "401" errors.
+- **Deactivating someone, or changing their role or team, applies on their next
+  click** — no longer at their next sign-in. A lost kiosk can be switched off.
+- The wall display only accepts the kiosk account when it asks to sign in.
+- Account creation is no longer limited to 5 an hour; a second site's `kiosk@…`
+  account gets the username `kiosk2` instead of an error. Change Password says
+  "Current password is incorrect" and asks for 8 characters, like the server.
+- Changing team in Settings reloads the page (and other open tabs), so the old
+  team's request rules can no longer be saved into the new one.
 
 ---
 
@@ -176,7 +219,27 @@ must stay staffed through a break (the builder no longer chases the rest).
 ### App won't start / keeps restarting
 - **Check the pod logs in Rancher** — the bootstrap plugin logs exactly what it did or which step failed
 - Most common cause: `DATABASE_URL` is wrong or the DB pod isn't reachable
-- If logs say `[bootstrap] FAILED: ...`, the SQL error message will be right there
+- If logs say `[bootstrap] FAILED: ...`, the SQL error message will be right there, followed by
+  `exiting so the pod restarts` — a failed setup restarts the pod on purpose (since Sep 2026)
+- `[bootstrap] waiting for the database (...) — retrying` is normal right after a restart: the app
+  pod usually comes up before the database and waits. Meanwhile `/api/health` and every API call
+  answer 503 "starting up".
+
+### `relation "..." does not exist` in the logs
+The app is talking to a database with no tables. Since Sep 2026 it can no longer get there by
+starting too early (it waits), so this means the **database was emptied or replaced while the app
+was running** — a database pod restarted onto a fresh volume, or a restore in progress.
+`GET /api/health` then answers `"tables": "missing"`. The app does not rebuild the tables by
+itself, on purpose: that would turn lost data into an empty install that looks healthy. Restore
+the data first (see `DB-DATA-LOSS-INCIDENT.md`), **then** restart the app pod — restarting it
+against an empty database creates a fresh install with the default admin login.
+
+### Health check
+`GET /api/health` answers **503** while the app is starting (waiting for the database or setting
+it up) or cannot reach the database, and **200** once it is running — including when the tables
+are missing (`"status": "no-tables"`). Deliberately: if it is wired as a *liveness* probe, failing
+on missing tables would restart the pod mid-restore and seed a fresh install. As a *readiness*
+probe it keeps traffic off the pod while it starts.
 
 ### "Connection refused" to database
 - Verify the DB pod is running (Rancher → Workloads → `scheduling-db`)
@@ -210,7 +273,7 @@ must stay staffed through a break (the builder no longer chases the rest).
 | `ADMIN_PASSWORD` | optional | Override default admin password (`admin123`). First-deploy only. |
 | `ADMIN_NAME` | optional | Display name for the admin (default: `Admin User`) |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | optional | For password-reset emails |
-| `APP_URL` | optional | Used in password-reset email links |
+| `APP_URL` | optional | The address people open, e.g. `https://scheduling.yourcompany.com` — used in password-reset email links (read at run time since Sep 2026; unset, links point at `http://localhost:3000`) |
 
 `ADMIN_*` vars only matter the first time the app starts with an empty `user_profiles` table. After the admin is created they're ignored and can be removed.
 
@@ -287,7 +350,7 @@ Browser ──HTTPS──▶ Rancher Ingress ──▶ scheduling-app pod (port 
 ```
 
 - Web UI assets are served by the same container that serves the API — they're bundled together by Nuxt at build time.
-- Auth is custom JWT (not OAuth / not SSO). Tokens live in HttpOnly cookies with 8-hour expiry.
+- Auth is custom JWT (not OAuth / not SSO). Tokens live in HttpOnly cookies; a session lasts while it's used and ends after 8 hours idle (kiosk accounts: 30 days). The cookie is marked Secure when the browser came in over HTTPS — keep the ingress on HTTPS (and forwarding `X-Forwarded-Proto`), because over plain `http://` the sign-in, password included, crosses the network unencrypted.
 - **No outbound network calls** except the database. (Optional SMTP for password-reset emails if you configure it.)
 
 ### Resource footprint
@@ -315,8 +378,8 @@ Scales fine to ~100 concurrent users on a single app pod. Horizontal scaling wor
 
 - JWT secret is a runtime env var (`JWT_SECRET`, 32+ chars — generate with `openssl rand -base64 32`)
 - Passwords are bcrypt-hashed in the DB
-- All API routes go through `server/middleware/auth.ts` which validates the JWT cookie
-- Multi-tenant isolation enforced in the API layer via `team_id` pulled from the signed JWT payload
+- All API routes go through `server/middleware/auth.ts`, which validates the JWT cookie and then reads the account (team, role, active) from the database, so deactivating someone or moving them to another team takes effect on their next click
+- Multi-tenant isolation enforced in the API layer via the account's `team_id` from the database
 - Non-root container user (uid 1001, defined in Dockerfile)
 - Rate-limited at the API layer (default 200 req/min, stricter for auth endpoints)
 

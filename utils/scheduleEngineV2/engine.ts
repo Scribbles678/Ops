@@ -8,16 +8,11 @@
  * it anyway.
  *
  * Design stance: V2 works at 15-minute RESOLUTION but optimises for CONTIGUITY.
- * Short blocks are expensive and appear essentially only in phase E, where they
- * patch a cliff nothing longer can reach. The goal remains 2-3 functions per person
- * in long stretches.
+ * It never emits a block shorter than ENGINE_MIN_BLOCK_MINUTES. The goal remains
+ * 2-3 functions per person in long stretches.
  *
  * This module is pure and fully exported — every function here is unit-testable
  * without a database, a browser or Nuxt.
- *
- * The pieces that are not specific to this engine's placement strategy — pins,
- * committing an assignment, merging, gap explanation, stats — are exported and
- * shared with `periodEngine.ts`, so the two engines cannot drift on them.
  */
 import {
   DEFAULT_WEIGHTS,
@@ -26,6 +21,7 @@ import {
   PREFERRED_MIN_MINUTES,
   SLOTS_PER_DAY,
   SLOT_MINUTES,
+  type EngineAction,
   type EngineAssignment,
   type EngineEmployee,
   type EngineFunction,
@@ -47,7 +43,7 @@ export interface EngineInput {
 }
 
 // ---------------------------------------------------------------------------
-// Shared building blocks (used by both engines)
+// Building blocks
 // ---------------------------------------------------------------------------
 
 /** Mutable state every placement touches: what has been assigned, and to whom. */
@@ -113,25 +109,41 @@ export function applyRequiredPins(
   pins: EngineInput['requiredPins'],
   employees: EngineEmployee[],
   functions: EngineFunction[],
-  actions: string[]
+  actions: EngineAction[]
 ): void {
   const fnById = new Map(functions.map((f) => [f.id, f]))
   const empById = new Map(employees.map((e) => [e.id, e]))
+  // One line per problem, however many blocks share it.
+  const report = (message: string, fix: EngineAction['fix']): void => {
+    if (!actions.some((a) => a.message === message)) actions.push({ message, fix })
+  }
   for (const pin of pins) {
     const emp = empById.get(pin.employeeId)
     const fn = fnById.get(pin.functionId)
     if (!emp || !fn) continue
     if (!emp.trained.has(fn.id)) {
-      actions.push(
-        `${emp.displayName} is set to always work ${fn.name} but is not trained for it, so it was skipped. Add the training, or remove the requirement.`
-      )
+      report(`${emp.displayName} is required on ${fn.name} but isn't trained for it, so it was skipped.`, 'employees')
       continue
     }
     // Only the parts of the pin the employee is actually free for.
-    for (const run of runsWhere(SLOTS_PER_DAY, (s) => s >= pin.startSlot && s < pin.endSlot && emp.free[s] === 1)) {
+    const runs = runsWhere(SLOTS_PER_DAY, (s) => s >= pin.startSlot && s < pin.endSlot && emp.free[s] === 1)
+    let placed = false
+    for (const run of runs) {
       if (slotsToMinutesLength(run.start, run.end) < ENGINE_MIN_BLOCK_MINUTES) continue
       commitAssignment(board, emp, fn, run.start, run.end, 'required-pin')
+      placed = true
     }
+    if (placed) continue
+    // Nothing of this block could be placed. prepare() already explained a block
+    // outside the shift, inside a break or during time off, so what is left is a
+    // remainder too short to place, or another required assignment already there.
+    const when = `${slotToTime(pin.startSlot)}–${slotToTime(pin.endSlot)}`
+    report(
+      runs.length
+        ? `${emp.displayName}'s required ${fn.name} ${when} is under ${ENGINE_MIN_BLOCK_MINUTES} minutes once breaks and time off are taken out, so it was skipped.`
+        : `${emp.displayName} has two required assignments that overlap at ${when}, so only one was used.`,
+      'required-assignments'
+    )
   }
 }
 
@@ -162,15 +174,17 @@ export function mergeAssignments(assignments: EngineAssignment[]): EngineAssignm
  * Was the whole floor short at this moment? Total demand across every function
  * versus every person actually available. When that is negative, the shortfall
  * is arithmetic, not allocation — no schedule can fix it, and it should not be
- * presented to a supervisor as something to act on. This is the same test the
- * Coverage Preview uses for its "impossible" figure.
+ * presented to a supervisor as something to act on.
  */
 export function explainGaps(
   employees: EngineEmployee[],
   functions: EngineFunction[],
   originallyFree: Map<string, Uint8Array>
-): { gaps: EngineGap[]; overTarget: EngineResult['overTarget']; actions: string[] } {
-  const actions: string[] = []
+): { gaps: EngineGap[]; overTarget: EngineResult['overTarget']; actions: EngineAction[] } {
+  const actions: EngineAction[] = []
+  const report = (message: string, fix: EngineAction['fix']): void => {
+    if (!actions.some((a) => a.message === message)) actions.push({ message, fix })
+  }
   const totalDemandAt = new Int16Array(SLOTS_PER_DAY)
   const totalFreeAt = new Int16Array(SLOTS_PER_DAY)
   for (const fn of functions) {
@@ -191,12 +205,14 @@ export function explainGaps(
   const overTarget: EngineResult['overTarget'] = []
 
   for (const fn of functions) {
-    // Only shortfalls that count: a hole during a break on a function nobody asked
-    // to keep covered through breaks is not a gap.
+    // Only shortfalls that count: a hole during a break or lunch is not a gap.
     for (const run of runsWhere(SLOTS_PER_DAY, (s) => fn.mustCover[s] === 1 && (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0))) {
       let shortfall = 0
+      let shortSlots = 0
       for (let s = run.start; s < run.end; s++) {
-        shortfall = Math.max(shortfall, (fn.demand[s] ?? 0) - (fn.covered[s] ?? 0))
+        const short = (fn.demand[s] ?? 0) - (fn.covered[s] ?? 0)
+        shortfall = Math.max(shortfall, short)
+        shortSlots += short
       }
       // Explain it, using the pre-assignment snapshot so "on break" is not
       // mistaken for "busy".
@@ -220,13 +236,16 @@ export function explainGaps(
       let cause: EngineGap['cause']
       let detail: string
       if (trainedAnyone === 0) {
-        cause = 'no-one-trained-on-shift'
+        // Not a scheduling problem at all: somebody has to be trained. Said once
+        // per job, however many gaps it has.
+        cause = 'no-one-trained'
         detail = `nobody is trained for ${fn.name}`
+        report(`Nobody is trained for ${fn.name}, so its targets can't be met.`, 'employees')
       } else if (floorWasShort(run.start, run.end)) {
         // Arithmetic, not allocation: more work is being asked for than there are
         // people present. Usually a whole shift on break, or a target set for an
         // hour nobody is rostered.
-        cause = 'no-one-trained-on-shift'
+        cause = 'floor-short'
         detail = `the whole floor is short at this time — more staffing is being asked for than there are people available`
       } else if (trainedOnFloor === 0) {
         // The decisive case: they exist, but not one of them is on the floor for
@@ -252,33 +271,26 @@ export function explainGaps(
         startSlot: run.start,
         endSlot: run.end,
         shortfall,
+        hours: (shortSlots * SLOT_MINUTES) / 60,
         cause,
         detail,
       })
-
-      // A function someone asked to keep covered through breaks/lunch, short
-      // inside exactly such a window: that is a decision for a person, not a note.
-      // Name only the window, not the whole shortfall run it sits in — a function
-      // short all morning would otherwise read "nobody is free 08:00–12:00".
-      const through = fn.coverBreaks && fn.coverLunch ? 'breaks and lunch' : fn.coverBreaks ? 'breaks' : 'lunch'
-      for (const win of runsWhere(SLOTS_PER_DAY, (s) => s >= run.start && s < run.end && fn.keepCovered[s] === 1)) {
-        const winTime = `${slotToTime(win.start)}–${slotToTime(win.end)}`
-        actions.push(
-          cause === 'all-trained-busy'
-            ? `${fn.name} is set to stay covered during ${through}, but everyone trained for it is on other work ${winTime}. Pin someone to it for that window, or accept the gap.`
-            : `${fn.name} is set to stay covered during ${through}, but nobody trained for it is free ${winTime}. Train someone on a different shift, or stagger that break.`
-        )
-      }
     }
 
-    if (!fn.excludeFromTargets) {
-      for (const run of runsWhere(SLOTS_PER_DAY, (s) => (fn.covered[s] ?? 0) > (fn.demand[s] ?? 0) && (fn.demand[s] ?? 0) > 0)) {
-        let surplus = 0
-        for (let s = run.start; s < run.end; s++) {
-          surplus = Math.max(surplus, (fn.covered[s] ?? 0) - (fn.demand[s] ?? 0))
-        }
-        overTarget.push({ functionName: fn.name, time: `${slotToTime(run.start)}–${slotToTime(run.end)}`, surplus })
+    for (const run of runsWhere(SLOTS_PER_DAY, (s) => (fn.covered[s] ?? 0) > (fn.demand[s] ?? 0) && (fn.demand[s] ?? 0) > 0)) {
+      let surplus = 0
+      let extraSlots = 0
+      for (let s = run.start; s < run.end; s++) {
+        const extra = (fn.covered[s] ?? 0) - (fn.demand[s] ?? 0)
+        surplus = Math.max(surplus, extra)
+        extraSlots += extra
       }
+      overTarget.push({
+        functionName: fn.name,
+        time: `${slotToTime(run.start)}–${slotToTime(run.end)}`,
+        surplus,
+        hours: (extraSlots * SLOT_MINUTES) / 60,
+      })
     }
   }
 
@@ -387,19 +399,14 @@ export function scoreCandidate(ctx: CandidateContext, w: EngineWeights): number 
   const minutes = slotsToMinutesLength(startSlot, endSlot)
   if (minutes < ENGINE_MIN_BLOCK_MINUTES) return -Infinity
 
-  // How much genuine unmet demand this run closes. A shortfall during a break on
-  // a function not flagged to stay covered through breaks does not count; one on
-  // a function that IS flagged counts extra.
+  // How much genuine unmet demand this run closes. A shortfall during a break or
+  // lunch does not count (see EngineFunction.mustCover).
   let unmetClosed = 0
-  let keepClosed = 0
   for (let s = startSlot; s < endSlot; s++) {
-    if (fn.mustCover[s] === 1 && (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0)) {
-      unmetClosed++
-      if (fn.keepCovered[s] === 1) keepClosed++
-    }
+    if (fn.mustCover[s] === 1 && (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0)) unmetClosed++
   }
 
-  let score = unmetClosed * w.unmet + keepClosed * w.breakCover
+  let score = unmetClosed * w.unmet
 
   // Slots consumed that were already covered. Penalising these stops the engine
   // spending a whole shift on a function that only needed its first hour.
@@ -447,7 +454,7 @@ export function runEngine(input: EngineInput): EngineResult {
   const w = input.weights ?? DEFAULT_WEIGHTS
   const { employees, functions, preferred } = input
   const warnings: string[] = []
-  const actions: string[] = []
+  const actions: EngineAction[] = []
 
   const board = newBoard(employees)
   const { assignments, distinctByEmp } = board
@@ -468,9 +475,12 @@ export function runEngine(input: EngineInput): EngineResult {
   // ---- Phase B: required pins ---------------------------------------------
   applyRequiredPins(board, input.requiredPins, employees, functions, actions)
 
-  // ---- Phase D: coverage fill, scarcest function first ---------------------
-  // Repeat until no positive-value move exists. Each round re-sorts, because
-  // filling one function changes what is scarce.
+  // ---- Phase D: coverage fill, highest priority first ----------------------
+  // One placement per round, then start again from the top, so the highest-
+  // priority function with a gap someone can still fill always gets the next
+  // person. Stops when no function has such a gap. Scarcity is fixed for the
+  // whole build (computed once in prepare()); it only orders functions that share
+  // a priority.
   let guard = 0
   const GUARD_LIMIT = 20000
   let progressed = true
@@ -547,60 +557,18 @@ export function runEngine(input: EngineInput): EngineResult {
         if (best) {
           commit(best.emp, fn, best.start, best.end, 'coverage')
           progressed = true
-          break // re-evaluate scarcity after every placement
+          break // start again from the top after every placement
         }
       }
       if (progressed) break
     }
   }
-  if (guard >= GUARD_LIMIT) actions.push('The builder stopped early and the schedule may be incomplete. Please check it before using it.')
+  if (guard >= GUARD_LIMIT) actions.push({ message: 'The builder stopped early, so the schedule may be incomplete. Check it before using it.' })
 
-  // ---- Phase E: cliff patching --------------------------------------------
-  // The new capability. Whatever unmet runs remain are shorter than the preferred
-  // minimum — the break/lunch cliffs. Fill them with short blocks, accepting the
-  // cost penalty, because a covered 15 minutes beats an open hole.
-  let cliffPatches = 0
-  // Same priority-then-scarcity order as phase D: whatever labour is left over
-  // after coverage should patch the cliffs that matter most first.
-  const cliffOrder = [...functions].sort((a, b) => a.priority - b.priority || a.scarcity - b.scarcity)
-  for (const fn of cliffOrder) {
-    if (!fn.demand.some((d) => d > 0)) continue
-    for (const gapRun of runsWhere(SLOTS_PER_DAY, (s) => (fn.covered[s] ?? 0) < (fn.demand[s] ?? 0))) {
-      if (!hasCountedUnmet(fn, gapRun.start, gapRun.end)) continue
-      let filled = true
-      while (filled) {
-        filled = false
-        let best: { emp: EngineEmployee; start: number; end: number; score: number } | null = null
-        for (const emp of employees) {
-          if (!emp.trained.has(fn.id)) continue
-          const run = longestFreeRun(emp.free, gapRun.start, gapRun.end)
-          if (!run) continue
-          if (slotsToMinutesLength(run.start, run.end) < ENGINE_MIN_BLOCK_MINUTES) continue
-          if (!capRoom(fn, run.start, run.end)) continue
-          const score = scoreCandidate(
-            {
-              employee: emp,
-              fn,
-              startSlot: run.start,
-              endSlot: run.end,
-              distinctFunctions: distinctByEmp.get(emp.id)!,
-              hasAdjacent: hasAdjacent(emp.id, fn.id, run.start, run.end),
-              preferred: preferred.get(emp.id)?.has(fn.id) ?? false,
-            },
-            w
-          )
-          if (score > -Infinity && (!best || score > best.score)) {
-            best = { emp, start: run.start, end: run.end, score }
-          }
-        }
-        if (best) {
-          commit(best.emp, fn, best.start, best.end, 'cliff-patch')
-          cliffPatches++
-          filled = true
-        }
-      }
-    }
-  }
+  // (There is no phase E any more. It "patched cliffs" with the same candidates
+  // and the same 30-minute floor as phase D, so once D had stopped it could never
+  // place anything; it was removed in Sep 2026. The letters are kept so the
+  // phase names match the docs and older notes.)
 
   // ---- Phase F: surplus deployment ----------------------------------------
   // Unlike V1, ZERO-TARGET functions are eligible here. In V1 anyone trained only
@@ -670,10 +638,6 @@ export function runEngine(input: EngineInput): EngineResult {
   // ---- Phase H: gaps, over-target, explanations ---------------------------
   const { gaps, overTarget, actions: gapActions } = explainGaps(employees, functions, originallyFree)
   actions.push(...gapActions)
-
-  if (cliffPatches > 0) {
-    warnings.push(`${cliffPatches} short block(s) were used to cover gaps while people were on break or at lunch.`)
-  }
 
   return {
     assignments: final,

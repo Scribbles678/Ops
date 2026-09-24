@@ -25,6 +25,17 @@
               Employees &amp; Training
             </button>
             <button
+              @click="activeTab = 'training-matrix'"
+              :class="[
+                'py-2 md:py-3 px-1 border-b-2 font-medium text-sm transition',
+                activeTab === 'training-matrix'
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              ]"
+            >
+              Training Matrix
+            </button>
+            <button
               @click="activeTab = 'job-functions'"
               :class="[
                 'py-2 md:py-3 px-1 border-b-2 font-medium text-sm transition',
@@ -65,6 +76,10 @@
            outside the shared card below. v-if (not v-show) on purpose: remounting
            refetches, so a job function added on the next tab shows up here. -->
       <TeamEmployeesTraining v-if="activeTab === 'employees'" />
+
+      <!-- Training Matrix tab: trained people on shift per job per hour, against a
+           per-job training target. Also its own card. -->
+      <TeamTrainingMatrix v-else-if="activeTab === 'training-matrix'" />
 
       <!-- Tab Content -->
       <div v-else class="card">
@@ -111,16 +126,6 @@
                           class="px-1.5 py-0.5 rounded text-[11px] font-medium"
                         >{{ priorityLabel(jobFunction.staffing_priority) }}</span>
                       </h3>
-                      <p class="text-xs md:text-sm text-gray-600">
-                        <span class="font-medium text-gray-700">Rate:</span>
-                        <span v-if="jobFunction.productivity_rate !== null && jobFunction.productivity_rate !== undefined">
-                          {{ jobFunction.productivity_rate }}
-                        </span>
-                        <span v-else>N/A</span>
-                        <span v-if="getJobFunctionUnitLabel(jobFunction)" class="ml-1">
-                          {{ getJobFunctionUnitLabel(jobFunction) }}
-                        </span>
-                      </p>
                     </div>
                   </div>
                   <div class="flex space-x-2">
@@ -327,154 +332,101 @@
       </div>
     </div>
 
-    <!-- Job Function Modal -->
-    <div v-if="showJobFunctionModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div class="bg-white rounded-lg p-4 md:p-5 max-w-md w-full mx-4">
-        <h3 class="text-xl font-bold mb-4">
+    <!-- Job Function Modal. Only settings that change something. Productivity rate,
+         unit, "exclude from targets grid" and the break/lunch coverage boxes were
+         removed in Sep 2026: none of them changed what the builder did (see
+         docs/SCHEDULE-BUILDER.md); their database columns stay, unread. The body
+         scrolls inside the window so the buttons stay reachable on short screens. -->
+    <div v-if="showJobFunctionModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div class="bg-white rounded-lg max-w-md w-full max-h-full flex flex-col shadow-xl">
+        <h3 class="text-xl font-bold px-5 pt-5 pb-3">
           {{ editingJobFunction ? 'Edit Job Function' : 'Add New Job Function' }}
         </h3>
-        <form @submit.prevent="handleJobFunctionSubmit" class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Name</label>
-            <input
-              v-model="jobFunctionFormData.name"
-              type="text"
-              required
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Color</label>
-            <input
-              v-model="jobFunctionFormData.color_code"
-              type="color"
-              class="w-full h-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Productivity Rate</label>
-            <input
-              v-model.number="jobFunctionFormData.productivity_rate"
-              type="number"
-              min="0"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Unit of Measure</label>
-            <select
-              v-model="jobFunctionFormData.unit_of_measure"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Select unit</option>
-              <option value="cartons/hour">Cartons/Hour</option>
-              <option value="boxes/hour">Boxes/Hour</option>
-              <option value="units/hour">Units/Hour</option>
-              <option value="pieces/hour">Pieces/Hour</option>
-              <option value="orders/hour">Orders/Hour</option>
-              <option value="pallets/hour">Pallets/Hour</option>
-              <option value="cases/hour">Cases/Hour</option>
-              <option value="items/hour">Items/Hour</option>
-              <option value="custom">Custom</option>
-            </select>
-          </div>
-          <div v-if="jobFunctionFormData.unit_of_measure === 'custom'">
-            <label class="block text-sm font-medium text-gray-700 mb-1">Custom Unit</label>
-            <input
-              v-model="jobFunctionFormData.custom_unit"
-              type="text"
-              placeholder="Enter custom unit"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div class="flex items-center space-x-2.5">
-            <input
-              id="jobFunction_exclude_from_targets"
-              v-model="jobFunctionFormData.exclude_from_targets"
-              type="checkbox"
-              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label for="jobFunction_exclude_from_targets" class="block text-sm font-medium text-gray-700">
-              Exclude from staffing targets grid
-              <span class="block text-xs font-normal text-gray-500">Use for roles handled by Required Assignments (e.g. Coordinator, TL)</span>
+        <form @submit.prevent="handleJobFunctionSubmit" class="flex flex-col min-h-0">
+          <div class="px-5 pb-5 space-y-4 overflow-y-auto">
+            <div class="flex gap-3">
+              <div class="flex-1">
+                <label for="jobFunction_name" class="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input
+                  id="jobFunction_name"
+                  v-model="jobFunctionFormData.name"
+                  type="text"
+                  required
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label for="jobFunction_color" class="block text-sm font-medium text-gray-700 mb-1">Color</label>
+                <input
+                  id="jobFunction_color"
+                  v-model="jobFunctionFormData.color_code"
+                  type="color"
+                  class="w-14 h-[42px] p-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <!-- What the Automated Schedule Builder does with this job. -->
+            <div class="space-y-4 border-t border-gray-200 pt-4">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Schedule builder</p>
+              <div>
+                <label for="jobFunction_priority" class="block text-sm font-medium text-gray-700 mb-1">Staffing priority</label>
+                <select
+                  id="jobFunction_priority"
+                  v-model.number="jobFunctionFormData.staffing_priority"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option :value="1">1 — Critical (fill first)</option>
+                  <option :value="2">2 — High</option>
+                  <option :value="3">3 — Normal</option>
+                  <option :value="4">4 — Low</option>
+                  <option :value="5">5 — Optional (drop first)</option>
+                </select>
+                <p class="text-xs text-gray-500 mt-1">When there aren't enough people for every job, higher priorities are filled first.</p>
+              </div>
+              <div>
+                <label for="jobFunction_max" class="block text-sm font-medium text-gray-700 mb-1">Max people at once</label>
+                <input
+                  id="jobFunction_max"
+                  v-model.number="jobFunctionFormData.max_headcount"
+                  type="number"
+                  min="0"
+                  placeholder="No limit"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p class="text-xs text-gray-500 mt-1">The builder stops adding people here at this number. Required assignments are placed regardless. Leave blank for no limit.</p>
+              </div>
+              <label class="flex items-start gap-2.5">
+                <input
+                  v-model="jobFunctionFormData.surplus_overflow"
+                  type="checkbox"
+                  class="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <span class="text-sm font-medium text-gray-700">
+                  Send spare people here first
+                  <span class="block text-xs font-normal text-gray-500">Someone with spare time, whose jobs all have enough people, goes here before anywhere else (e.g. Pick, Projects).</span>
+                </span>
+              </label>
+            </div>
+
+            <!-- Edit only: a new job is always created active. -->
+            <label v-if="editingJobFunction" class="flex items-start gap-2.5 border-t border-gray-200 pt-4">
+              <input
+                v-model="jobFunctionFormData.is_active"
+                type="checkbox"
+                class="mt-0.5 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span class="text-sm font-medium text-gray-700">
+                Active
+                <span class="block text-xs font-normal text-gray-500">Inactive jobs are left out of the builder and the targets grid.</span>
+              </span>
             </label>
+
+            <p v-if="jobFunctionSaveError" class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {{ jobFunctionSaveError }}
+            </p>
           </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Max people at once (per hour)</label>
-            <input
-              v-model.number="jobFunctionFormData.max_headcount"
-              type="number"
-              min="0"
-              placeholder="No limit"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <span class="block text-xs text-gray-500 mt-1">Builder never assigns more than this many people to this function in any hour. Leave blank for no limit.</span>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">Staffing priority</label>
-            <select
-              v-model.number="jobFunctionFormData.staffing_priority"
-              class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option :value="1">1 — Critical (fill first)</option>
-              <option :value="2">2 — High</option>
-              <option :value="3">3 — Normal</option>
-              <option :value="4">4 — Low</option>
-              <option :value="5">5 — Optional (drop first)</option>
-            </select>
-            <span class="block text-xs text-gray-500 mt-1">When there aren't enough people to cover everything, the V2 builder fills higher-priority functions first and lets the lowest ones go short.</span>
-          </div>
-          <!-- Break / lunch coverage. The builder does not normally treat a hole
-               during a 15-minute break or lunch as a gap; these say "this one
-               matters enough to keep staffed through it". -->
-          <div class="flex items-center space-x-2.5">
-            <input
-              id="jobFunction_break_coverage_required"
-              v-model="jobFunctionFormData.break_coverage_required"
-              type="checkbox"
-              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label for="jobFunction_break_coverage_required" class="block text-sm font-medium text-gray-700">
-              Keep covered during 15-minute breaks
-              <span class="block text-xs font-normal text-gray-500">The builder will try to keep someone from another shift on this function while a shift is on break, and flag it if nobody can.</span>
-            </label>
-          </div>
-          <div class="flex items-center space-x-2.5">
-            <input
-              id="jobFunction_lunch_coverage_required"
-              v-model="jobFunctionFormData.lunch_coverage_required"
-              type="checkbox"
-              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label for="jobFunction_lunch_coverage_required" class="block text-sm font-medium text-gray-700">
-              Keep covered through lunch
-              <span class="block text-xs font-normal text-gray-500">Same, for the 30-minute lunch window.</span>
-            </label>
-          </div>
-          <div class="flex items-center space-x-2.5">
-            <input
-              id="jobFunction_surplus_overflow"
-              v-model="jobFunctionFormData.surplus_overflow"
-              type="checkbox"
-              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label for="jobFunction_surplus_overflow" class="block text-sm font-medium text-gray-700">
-              Surplus overflow function
-              <span class="block text-xs font-normal text-gray-500">After targets are met, extra workers flow into this function first (e.g. Pick, Projects)</span>
-            </label>
-          </div>
-          <div class="flex items-center">
-            <input
-              v-model="jobFunctionFormData.is_active"
-              type="checkbox"
-              id="jobFunction_active"
-              class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-            />
-            <label for="jobFunction_active" class="ml-2 block text-sm text-gray-700">
-              Active
-            </label>
-          </div>
-          <div class="flex justify-end space-x-3 pt-4">
+          <div class="flex justify-end gap-3 px-5 py-3 border-t border-gray-200">
             <button
               type="button"
               @click="closeJobFunctionModal"
@@ -484,7 +436,8 @@
             </button>
             <button
               type="submit"
-              class="btn-primary"
+              :disabled="jobFunctionsLoading"
+              class="btn-primary disabled:opacity-50"
             >
               {{ editingJobFunction ? 'Update' : 'Create' }}
             </button>
@@ -617,10 +570,10 @@
 
 <script setup lang="ts">
 // The tab lives in the URL (?tab=…) so links can land on a specific one — the
-// Rules & Targets page points at Shift Management, /training redirects here —
-// and the back button behaves.
-type TeamSetupTab = 'employees' | 'job-functions' | 'shifts' | 'target-hours'
-const TABS: TeamSetupTab[] = ['employees', 'job-functions', 'shifts', 'target-hours']
+// Rules & Targets page points at Shift Management and Training Matrix, /training
+// redirects here — and the back button behaves.
+type TeamSetupTab = 'employees' | 'training-matrix' | 'job-functions' | 'shifts' | 'target-hours'
+const TABS: TeamSetupTab[] = ['employees', 'training-matrix', 'job-functions', 'shifts', 'target-hours']
 const route = useRoute()
 const router = useRouter()
 const tabFromQuery = (): TeamSetupTab => {
@@ -686,18 +639,13 @@ const editingShift = ref(null)
 const jobFunctionFormData = ref({
   name: '',
   color_code: '#3B82F6',
-  productivity_rate: null,
-  unit_of_measure: '',
-  custom_unit: '',
   is_active: true,
   sort_order: 0,
-  exclude_from_targets: false,
   max_headcount: null,
   surplus_overflow: false,
-  staffing_priority: 3,
-  break_coverage_required: false,
-  lunch_coverage_required: false
+  staffing_priority: 3
 })
+const jobFunctionSaveError = ref('')
 
 const PRIORITY_LABELS = {
   1: 'Priority 1 · Critical',
@@ -710,14 +658,6 @@ const priorityLabel = (p) => PRIORITY_LABELS[p ?? 3] ?? ''
 
 const priorityBadgeClass = (p) =>
   (p ?? 3) <= 2 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'
-
-const getJobFunctionUnitLabel = (jobFunction) => {
-  if (!jobFunction) return ''
-  if (jobFunction.unit_of_measure === 'custom') {
-    return jobFunction.custom_unit || ''
-  }
-  return jobFunction.unit_of_measure || ''
-}
 
 const shiftFormData = ref({
   name: '',
@@ -738,42 +678,34 @@ const loading = computed(() => jobFunctionsLoading.value || shiftsLoading.value)
 const error = computed(() => jobFunctionsError.value || shiftsError.value)
 
 // Job Functions functions
+// The form sends only the fields it shows. The update route leaves anything not
+// sent as it is, so the retired columns keep whatever they held.
 const openAddJobFunctionModal = () => {
   editingJobFunction.value = null
+  jobFunctionSaveError.value = ''
   jobFunctionFormData.value = {
     name: '',
     color_code: '#3B82F6',
-    productivity_rate: null,
-    unit_of_measure: '',
-    custom_unit: '',
     is_active: true,
     sort_order: jobFunctions.value.length,
-    exclude_from_targets: false,
     max_headcount: null,
     surplus_overflow: false,
-    staffing_priority: 3,
-    break_coverage_required: false,
-    lunch_coverage_required: false
+    staffing_priority: 3
   }
   showJobFunctionModal.value = true
 }
 
 const openEditJobFunctionModal = (jobFunction) => {
   editingJobFunction.value = jobFunction
+  jobFunctionSaveError.value = ''
   jobFunctionFormData.value = {
     name: jobFunction.name,
     color_code: jobFunction.color_code,
-    productivity_rate: jobFunction.productivity_rate,
-    unit_of_measure: jobFunction.unit_of_measure || '',
-    custom_unit: jobFunction.custom_unit || '',
     is_active: jobFunction.is_active,
     sort_order: jobFunction.sort_order,
-    exclude_from_targets: jobFunction.exclude_from_targets ?? false,
     max_headcount: jobFunction.max_headcount ?? null,
     surplus_overflow: jobFunction.surplus_overflow ?? false,
-    staffing_priority: jobFunction.staffing_priority ?? 3,
-    break_coverage_required: jobFunction.break_coverage_required ?? false,
-    lunch_coverage_required: jobFunction.lunch_coverage_required ?? false
+    staffing_priority: jobFunction.staffing_priority ?? 3
   }
   showJobFunctionModal.value = true
 }
@@ -784,19 +716,19 @@ const closeJobFunctionModal = () => {
 }
 
 const handleJobFunctionSubmit = async () => {
-  try {
-    if (jobFunctionFormData.value.unit_of_measure !== 'custom') {
-      jobFunctionFormData.value.custom_unit = ''
-    }
-    if (editingJobFunction.value) {
-      await updateJobFunction(editingJobFunction.value.id, jobFunctionFormData.value)
-    } else {
-      await createJobFunction(jobFunctionFormData.value)
-    }
-    closeJobFunctionModal()
-  } catch (e) {
-    console.error('Error saving job function:', e)
+  jobFunctionSaveError.value = ''
+  const saved = editingJobFunction.value
+    ? await updateJobFunction(editingJobFunction.value.id, jobFunctionFormData.value)
+    : await createJobFunction(jobFunctionFormData.value)
+  if (!saved) {
+    // The save failed. Keep the form open with the reason. The composable also put
+    // it in its shared error, which would replace the whole job list with "Error
+    // loading job functions", so clear that.
+    jobFunctionSaveError.value = `Couldn't save: ${jobFunctionsError.value || 'unknown error'}`
+    jobFunctionsError.value = null
+    return
   }
+  closeJobFunctionModal()
 }
 
 const deleteJobFunctionHandler = async (jobFunctionId) => {

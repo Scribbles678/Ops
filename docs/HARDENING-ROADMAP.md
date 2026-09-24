@@ -179,6 +179,17 @@ schema present
   → apply migrations as today (unchanged — updates stay zero-touch)
 ```
 
+> **Correction (2026-09-23, verified).** When this was written, "throw" did **not**
+> crashloop the pod: Nitro does not await the plugin, so a thrown error was only logged
+> as `[unhandledRejection]` and the app kept serving a database with no tables — the
+> `relation "pto_days" does not exist` IT saw. And `/api/health` was green on an empty
+> database. Both are fixed: `bootstrap.ts` now catches any setup failure and, in a built
+> app, calls `process.exit(1)`; `/api/health` is 503 until setup finishes. So a throw
+> inside `runBootstrap()` now does crashloop the pod, as this layer assumes. One trap
+> for implementing the guard: the build inlines `process.env.NODE_ENV` as
+> `"production"`, so test for a built app with `!import.meta.dev`, not NODE_ENV
+> (`BOOTSTRAP_ALLOW_INIT` is read at run time and is fine).
+
 The error message should say exactly what happened and what to do:
 
 ```

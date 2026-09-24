@@ -7,12 +7,40 @@
  */
 import {
   SLOTS_PER_DAY,
+  type EngineAction,
   type EngineEmployee,
   type EngineFunction,
 } from './types'
-import { fillSlots, slotCeil, slotOf, toMinutes } from './slots'
+import { fillSlots, slotCeil, slotOf, slotToTime, toMinutes } from './slots'
+import { describePto, type PtoDescription } from '../ptoDisplay'
 
 const METER_CHILD = /^(.+) (\d+)$/
+
+/**
+ * Canonical input order.
+ *
+ * The engine breaks ties in favour of whoever comes first, so the order the caller
+ * happened to fetch rows in used to change the schedule: the harness (unordered
+ * SQL) and the app (the API's ORDER BYs) disagreed on 10+ people's days for the
+ * same data. prepare() therefore sorts its own inputs, and the output depends on
+ * the data alone.
+ *
+ * Plain code-unit comparison rather than localeCompare, so the browser and Node
+ * sort identically. It also matches the byte-order ORDER BY the API returns today,
+ * so live schedules did not change when this was added.
+ */
+const compareText = (a: unknown, b: unknown): number => {
+  const x = String(a ?? '')
+  const y = String(b ?? '')
+  return x < y ? -1 : x > y ? 1 : 0
+}
+/** Same order as GET /api/employees: last name, first name. */
+const byEmployeeOrder = (a: any, b: any): number =>
+  compareText(a.last_name, b.last_name) || compareText(a.first_name, b.first_name) || compareText(a.id, b.id)
+/** Same order as GET /api/job-functions: sort_order (unset last), then name. */
+const sortOrderOf = (j: any): number => (j.sort_order == null ? Number.MAX_SAFE_INTEGER : Number(j.sort_order))
+const byFunctionOrder = (a: any, b: any): number =>
+  sortOrderOf(a) - sortOrderOf(b) || compareText(a.name, b.name) || compareText(a.id, b.id)
 
 /** True if `trained` qualifies the employee for `fn`, honouring Meter parents. */
 export function isTrainedFor(
@@ -91,8 +119,8 @@ export interface PrepareInput {
   staffingTargets: any[]
   /** employeeId -> { jobFunctionId -> preferred_assignment row (with .blocks) } */
   preferredAssignments: Record<string, Record<string, any>>
-  /** employeeId -> pto_days row */
-  ptoByEmployee: Record<string, any>
+  /** employeeId -> every pto_days row for that employee on the date (there can be several) */
+  ptoByEmployee: Record<string, any[]>
   /**
    * employeeId -> the shift they are actually working today, when it differs from
    * their default. Without this the builder schedules a swapped employee against
@@ -107,16 +135,22 @@ export interface PreparedInput {
   preferred: Map<string, Set<string>>
   requiredPins: { employeeId: string; functionId: string; startSlot: number; endSlot: number }[]
   /** Someone must fix these in the app. See EngineResult.actions. */
-  actions: string[]
+  actions: EngineAction[]
   /** Informational only. */
   warnings: string[]
+  /** People off for the whole day (full-day time off or a call-in). */
+  offAllDay: number
 }
 
 export function prepare(input: PrepareInput): PreparedInput {
   const warnings: string[] = []
-  const actions: string[] = []
+  const actions: EngineAction[] = []
+  // One line per problem, however many rows or blocks share it.
+  const report = (message: string, fix?: EngineAction['fix']): void => {
+    if (!actions.some((a) => a.message === message)) actions.push({ message, fix })
+  }
   const shiftById = new Map(input.shifts.map((s: any) => [s.id, s]))
-  const activeFunctions = input.jobFunctions.filter((j: any) => j.is_active !== false)
+  const activeFunctions = [...input.jobFunctions].sort(byFunctionOrder).filter((j: any) => j.is_active !== false)
 
   // ---- functions + demand grid --------------------------------------------
   const expanded = expandFanOut(input.staffingTargets, input.jobFunctions)
@@ -173,42 +207,30 @@ export function prepare(input: PrepareInput): PreparedInput {
     }
     for (const [fnId, units] of staleHours) {
       const name = input.jobFunctions.find((j: any) => j.id === fnId)?.name ?? 'a job function'
-      actions.push(
-        `${name} has staffing targets set for hours nobody works. Clear those cells in the Target Hours grid.`
-      )
+      report(`${name} has targets set for hours nobody works. Clear those cells.`, 'rules-and-targets')
     }
   }
 
-  // Break and lunch windows across all active shifts. A shortfall inside one only
-  // counts for functions flagged to stay covered through it — the floor does not
-  // expect the builder to staff everything through a 15-minute break, and listing
-  // every such hole buried the two or three gaps a supervisor could act on.
-  const breakSlots = new Uint8Array(SLOTS_PER_DAY)
-  const lunchSlots = new Uint8Array(SLOTS_PER_DAY)
+  // Break and lunch windows across all active shifts. A shortfall inside one does
+  // not count for any job: the floor does not expect the builder to staff a job
+  // through a 15-minute break, and listing every such hole buried the two or three
+  // gaps a supervisor could act on. (Per-job "keep covered" flags that overrode
+  // this were removed in Sep 2026; the job_functions columns are no longer read.)
+  const mustCover = new Uint8Array(SLOTS_PER_DAY).fill(1)
   for (const sh of input.shifts) {
     if (sh?.is_active === false) continue
-    for (const [a, b, arr] of [
-      [sh.break_1_start, sh.break_1_end, breakSlots],
-      [sh.break_2_start, sh.break_2_end, breakSlots],
-      [sh.lunch_start, sh.lunch_end, lunchSlots],
-    ] as [any, any, Uint8Array][]) {
+    for (const [a, b] of [
+      [sh.break_1_start, sh.break_1_end],
+      [sh.break_2_start, sh.break_2_end],
+      [sh.lunch_start, sh.lunch_end],
+    ]) {
       const s = toMinutes(a)
       const t = toMinutes(b)
-      if (s != null && t != null && t > s) fillSlots(arr, s, t, 1)
+      if (s != null && t != null && t > s) fillSlots(mustCover, s, t, 0)
     }
   }
 
   const functions: EngineFunction[] = activeFunctions.map((j: any) => {
-    const coverBreaks = !!j.break_coverage_required
-    const coverLunch = !!j.lunch_coverage_required
-    const mustCover = new Uint8Array(SLOTS_PER_DAY)
-    const keepCovered = new Uint8Array(SLOTS_PER_DAY)
-    for (let s = 0; s < SLOTS_PER_DAY; s++) {
-      const inBreak = breakSlots[s] === 1
-      const inLunch = lunchSlots[s] === 1
-      mustCover[s] = (inBreak && !coverBreaks) || (inLunch && !coverLunch) ? 0 : 1
-      keepCovered[s] = (inBreak && coverBreaks) || (inLunch && coverLunch) ? 1 : 0
-    }
     return {
       id: j.id,
       name: j.name,
@@ -216,11 +238,8 @@ export function prepare(input: PrepareInput): PreparedInput {
       covered: new Int16Array(SLOTS_PER_DAY),
       maxHeadcount: j.max_headcount == null ? null : Number(j.max_headcount),
       isOverflow: !!j.surplus_overflow,
-      excludeFromTargets: !!j.exclude_from_targets,
+      // Read-only, and the same for every job.
       mustCover,
-      keepCovered,
-      coverBreaks,
-      coverLunch,
       scarcity: 1,
       // 3 = normal, so a function with no explicit priority behaves as before.
       priority: Number(j.staffing_priority) >= 1 && Number(j.staffing_priority) <= 5
@@ -231,11 +250,14 @@ export function prepare(input: PrepareInput): PreparedInput {
 
   // ---- employees + availability grid ---------------------------------------
   const employees: EngineEmployee[] = []
+  // Per employee: shift hours, and shift hours minus breaks and lunch (before time
+  // off). Only used to explain a required assignment that cannot be placed.
+  const shiftShape = new Map<string, { span: Uint8Array; workable: Uint8Array }>()
   let noShift = 0
   let noTraining = 0
   let fullDayPto = 0
 
-  for (const e of input.employees) {
+  for (const e of [...input.employees].sort(byEmployeeOrder)) {
     if (e.is_active === false) continue
     // A shift swap replaces the employee's shift for this date only. PTO hour
     // accounting has always honoured it (see getEffectiveShift in ptoUsage.ts);
@@ -248,8 +270,15 @@ export function prepare(input: PrepareInput): PreparedInput {
     const trainedIds = input.training[e.id] ?? []
     if (!trainedIds.length) { noTraining++; continue }
 
-    const pto = input.ptoByEmployee[e.id]
-    if (pto?.pto_type === 'full_day' || pto?.pto_type === 'call_in') { fullDayPto++; continue }
+    // Every absence that day, read the one way the rest of the app reads them
+    // (utils/ptoDisplay.ts). This used to keep a single pto_days row per person and
+    // interpret it itself, so an arrive-late plus a leave-early on the same day
+    // honoured only one of them, and an untyped row the display board shows as
+    // "off all day" was scheduled all day.
+    const absences = (input.ptoByEmployee[e.id] ?? [])
+      .map((row) => describePto(row))
+      .filter((d): d is PtoDescription => d != null)
+    if (absences.some((d) => d.allDay)) { fullDayPto++; continue }
 
     const free = new Uint8Array(SLOTS_PER_DAY)
     const start = toMinutes(shift.start_time)
@@ -257,6 +286,7 @@ export function prepare(input: PrepareInput): PreparedInput {
     if (start == null || end == null) { noShift++; continue }
     if (end <= start) end += 1440
     fillSlots(free, start, end, 1)
+    const span = Uint8Array.from(free)
 
     // Lunch and breaks are unavailable. Modelling breaks explicitly on the grid is
     // what makes the whole-shift break cliff visible to the engine.
@@ -269,15 +299,11 @@ export function prepare(input: PrepareInput): PreparedInput {
       const t = toMinutes(b)
       if (s != null && t != null && t > s) fillSlots(free, s, t, 0)
     }
+    shiftShape.set(e.id, { span, workable: Uint8Array.from(free) })
 
-    // Partial PTO clips availability.
-    if (pto && pto.pto_type !== 'full_day') {
-      const ps = toMinutes(pto.start_time)
-      const pe = toMinutes(pto.end_time)
-      if (ps != null && pe != null && pe > ps) fillSlots(free, ps, pe, 0)
-      else if (pto.pto_type === 'leave_early' && ps != null) fillSlots(free, ps, end, 0)
-      else if (pto.pto_type === 'arrive_late' && pe != null) fillSlots(free, start, pe, 0)
-    }
+    // Partial absences clip availability: leave early runs to the end of the day,
+    // arrive late from the start of it.
+    for (const d of absences) fillSlots(free, d.startMin, d.endMin, 0)
 
     let onClock = 0
     for (let s = 0; s < SLOTS_PER_DAY; s++) if (free[s] === 1) onClock++
@@ -299,9 +325,8 @@ export function prepare(input: PrepareInput): PreparedInput {
     })
   }
 
-  if (noShift) actions.push(`${noShift} ${noShift === 1 ? 'person has' : 'people have'} no shift assigned, so ${noShift === 1 ? 'they were' : 'they were'} left out. Set a shift on the Employees page.`)
-  if (noTraining) actions.push(`${noTraining} ${noTraining === 1 ? 'person has' : 'people have'} no training recorded, so ${noTraining === 1 ? 'they were' : 'they were'} left out. Add training on the Training page.`)
-  if (fullDayPto) warnings.push(`${fullDayPto} ${fullDayPto === 1 ? 'person is' : 'people are'} off for the whole day.`)
+  if (noShift) report(`${noShift} ${noShift === 1 ? 'person has' : 'people have'} no shift, so they were left out.`, 'employees')
+  if (noTraining) report(`${noTraining} ${noTraining === 1 ? 'person has' : 'people have'} no training recorded, so they were left out.`, 'employees')
 
   // ---- scarcity: trained supply ÷ total demand ------------------------------
   for (const fn of functions) {
@@ -316,12 +341,49 @@ export function prepare(input: PrepareInput): PreparedInput {
   // ---- preferred + required pins -------------------------------------------
   const preferred = new Map<string, Set<string>>()
   const requiredPins: PreparedInput['requiredPins'] = []
-  const empIds = new Set(employees.map((e) => e.id))
+  const activeFnIds = new Set(activeFunctions.map((j: any) => j.id))
+  const fnName = (id: string): string => input.jobFunctions.find((j: any) => j.id === id)?.name ?? 'a job function'
 
-  for (const [empId, byFn] of Object.entries(input.preferredAssignments ?? {})) {
-    if (!empIds.has(empId)) continue
+  for (const emp of employees) {
+    const byFn = input.preferredAssignments?.[emp.id]
+    if (!byFn) continue
     const set = new Set<string>()
-    for (const [fnId, pa] of Object.entries(byFn ?? {})) {
+    const shape = shiftShape.get(emp.id)!
+
+    /**
+     * Queue one required block, or say why it cannot be placed. Silence here is
+     * what made required assignments look ignored: a block outside the person's
+     * shift, inside their break, or on an inactive function simply vanished.
+     */
+    const pin = (functionId: string, startSlot: number, endSlot: number): void => {
+      const fn = fnName(functionId)
+      const who = `${emp.displayName}'s required ${fn} ${slotToTime(startSlot)}–${slotToTime(endSlot)}`
+      if (!activeFnIds.has(functionId)) {
+        report(`${who} was skipped because ${fn} is not active.`, 'job-functions')
+        return
+      }
+      let onShift = false
+      let workable = false
+      let free = false
+      for (let s = startSlot; s < Math.min(endSlot, SLOTS_PER_DAY); s++) {
+        if (shape.span[s] === 1) onShift = true
+        if (shape.workable[s] === 1) workable = true
+        if (emp.free[s] === 1) free = true
+      }
+      if (!onShift) {
+        report(`${who} is outside their shift today, so it was skipped.`, 'required-assignments')
+        return
+      }
+      if (!workable) {
+        report(`${who} falls entirely in their break or lunch, so it was skipped.`, 'required-assignments')
+        return
+      }
+      if (!free) return // off for that part of the day: nothing to fix
+      requiredPins.push({ employeeId: emp.id, functionId, startSlot, endSlot })
+      set.add(functionId)
+    }
+
+    for (const [fnId, pa] of Object.entries(byFn)) {
       set.add(fnId)
       if (!pa?.is_required) continue
 
@@ -331,7 +393,11 @@ export function prepare(input: PrepareInput): PreparedInput {
           const bs = toMinutes(b.start_time)
           const be = toMinutes(b.end_time)
           if (bs == null || be == null || be <= bs) continue
-          requiredPins.push({ employeeId: empId, functionId: fnId, startSlot: slotOf(bs), endSlot: slotCeil(be) })
+          // Each block carries its own job function ("X4 mornings, EM9
+          // afternoons"). Until Sep 2026 every block was pinned to the row's base
+          // function, which the form sets to the FIRST block's, so the afternoon
+          // ran X4 as well — the main reason required assignments looked ignored.
+          pin(b.job_function_id || fnId, slotOf(bs), slotCeil(be))
         }
       } else {
         // Legacy row with no time blocks: the AM/PM columns decide. Same rule the
@@ -343,8 +409,7 @@ export function prepare(input: PrepareInput): PreparedInput {
         // Until Sep 2026 this pinned the BASE function for the whole day and never
         // read the PM column, so "X4 mornings, EM9 afternoons" ran X4 all day. On
         // the dev data 4 of 7 live pins were affected.
-        const emp = employees.find((x) => x.id === empId)
-        const shift = emp?.shiftId ? shiftById.get(emp.shiftId) : null
+        const shift = emp.shiftId ? shiftById.get(emp.shiftId) : null
         const sStart = toMinutes(shift?.start_time)
         let sEnd = toMinutes(shift?.end_time)
         if (sStart != null && sEnd != null && sEnd <= sStart) sEnd += 1440
@@ -356,20 +421,26 @@ export function prepare(input: PrepareInput): PreparedInput {
 
         if (sStart == null || sEnd == null) {
           // No usable shift times: fall back to the base function all day.
-          requiredPins.push({ employeeId: empId, functionId: fnId, startSlot: 0, endSlot: SLOTS_PER_DAY })
+          pin(fnId, 0, SLOTS_PER_DAY)
         } else {
           const amEnd = lunchStart ?? sEnd
-          if (amFn && amEnd > sStart) {
-            requiredPins.push({ employeeId: empId, functionId: amFn, startSlot: slotOf(sStart), endSlot: slotCeil(amEnd) })
-          }
-          if (pmFn && lunchEnd != null && sEnd > lunchEnd) {
-            requiredPins.push({ employeeId: empId, functionId: pmFn, startSlot: slotOf(lunchEnd), endSlot: slotCeil(sEnd) })
-          }
+          if (amFn && amEnd > sStart) pin(amFn, slotOf(sStart), slotCeil(amEnd))
+          if (pmFn && lunchEnd != null && sEnd > lunchEnd) pin(pmFn, slotOf(lunchEnd), slotCeil(sEnd))
         }
       }
     }
-    preferred.set(empId, set)
+    preferred.set(emp.id, set)
   }
 
-  return { employees, functions, preferred, requiredPins, actions, warnings }
+  // Per person, earliest first: where two of someone's required assignments
+  // overlap, the earlier one wins, whatever order the rows were fetched in.
+  const empRank = new Map(employees.map((e, i) => [e.id, i]))
+  requiredPins.sort(
+    (a, b) =>
+      empRank.get(a.employeeId)! - empRank.get(b.employeeId)! ||
+      a.startSlot - b.startSlot ||
+      compareText(a.functionId, b.functionId)
+  )
+
+  return { employees, functions, preferred, requiredPins, actions, warnings, offAllDay: fullDayPto }
 }
