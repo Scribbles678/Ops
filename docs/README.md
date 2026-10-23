@@ -49,6 +49,7 @@ mounted.** Today the live homes are:
 |---|---|
 | Job Functions / Shifts / Target Hours editors | inline in `pages/details.vue` (Team Setup) |
 | Employees & Training tab | `components/team/EmployeesTraining.vue` |
+| Leave of absence window (Oct 2026) | `components/team/LeaveModal.vue`, opened from that tab |
 | Settings (tabs, Oct 2026) | `pages/settings.vue` is only the tab shell. My account → `components/settings/AccountTab.vue`; Request rules + blocked dates → `RequestRulesTab.vue`; users → `UsersTab.vue`; teams → `TeamsTab.vue` (all in `components/settings/`) |
 | Employee Overview | `components/employee/Overview.vue`, rendered by `pages/employee-overview.vue` |
 | Change log | `components/audit/ChangeLogModal.vue` |

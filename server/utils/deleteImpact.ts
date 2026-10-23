@@ -61,10 +61,10 @@ const upcomingDates = async (sql: string, params: unknown[]): Promise<string[]> 
 
 export async function employeeDeleteImpact(id: string, name: string, from: string): Promise<DeleteImpact> {
   const q = (table: string) => count(`SELECT count(*)::int AS n FROM ${table} WHERE employee_id = $1`, [id])
-  const [assignments, pto, requests, swaps, notes, errors, points, training, pins, archived, accounts] = await Promise.all([
+  const [assignments, pto, requests, swaps, notes, errors, points, training, pins, archived, accounts, leaves] = await Promise.all([
     q('schedule_assignments'), q('pto_days'), q('schedule_requests'), q('shift_swaps'),
     q('performance_notes'), q('performance_errors'), q('attendance_points'), q('employee_training'),
-    q('preferred_assignments'), q('schedule_assignments_archive'), q('user_profiles'),
+    q('preferred_assignments'), q('schedule_assignments_archive'), q('user_profiles'), q('employee_leaves'),
   ])
   const [upDates, upPto, pending, upSwaps] = await Promise.all([
     upcomingDates(`SELECT DISTINCT schedule_date::text AS d FROM schedule_assignments WHERE employee_id = $1 AND schedule_date >= $2 ORDER BY 1`, [id, from]),
@@ -77,6 +77,7 @@ export async function employeeDeleteImpact(id: string, name: string, from: strin
     erases: lines([
       [assignments, 'schedule assignment (every date)', 'schedule assignments (every date)'],
       [pto, 'time-off day or call-in', 'time-off days and call-ins'],
+      [leaves, 'leave of absence', 'leaves of absence'],
       [requests, 'request (time off or shift swap)', 'requests (time off and shift swaps)'],
       [swaps, 'shift swap', 'shift swaps'],
       [notes, 'performance note', 'performance notes'],

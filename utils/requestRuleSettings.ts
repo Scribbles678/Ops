@@ -21,6 +21,39 @@ export const WEEKDAYS = [
 ] as const
 export type WeekdayKey = (typeof WEEKDAYS)[number]['key']
 
+/**
+ * Saturday and Sunday count only at a site that works them (open_weekend_days).
+ * Monday to Friday always do. A closed day is skipped in a multi-day request and a
+ * request for it alone is refused — the sites are Mon–Fri, and a weekend day in a
+ * two-week stretch used to be charged a full shift against the Sat/Sun limits.
+ */
+export const WEEKEND_KEYS = ['sat', 'sun'] as const
+export type WeekendKey = (typeof WEEKEND_KEYS)[number]
+
+/** The weekend days a team works, from its setting: '' (none — the default), 'sat', 'sun' or 'sat,sun'. */
+export function openWeekendDays(raw: unknown): WeekendKey[] {
+  const parts = (Array.isArray(raw) ? raw : String(raw ?? '').split(',')).map((p) => String(p).trim())
+  return WEEKEND_KEYS.filter((k) => parts.includes(k))
+}
+
+/** 'mon' … 'sun' for a YYYY-MM-DD. */
+export function weekdayOf(ymd: string): WeekdayKey {
+  const [y = 0, m = 1, d = 1] = ymd.split('-').map(Number)
+  return (['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const)[new Date(y, m - 1, d).getDay()]!
+}
+
+/** Does the site work on `ymd`, given the weekend days it works? */
+export function isWorkingDay(ymd: string, open: readonly WeekendKey[]): boolean {
+  const day = weekdayOf(ymd)
+  return day === 'sat' || day === 'sun' ? open.includes(day) : true
+}
+
+/** Why a request for a day the site doesn't work is refused. */
+export const closedDayMessage = (ymd: string): string => {
+  const name = WEEKDAYS.find((d) => d.key === weekdayOf(ymd))?.name ?? 'That day'
+  return `${name}s aren't working days at this site, so there's no time off or schedule change to ask for.`
+}
+
 /** Most requests a count rule may allow; far above any real team, low enough to catch a typo. */
 export const MAX_RULE_COUNT = 1000
 /** Longest advance notice, in business days: about a working year. */
@@ -44,10 +77,19 @@ export const RULE_DEFAULTS = {
   min_business_days_notice: 1,
 } as const
 
-type RuleKind = 'count' | 'optionalCount' | 'notice' | 'hoursByWeekday'
+/**
+ * Whether a day of someone's leave of absence (employee_leaves) uses up the daily
+ * time-off limit, priced like a full day off. Off unless a supervisor turns it on,
+ * so teams' limits behave as they did before leaves existed (server/utils/ptoUsage.ts).
+ */
+export const countsLeaveInLimit = (raw: unknown): boolean => String(raw ?? '').trim() === 'true'
+
+type RuleKind = 'count' | 'optionalCount' | 'notice' | 'hoursByWeekday' | 'weekendDays' | 'onOff'
 
 export const REQUEST_RULES = {
   max_pto_hours_by_dow: { kind: 'hoursByWeekday', label: 'Max time-off hours per day' },
+  open_weekend_days: { kind: 'weekendDays', label: 'Weekend days the site works' },
+  count_leave_in_pto_limit: { kind: 'onOff', label: 'Count leave of absence toward the daily limit' },
   max_shift_swaps_per_day: { kind: 'count', label: 'Shift changes per day' },
   max_leave_on_time_per_day: { kind: 'optionalCount', label: 'Leave-on-time requests per day' },
   max_shift_change_per_employee_per_week: { kind: 'count', label: 'Shift changes per week per employee' },
@@ -81,8 +123,12 @@ export function weekdayHoursProblem(day: WeekdayKey, value: unknown): string | n
   return null
 }
 
-/** The whole value for `key`: a sentence saying what's wrong, or null when it's fine. */
-export function ruleProblem(key: RuleKey, value: unknown): string | null {
+/**
+ * The whole value for `key`: a sentence saying what's wrong, or null when it's fine.
+ * The hours check needs the weekend days the site works: a closed day has no limit
+ * to fill in (without `openWeekend`, all seven are checked).
+ */
+export function ruleProblem(key: RuleKey, value: unknown, openWeekend: readonly WeekendKey[] = WEEKEND_KEYS): string | null {
   const { kind, label } = REQUEST_RULES[key]
   switch (kind) {
     case 'count': {
@@ -109,11 +155,20 @@ export function ruleProblem(key: RuleKey, value: unknown): string | null {
       }
       if (!map || typeof map !== 'object') return `${label}: enter hours for every day of the week.`
       for (const d of WEEKDAYS) {
+        if ((d.key === 'sat' || d.key === 'sun') && !openWeekend.includes(d.key)) continue
         const problem = weekdayHoursProblem(d.key, (map as Record<string, unknown>)[d.key])
         if (problem) return problem
       }
       return null
     }
+    case 'weekendDays': {
+      const parts = (Array.isArray(value) ? value : String(value ?? '').split(',')).map((p) => String(p).trim()).filter(Boolean)
+      return parts.every((p) => (WEEKEND_KEYS as readonly string[]).includes(p))
+        ? null
+        : `${label}: Saturday, Sunday, both or neither.`
+    }
+    case 'onOff':
+      return value === true || value === false || value === 'true' || value === 'false' ? null : `${label}: on or off.`
   }
 }
 
@@ -126,8 +181,13 @@ export function ruleStoredValue(key: RuleKey, value: unknown): string {
   const { kind } = REQUEST_RULES[key]
   if (kind === 'hoursByWeekday') {
     const map = (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown>
-    return JSON.stringify(Object.fromEntries(WEEKDAYS.map((d) => [d.key, Number(String(map[d.key]).trim())])))
+    // Every day that has a valid number: all the open ones (ruleProblem checked them),
+    // and a closed weekend day only if it still carries one, ready for reopening.
+    const kept = WEEKDAYS.filter((d) => !blank(map[d.key]) && weekdayHoursProblem(d.key, map[d.key]) === null)
+    return JSON.stringify(Object.fromEntries(kept.map((d) => [d.key, Number(String(map[d.key]).trim())])))
   }
+  if (kind === 'weekendDays') return openWeekendDays(value).join(',')
+  if (kind === 'onOff') return String(value).trim() === 'true' ? 'true' : 'false'
   if (kind === 'optionalCount' && blank(value)) return ''
   return String(Number(String(value).trim()))
 }

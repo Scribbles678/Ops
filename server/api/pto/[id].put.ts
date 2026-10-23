@@ -2,6 +2,7 @@ import { transaction } from '../../utils/db'
 import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
 import { logChange, employeeDisplayName, describePtoDay } from '../../utils/auditLog'
 import { lockTeamTimeOff, findTimeOffConflict, requestShapeForPto, timeOffLabel } from '../../utils/timeOff'
+import { isLeaveDayId } from '../../utils/leave'
 import { describePto } from '../../../utils/ptoDisplay'
 
 /** What the schedule page's PTO popup writes. A call-in has its own button. */
@@ -26,6 +27,9 @@ export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id') || getRouterParam(event, 'date')
   if (!id) {
     throw createError({ statusCode: 400, message: 'Missing PTO record ID' })
+  }
+  if (isLeaveDayId(id)) {
+    throw createError({ statusCode: 400, message: "That's a day of a leave of absence, not time off. Change the leave on Team Setup." })
   }
   const body = await readBody(event)
   const shape = {

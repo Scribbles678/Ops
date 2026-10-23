@@ -5,13 +5,18 @@ import {
   type ShiftInfo,
 } from './ptoHours'
 import { PTO_TYPE_FOR_REQUEST } from './timeOff'
+import { countsLeaveInLimit, isWorkingDay, openWeekendDays } from '../../utils/requestRuleSettings'
 
 /**
  * Team-wide PTO hours already committed, per date.
  *
- * Counts two things, which together are "who is already off":
+ * Counts these, which together are "who is already off":
  *   1. approved schedule_requests of an hour-consuming type
  *   2. pto_days rows NOT materialized by a request — manual entries and call-ins
+ *   3. days of a leave of absence (employee_leaves, migration 028) — ONLY when the
+ *      team counts them (Request rules, count_leave_in_pto_limit; off by default),
+ *      each a full day at that person's shift hours, on days the site works, for
+ *      active people, and not on a day (1) or (2) already charges them for
  *
  * (2) is deduped against (1) via schedule_requests.created_pto_id so an approved
  * request and the pto_days row it created are never both charged.
@@ -80,7 +85,9 @@ export interface UsedHoursBreakdown {
   callIn: number
   /** Any other pto_days entered by hand, with no originating request. */
   manual: number
-  /** approved + callIn + manual. */
+  /** Days of a leave of absence; always 0 unless the team counts leave toward the limit. */
+  leave: number
+  /** approved + callIn + manual + leave. */
   total: number
 }
 
@@ -105,13 +112,15 @@ export async function getUsedHoursBreakdownByDate(
   const used: Record<string, UsedHoursBreakdown> = {}
   const round2 = (n: number) => Math.round(n * 100) / 100
   const bucket = (date: string): UsedHoursBreakdown =>
-    (used[date] ??= { approved: 0, callIn: 0, manual: 0, total: 0 })
-  const add = (date: string, hours: number, kind: 'approved' | 'callIn' | 'manual' = 'approved') => {
+    (used[date] ??= { approved: 0, callIn: 0, manual: 0, leave: 0, total: 0 })
+  const add = (date: string, hours: number, kind: 'approved' | 'callIn' | 'manual' | 'leave' = 'approved') => {
     if (!hours) return
     const b = bucket(date)
     b[kind] = round2(b[kind] + hours)
-    b.total = round2(b.approved + b.callIn + b.manual)
+    b.total = round2(b.approved + b.callIn + b.manual + b.leave)
   }
+  /** "employee|date" pairs already charged by (1) or (2), so a leave day never doubles them. */
+  const charged = new Set<string>()
 
   // ---- 1. Approved schedule_requests -------------------------------------------
   const reqParams: unknown[] = [dateFrom, dateTo]
@@ -122,7 +131,7 @@ export async function getUsedHoursBreakdownByDate(
   }
 
   const requests = await db.query(
-    `SELECT src.the_date::text AS date, src.request_type,
+    `SELECT src.the_date::text AS date, src.employee_id, src.request_type,
             src.start_time::text AS start_time,
             src.end_time::text   AS end_time,
             ${SHIFT_COLS}
@@ -141,6 +150,7 @@ export async function getUsedHoursBreakdownByDate(
 
   for (const r of requests.rows) {
     add(r.date, hoursForRequest(r.request_type, r.start_time, r.end_time, shiftFrom(r)))
+    charged.add(`${r.employee_id}|${r.date}`)
   }
 
   // ---- 2. pto_days with no originating request ---------------------------------
@@ -152,7 +162,7 @@ export async function getUsedHoursBreakdownByDate(
   }
 
   const ptoDays = await db.query(
-    `SELECT src.the_date::text AS date, src.pto_type,
+    `SELECT src.the_date::text AS date, src.employee_id, src.pto_type,
             src.start_time::text AS start_time,
             src.end_time::text   AS end_time,
             ${SHIFT_COLS}
@@ -176,6 +186,40 @@ export async function getUsedHoursBreakdownByDate(
       hoursForPtoDay(r.pto_type, r.start_time, r.end_time, shiftFrom(r)),
       r.pto_type === 'call_in' ? 'callIn' : 'manual'
     )
+    charged.add(`${r.employee_id}|${r.date}`)
+  }
+
+  // ---- 3. Leave of absence, when the team counts it -----------------------------
+  // Read here, not passed in, so every caller (the rule, the strip, the calendar)
+  // gets the same answer from the same setting.
+  if (teamId) {
+    const settings = await db.query(
+      `SELECT setting_key, setting_value FROM team_settings
+       WHERE team_id = $1 AND setting_key IN ('count_leave_in_pto_limit', 'open_weekend_days')`,
+      [teamId]
+    )
+    const setting = (k: string) => settings.rows.find((s: any) => s.setting_key === k)?.setting_value
+    if (countsLeaveInLimit(setting('count_leave_in_pto_limit'))) {
+      const open = openWeekendDays(setting('open_weekend_days'))
+      const leaveDays = await db.query(
+        `SELECT src.the_date::text AS date, src.employee_id, ${SHIFT_COLS}
+         FROM (
+           SELECT l.employee_id, d::date AS the_date
+           FROM employee_leaves l
+           JOIN employees le ON le.id = l.employee_id AND le.is_active
+           CROSS JOIN LATERAL generate_series(
+             GREATEST(l.start_date, $1::date), LEAST(COALESCE(l.end_date, $2::date), $2::date), interval '1 day'
+           ) AS d
+           WHERE l.team_id = $3 AND l.start_date <= $2::date AND (l.end_date IS NULL OR l.end_date >= $1::date)
+         ) src
+         ${SHIFT_JOIN}`,
+        [dateFrom, dateTo, teamId]
+      )
+      for (const r of leaveDays.rows) {
+        if (!isWorkingDay(r.date, open) || charged.has(`${r.employee_id}|${r.date}`)) continue
+        add(r.date, hoursForPtoDay('full_day', null, null, shiftFrom(r)), 'leave')
+      }
+    }
   }
 
   return used

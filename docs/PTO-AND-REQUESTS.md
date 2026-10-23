@@ -17,6 +17,7 @@ apart — so treat a second implementation as a bug, not a shortcut.
 | `server/utils/ptoUsage.ts` | How many hours a team has already committed on a date, in total (`getUsedHoursByDate`) or itemised by source (`getUsedHoursBreakdownByDate`). |
 | `server/utils/requestRules.ts` | `evaluateRequest()` — the auto-approval rule engine. |
 | `server/utils/timeOff.ts` | Whether a person is **already off** at that time (one absence at a time), the request → `pto_days` row mapping, the team lock on time-off writes, deleting a request with its rows. See [One absence at a time](#one-absence-at-a-time). |
+| `server/utils/leave.ts` | Leaves of absence (`employee_leaves`, migration 028): who is on leave on a date, and their days as all-day rows for every time-off read. See [Leave of absence](#leave-of-absence-oct-2026). |
 | `utils/ptoDisplay.ts` | How a `pto_days` row should be READ and DISPLAYED (client + server). |
 | `utils/requestDisplay.ts` | How a `schedule_requests` row is LABELLED (type name, "leaves 4:00 PM"). The PTO calendar and the request modal both use it. |
 
@@ -76,10 +77,15 @@ rather than guessing. Older docs described the flat rate as the model — it is 
 
 ### What counts as "already off" (`ptoUsage.ts`)
 
-Two sources, deduped:
+Two sources, deduped, and a third only if the team asks for it:
 
 1. approved `schedule_requests` of an hour-consuming type
 2. `pto_days` rows **not** materialized by a request — manual entries and call-ins
+3. days of a **leave of absence** — only when the team's `count_leave_in_pto_limit`
+   is on (off by default): each working day at that person's full-day hours, for
+   active people, and never on a day (1) or (2) already charges them for. Itemised
+   as `leave` in the breakdown; the setting is read inside `ptoUsage.ts`, so the
+   rule, the strip and the calendar can't disagree about it.
 
 (2) is deduped against (1) via `schedule_requests.created_pto_id`, so an approved
 request and the `pto_days` row it created are never both charged. Each row is priced
@@ -117,9 +123,34 @@ shows a state the app cannot produce.
 | Max leave-on-time per day, team-wide | `max_leave_on_time_per_day` | *unset = no limit* |
 | Max leave-early per employee per week | `max_leave_early_per_employee_per_week` | *unset = no limit* |
 | Date not blocked | `team_blocked_dates` | — |
+| The site works that day | `open_weekend_days` (`''`, `sat`, `sun` or `sat,sun`) — Mon–Fri always count | *unset = weekends closed* |
+| Leave of absence uses the daily hours | `count_leave_in_pto_limit` (`'true'` / `'false'`) — not a pass/fail rule: when on, leave days count as used hours in rule 4 | *unset = off* |
 
-**Where they're set, and what's accepted.** Settings → Request rules (Supervisor and
-up). `utils/requestRuleSettings.ts` is the one list of these keys, what each
+**Weekends (Oct 2026).** Saturday and Sunday count only if the site works them —
+Settings → Request rules → tick **Open** above the day. A closed day has no
+time-off limit to set, the request form skips it in a multi-day request (a two-week
+stretch becomes its ten working days), and a request for it alone is refused with
+"Saturdays aren't working days at this site" (400, nothing saved, like a duplicate).
+Until then a range asked for every calendar day: each weekend day was charged a
+full shift against the Sat/Sun limits, so it was either rejected or inflated the
+team's hours and the Employee Overview. The rule lives in
+`utils/requestRuleSettings.ts` (`isWorkingDay`), read by the rule engine, the
+availability strip and the form. **Every team starts with weekends closed.** If a
+site works weekends, open them before its people next ask; this read-only query on
+the work database shows teams with weekend schedules or weekend time off in the
+last year:
+
+```sql
+SELECT t.name AS team,
+       (SELECT count(*) FROM schedule_assignments a WHERE a.team_id = t.id
+          AND extract(isodow FROM a.schedule_date) IN (6, 7) AND a.schedule_date > current_date - 365) AS weekend_assignments,
+       (SELECT count(*) FROM schedule_requests r WHERE r.team_id = t.id AND r.status = 'approved'
+          AND extract(isodow FROM r.request_date) IN (6, 7) AND r.request_date > current_date - 365) AS weekend_requests
+FROM teams t ORDER BY 1;
+```
+
+**Where they're set, and what's accepted.** Settings → Request rules: Supervisors and
+up change them; Team Leads see them locked (view only). `utils/requestRuleSettings.ts` is the one list of these keys, what each
 accepts and the defaults above; the form checks each box with it and
 `POST /api/team-settings` refuses anything else, saving the whole form in one
 transaction. Counts are whole numbers 0–1000, notice 0–260 business days, daily hours
@@ -227,6 +258,8 @@ path that records time off:
 | Supervisor approves a rejected request (`PUT /api/schedule-requests/:id`) | **409** — the rules can be overridden, a duplicate cannot |
 | PTO entered on the schedule page (`POST /api/pto`) | **409** |
 | A call-in (`POST /api/pto`, `pto_type: 'call_in'`) | **replaces** the time off already there (each removal logged), listed in the response's `replaced` |
+| Anything on a day of a **leave of absence** — any request type, PTO, a call-in | **409** "… is on leave of absence on Fri, Nov 20 (Nov 2 – Dec 15)", nothing saved (`findLeaveConflict`) |
+| Saving a leave over time off already booked | the leave **cancels** that time off from today on (each removal logged); days before today stay as recorded |
 
 - **"Already off"** is exactly what the budget charges (`ptoUsage.ts`): approved
   requests, plus `pto_days` rows no request created.
@@ -364,6 +397,49 @@ same rules as a dry run so the UI can name the unavailable days and ask whether 
 proceed with the rest or cancel the whole range.
 
 ---
+
+### Leave of absence (Oct 2026)
+
+Someone away for a stretch (medical, family, any longer absence) is put **on leave**
+for a date range: Team Setup → Employees → **Leave** (also "Set a leave instead" in
+the Edit window when Active is unticked). Before this, the only tool was unticking
+**Active**, which took the person out of the schedule *and* out of sight, and
+nothing brought them back when they returned.
+
+- **Stored** in `employee_leaves` (migration 028): first day, last day (`NULL` =
+  return date not known yet), an optional note. Not `pto_days` rows: one row per
+  leave, so changing the return date is one edit.
+- **Who:** Supervisors and up set, change and remove leaves (`/api/leaves`,
+  `requireSupervisor`). Team Leads see the badge and can open a leave read-only.
+  The note is shown on Team Setup and Employee Overview only — never on the kiosk,
+  the display board or the PTO calendar (the day rows those read carry no note).
+- **While a leave covers a working day** the person (if active) is off all day:
+  `leaveDayRows()` adds a `pto_type: 'leave'` row with no times to
+  `GET /api/pto/:date` (the builder, the schedule page, the display board),
+  `POST /api/schedule/copy` and `GET /api/pto-calendar` (`leave_days`), and
+  `describePto` reads it as all day ("LEAVE"). Those rows' ids are
+  `leave:<leave id>:<date>`; `PUT`/`DELETE /api/pto/:id` refuse them (400).
+- **Requests and PTO on a leave day are refused** (409, nothing saved), see the
+  table above. A range over a leave lists those days as unavailable, so "submit the
+  rest" skips them.
+- **Saving a leave cancels the person's booked time off inside it, from today on**
+  (Michael's call): their record shows the leave, not PTO they didn't take, and no
+  day is counted twice. The window lists those days before Save
+  (`POST /api/leaves/preview`). Days before today aren't touched — call-ins and
+  attendance points aren't rewritten. Changing a leave applies the same to days it
+  newly covers; shortening or removing one brings nothing back.
+- **Assignments already on the schedule** inside a new leave stay (the window says
+  how many); the schedule page shows the person as on leave on those days. Clear or
+  rebuild those days.
+- **The daily time-off limit** counts leave only when the team turns on
+  **Count people on leave of absence toward these limits** (Request rules,
+  `count_leave_in_pto_limit`). Off by default, so limits behave as before.
+- **Active** stays for people who have left the team. Deactivated people are listed
+  under **Inactive employees** at the bottom of Team Setup (the header's
+  "Inactive (N)" button jumps there), with Reactivate. The Sep 24 build (68b74b6)
+  listed active people only, so a deactivated person vanished from Team Setup.
+- Every leave change is in the change log (entity `leave`); the note goes in the
+  entry's record, not its sentence.
 
 ## Mock data for the calendar
 

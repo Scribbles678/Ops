@@ -73,12 +73,16 @@ export default defineEventHandler(async (event) => {
     await lockTeamTimeOff(client, teamId)
     const settings = await loadTeamSettings(client, teamId)
 
-    const { status, ruleResults, rejectionReason, conflict } = await evaluateRequest(
+    const { status, ruleResults, rejectionReason, conflict, closedDay } = await evaluateRequest(
       client,
       teamId,
       settings,
       { employee_id, request_type, request_date, start_time, end_time }
     )
+    // A day the site doesn't work: nothing to ask for, so nothing is saved.
+    if (closedDay) {
+      throw createError({ statusCode: 400, message: closedDay })
+    }
     if (conflict) {
       throw createError({ statusCode: 409, message: conflict })
     }

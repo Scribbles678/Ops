@@ -76,6 +76,20 @@
         <!-- Dashboard. Held at reduced opacity while refetching so there's no skeleton flash. -->
         <div v-else-if="data" :class="loading ? 'opacity-60 transition-opacity' : ''">
 
+          <!-- Leave of absence: every one they've had, whatever the period (set on Team Setup). -->
+          <div v-if="data.leaves?.length" class="mb-3 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-900">
+            <p class="font-medium">
+              <template v-if="shownLeave">{{ leaveBadge(shownLeave, data.today) }}.</template>
+              <template v-else>Leave of absence</template>
+            </p>
+            <ul class="mt-1 space-y-0.5 text-xs">
+              <li v-for="l in data.leaves" :key="l.id">
+                <span :class="leaveState(l, data.today) === 'past' ? 'text-violet-700/70' : ''">{{ leaveSpanWithYear(l) }}</span>
+                <span v-if="l.notes" class="text-violet-700/80"> — {{ l.notes }}</span>
+              </li>
+            </ul>
+          </div>
+
           <!-- Summary tiles (a fifth, Attendance points, for admins) -->
           <div class="grid grid-cols-2 md:grid-cols-3 gap-2.5 mb-3" :class="data.attendancePoints ? 'lg:grid-cols-5' : 'lg:grid-cols-4'">
             <div class="border border-gray-200 rounded-lg p-3">
@@ -608,7 +622,7 @@
     <AuditChangeLogModal
       v-if="showChangeLog && employeeId"
       :title="`Change log — ${data?.employee?.name ?? 'this employee'}`"
-      subtitle="Every manual change to this person's requests, time off, attendance points, notes and errors."
+      subtitle="Every manual change to this person's requests, time off, leaves of absence, attendance points, notes and errors."
       :employee-id="employeeId"
       @close="showChangeLog = false"
     />
@@ -735,6 +749,7 @@ export type OverviewPeriod = (typeof OVERVIEW_PERIODS)[number]['key']
 
 <script setup lang="ts">
 import { canManageTeam } from '~/utils/roles'
+import { leaveBadge, leaveDay, leaveState, leaveToShow, type LeaveDates } from '~/utils/leaveDisplay'
 
 // Both are v-models: the page keeps them in the URL so an overview is
 // bookmarkable and Back/Forward work.
@@ -754,6 +769,14 @@ const data = ref<any>(null)
 const loading = ref(false)
 const error = ref('')
 const showMixTable = ref(false)
+
+/** The leave running on the site's today, else the next one (server answers `today`). */
+const shownLeave = computed(() => (data.value?.leaves?.length ? leaveToShow(data.value.leaves, data.value.today) : null))
+/** "Nov 2, 2026 – Dec 15, 2026": the list spans years, so it says which. */
+const leaveSpanWithYear = (l: LeaveDates) =>
+  l.end_date
+    ? `${leaveDay(l.start_date, true)} – ${leaveDay(l.end_date, true)}`
+    : `From ${leaveDay(l.start_date, true)} (return date not set)`
 
 const periods = OVERVIEW_PERIODS
 
@@ -1261,6 +1284,13 @@ const exportCsv = () => {
   lines.push('Date,Type,Time,Status,Notes')
   for (const r of d.activity) {
     lines.push([r.date, typeLabel(r.type), timeLabel(r), statusLabel(r.status), r.notes || ''].map(esc).join(','))
+  }
+
+  if (d.leaves?.length) {
+    lines.push('')
+    lines.push('LEAVE OF ABSENCE')
+    lines.push('First day,Last day,Note')
+    for (const l of d.leaves) lines.push([l.start_date, l.end_date ?? 'not set', l.notes || ''].map(esc).join(','))
   }
 
   // Admin-only sections; null for everyone else.

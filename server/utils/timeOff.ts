@@ -2,6 +2,8 @@ import type { AuthUser } from './authorize'
 import { HOUR_CONSUMING_TYPES } from './ptoHours'
 import { logChange, employeeDisplayName, describeRequest, describePtoDay } from './auditLog'
 import { teamTimeZone } from './teamTime'
+import { leaveOnDay, leaveSpan } from './leave'
+import { leaveDay } from '../../utils/leaveDisplay'
 import { describePto, ptoTypeLabel, ptoTimeLabel } from '../../utils/ptoDisplay'
 
 /**
@@ -176,8 +178,24 @@ const dayLabel = (date: string): string => {
 }
 
 /**
+ * A leave of absence covering `date` (server/utils/leave.ts), as the sentence that
+ * refuses anything else that day — time off, a call-in, a request of any kind — or null.
+ */
+export async function findLeaveConflict(
+  db: Queryable,
+  opts: { teamId: string; employeeId: string; date: string }
+): Promise<string | null> {
+  const leave = await leaveOnDay(db, opts.teamId, opts.employeeId, opts.date)
+  if (!leave) return null
+  const who = await employeeDisplayName(db, opts.employeeId)
+  const span = leave.end_date ? leaveSpan(leave) : `from ${leaveDay(leave.start_date)}, return date not set`
+  return `${who} is on leave of absence on ${dayLabel(opts.date)} (${span}).`
+}
+
+/**
  * The first absence the person already has on `date` that overlaps `shape`, as a
- * sentence for the person at the screen — or null when there is none.
+ * sentence for the person at the screen — or null when there is none. A leave of
+ * absence covers the whole day, so it overlaps everything.
  * `ignorePtoId` leaves out the row being edited (and the request that created it).
  */
 export async function findTimeOffConflict(
@@ -186,6 +204,9 @@ export async function findTimeOffConflict(
 ): Promise<string | null> {
   const wanted = describePto(opts.shape)
   if (!wanted) return null
+
+  const onLeave = await findLeaveConflict(db, opts)
+  if (onLeave) return onLeave
 
   const entries = await timeOffOnDay(db, opts.teamId, opts.employeeId, opts.date)
   const hit = entries.find((e) => {
@@ -206,12 +227,16 @@ export async function findTimeOffConflict(
  * The same question for a request about to be decided. Hour-consuming types go
  * through the overlap check; a leave-on-time or a shift change refuses a second
  * one for the same day (a second swap used to overwrite the first in place).
+ * Nothing is asked for on a day of a leave of absence.
  */
 export async function findRequestConflict(
   db: Queryable,
   teamId: string,
   r: { employee_id: string; request_type: string; request_date: string; start_time?: string | null; end_time?: string | null }
 ): Promise<string | null> {
+  const onLeave = await findLeaveConflict(db, { teamId, employeeId: r.employee_id, date: r.request_date })
+  if (onLeave) return onLeave
+
   const shape = ptoShapeForRequest(r.request_type, r.start_time, r.end_time)
   if (shape) {
     return findTimeOffConflict(db, { teamId, employeeId: r.employee_id, date: r.request_date, shape })
@@ -307,4 +332,90 @@ export async function replaceTimeOffForCallIn(
     }
   }
   return entries.map((e) => timeOffLabel(e.shape))
+}
+
+/**
+ * Time off the person has booked between `from` and `to` (to null = no end), as the
+ * budget charges it: approved requests, and pto_days rows no request created.
+ */
+export async function timeOffBetween(
+  db: Queryable,
+  opts: { teamId: string; employeeId: string; from: string; to: string | null }
+): Promise<(TimeOffEntry & { date: string })[]> {
+  const out: (TimeOffEntry & { date: string })[] = []
+  const params = [opts.teamId, opts.employeeId, opts.from, opts.to]
+
+  const requests = await db.query(
+    `SELECT *, request_date::text AS the_date FROM schedule_requests
+     WHERE team_id = $1 AND employee_id = $2 AND status = 'approved' AND request_type = ANY($5::text[])
+       AND request_date >= $3::date AND request_date <= COALESCE($4::date, 'infinity'::date)
+     ORDER BY request_date, created_at`,
+    [...params, HOUR_CONSUMING_TYPES]
+  )
+  for (const r of requests.rows) {
+    const shape = ptoShapeForRequest(r.request_type, r.start_time, r.end_time)
+    if (!shape) continue
+    out.push({ source: 'request', requestId: r.id, ptoId: r.created_pto_id ?? null, shape, recordedAt: r.created_at, row: r, date: r.the_date })
+  }
+
+  const ptoDays = await db.query(
+    `SELECT p.*, p.pto_date::text AS the_date FROM pto_days p
+     WHERE p.team_id = $1 AND p.employee_id = $2
+       AND p.pto_date >= $3::date AND p.pto_date <= COALESCE($4::date, 'infinity'::date)
+       AND NOT EXISTS (SELECT 1 FROM schedule_requests sr WHERE sr.created_pto_id = p.id)
+     ORDER BY p.pto_date, p.created_at`,
+    params
+  )
+  for (const p of ptoDays.rows) {
+    out.push({
+      source: 'pto_day',
+      requestId: null,
+      ptoId: p.id,
+      shape: { pto_type: p.pto_type, start_time: p.start_time, end_time: p.end_time },
+      recordedAt: p.created_at,
+      row: p,
+      date: p.the_date,
+    })
+  }
+
+  return out.sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/** "Fri, Nov 20 — Full Day" for each, in date order: what a leave would cancel. */
+export const timeOffDayLabels = (entries: { date: string; shape: PtoShape }[]): string[] =>
+  entries.map((e) => `${dayLabel(e.date)} — ${timeOffLabel(e.shape)}`)
+
+/**
+ * A leave of absence covers whole days, so — like a call-in — it REPLACES the time
+ * off the person had booked inside it (Michael's call, Oct 2026): their record shows
+ * the leave rather than PTO they never took, and no day is counted twice. Only from
+ * `from` on (the site's today, or the leave's first day if later): days already past
+ * stay as recorded, so call-ins and attendance points aren't rewritten. Each removal
+ * is logged; returns what it cancelled, for the confirmation.
+ */
+export async function cancelTimeOffForLeave(
+  db: Queryable,
+  opts: { teamId: string; employeeId: string; from: string; to: string | null; actor: AuthUser }
+): Promise<string[]> {
+  const entries = await timeOffBetween(db, opts)
+  const who = await employeeDisplayName(db, opts.employeeId)
+  for (const e of entries) {
+    if (e.source === 'request') {
+      await deleteRequestWithRecords(db, e.row, opts.actor, 'replaced by a leave of absence')
+    } else {
+      await db.query('DELETE FROM pto_days WHERE id = $1', [e.ptoId])
+      await logChange(db, {
+        teamId: opts.teamId,
+        actor: opts.actor,
+        action: 'delete',
+        entity: 'pto_day',
+        entityId: e.ptoId,
+        employeeId: opts.employeeId,
+        employeeName: who,
+        summary: `Removed ${describePtoDay(e.row)} for ${who} (replaced by a leave of absence)`,
+        before: e.row,
+      })
+    }
+  }
+  return timeOffDayLabels(entries)
 }

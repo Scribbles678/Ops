@@ -11,7 +11,7 @@ gates and the Settings page alike — if you change a role's meaning, change it 
 | Role | Stored as | Who | Can |
 |---|---|---|---|
 | **Super Admin** | `is_super_admin` | system owner / IT | everything, on every team: creating and deleting teams and setting their time zones, every team's accounts (including making Super Admins, moving accounts between teams and deleting accounts), switching their own team |
-| **Supervisor** | `is_admin` | runs the team | everything on the floor **plus** Request Rules, blocked dates, the **change log** (who approved / rejected / deleted what — see PTO-AND-REQUESTS.md) and **their own team's accounts** (see "Who manages accounts" below). *(Labelled "Admin" until Sep 2026 — same flag, same rights.)* |
+| **Supervisor** | `is_admin` | runs the team | everything on the floor **plus** Request Rules, blocked dates, **leaves of absence** (Team Setup → Leave; Team Leads see them read-only), the **change log** (who approved / rejected / deleted what — see PTO-AND-REQUESTS.md) and **their own team's accounts** (see "Who manages accounts" below). *(Labelled "Admin" until Sep 2026 — same flag, same rights.)* |
 | **Team Lead / Coordinator** | `is_team_lead` | day-to-day leads | schedules, employees, training, shifts, targets, PTO entries; approve / reject / delete requests; errors, performance notes and attendance points; the full Employee Overview. On Settings they see only **Change Password** and **Account Information**. |
 | **Kiosk** | `is_display_user` | the shared wall iPad | locked to `/display`; can submit requests and look one employee's requests up by UPI. The API refuses it everything else, and the employee list it reads carries no UPIs |
 
@@ -34,7 +34,7 @@ roles were tightened in Sep 2026.
 |---|---|---|
 | `requireAuth` | any active account | what the kiosk needs: the display board's reads, submitting a request and the UPI lookup (all team-scoped) |
 | `requireTeamLead` | Team Lead, Supervisor, Super Admin | everything else a kiosk must not do: schedule and time-off writes, shift swaps, required assignments, targets, the request lists and details, request approve/reject/delete, the Employee Overview, performance errors and notes, attendance points |
-| `requireSupervisor` | Supervisor, Super Admin | team settings (request rules), blocked dates, the change log, the team's accounts (narrowed further by `assertAccountManageable`) |
+| `requireSupervisor` | Supervisor, Super Admin | team settings (request rules), blocked dates, setting / changing / removing a leave of absence (`/api/leaves`; reading them is `requireTeamLead`), the change log, the team's accounts (narrowed further by `assertAccountManageable`) |
 | `requireSuperAdmin` | Super Admin | teams, deleting accounts |
 
 `getTeamFilter` / `getWriteTeamId` additionally refuse a **no-role** account and a
@@ -43,9 +43,9 @@ returns its review sections (`performance`, `attendancePoints`) only to Team Lea
 and above.
 
 **Client** — `middleware/auth.global.ts` sends Kiosk accounts to `/display` and
-no-role accounts to `/settings`; the Settings page shows its **Request rules** and
-**Users** tabs only to Supervisors and Super Admins, and **Teams** only to Super
-Admins (everyone gets **My account**). Client checks are convenience; the server
+no-role accounts to `/settings`; the Settings page shows **Request rules** to Team Leads
+and up — locked (view only) below Supervisor — **Users** only to Supervisors and Super
+Admins, and **Teams** only to Super Admins (everyone gets **My account**). Client checks are convenience; the server
 gates are the authority.
 
 **Exactly one role.** `POST /api/admin/users/create` requires a `role` and

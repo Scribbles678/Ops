@@ -38,7 +38,7 @@ export const ROLES: { key: Role; label: string; description: string }[] = [
   {
     key: 'team_lead',
     label: 'Team Lead / Coordinator',
-    description: 'Same as Supervisor, except request rules, blocked dates and user accounts. Settings shows only their own account.',
+    description: 'Same as Supervisor, except changing request rules, blocked dates and user accounts. They can see the request rules, locked.',
   },
   {
     key: 'kiosk',

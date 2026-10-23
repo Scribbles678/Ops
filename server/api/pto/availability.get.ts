@@ -5,6 +5,7 @@ import { getUsedHoursByDate } from '../../utils/ptoUsage'
 import { assertRequestDate } from '../../utils/requestRules'
 import { assertEmployeeOnTeam } from '../../utils/teamOwnership'
 import { teamToday, dateOnly } from '../../utils/teamTime'
+import { openWeekendDays, isWorkingDay } from '../../../utils/requestRuleSettings'
 
 /** Longest range one call may ask for. The strip asks for a week, the schedule page a month. */
 const MAX_RANGE_DAYS = 93
@@ -79,6 +80,10 @@ export default defineEventHandler(async (event) => {
   const today = await teamToday({ query }, teamId)
   const now = dateOnly(today)
 
+  // Weekend days the site works (open_weekend_days; none by default). The strip shows
+  // only working days, and the request form skips the others in a multi-day request.
+  const openWeekend = openWeekendDays(settings['open_weekend_days'])
+
   const days: any[] = []
   const [fy, fm, fd] = dateFrom.split('-').map(Number)
   const cursor = new Date(fy, fm - 1, fd)
@@ -94,8 +99,10 @@ export default defineEventHandler(async (event) => {
 
     // Mirrors the rule engine's pass/fail for a same-day submission, so the strip can
     // grey out days nothing can be booked on instead of advertising free hours.
+    const open = isWorkingDay(date, openWeekend)
     let ineligibleReason: string | null = null
-    if (isBlocked) ineligibleReason = blockedByDate[date] ? `Blocked: ${blockedByDate[date]}` : 'Blocked — no requests allowed'
+    if (!open) ineligibleReason = 'Not a working day'
+    else if (isBlocked) ineligibleReason = blockedByDate[date] ? `Blocked: ${blockedByDate[date]}` : 'Blocked — no requests allowed'
     else if (isPast) ineligibleReason = 'Date has passed'
     else if (!hasNotice) ineligibleReason = `Needs ${minNotice} business day(s) notice`
 
@@ -109,12 +116,13 @@ export default defineEventHandler(async (event) => {
       isToday: date === today,
       isPast,
       hasNotice,
-      eligible: !isBlocked && !isPast && hasNotice,
+      open,
+      eligible: open && !isBlocked && !isPast && hasNotice,
       ineligibleReason,
     })
 
     cursor.setDate(cursor.getDate() + 1)
   }
 
-  return { days, minBusinessDaysNotice: minNotice }
+  return { days, minBusinessDaysNotice: minNotice, openWeekendDays: openWeekend }
 })

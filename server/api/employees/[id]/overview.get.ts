@@ -4,6 +4,7 @@ import { countBusinessDaysBetween, fmtDate } from '../../../utils/ptoHours'
 import { getEmployeeAbsences } from '../../../utils/ptoUsage'
 import { canLead } from '../../../../utils/roles'
 import { teamToday, dateOnly } from '../../../utils/teamTime'
+import { LEAVE_COLUMNS } from '../../../utils/leave'
 
 /**
  * Employee Overview — every metric behind the dashboard, aggregated in SQL.
@@ -77,6 +78,13 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, message: 'Employee not found' })
   }
   const teamId: string | null = employee.team_id
+
+  // Every leave of absence they've had, whatever the period: the page says when
+  // they're on one, and lists them.
+  const leaves = (await query<any>(
+    `SELECT ${LEAVE_COLUMNS} FROM employee_leaves WHERE employee_id = $1 AND team_id = $2 ORDER BY start_date DESC`,
+    [employeeId, employee.team_id]
+  )).rows
 
   const [mixResult, totalsResult, trainingResult, benchResult, requestResult] = await Promise.all([
     // Work mix: hours + days per job function
@@ -404,6 +412,8 @@ export default defineEventHandler(async (event) => {
       shift: employee.shift_name,
       isActive: employee.is_active,
     },
+    leaves,
+    today: fmtDate(today),
     range: { from, to },
     summary: {
       daysScheduled: totals.days_scheduled ?? 0,

@@ -8,7 +8,7 @@ import {
 import { getEffectiveShift, getUsedHoursForDate } from './ptoUsage'
 import { teamToday, dateOnly } from './teamTime'
 import { findRequestConflict } from './timeOff'
-import { RULE_DEFAULTS } from '../../utils/requestRuleSettings'
+import { RULE_DEFAULTS, openWeekendDays, isWorkingDay, closedDayMessage } from '../../utils/requestRuleSettings'
 
 /**
  * The auto-approval rule engine, in one reusable place.
@@ -63,6 +63,12 @@ export interface RuleVerdict {
    * reports it as the day's reason.
    */
   conflict: string | null
+  /**
+   * Set when the site doesn't work that day (a weekend day it hasn't opened,
+   * open_weekend_days). Refused like a conflict — 400, nothing saved — and a
+   * multi-day request skips such days before it gets here.
+   */
+  closedDay: string | null
 }
 
 export interface RuleInput {
@@ -247,13 +253,16 @@ export async function evaluateRequest(
     if (isBlocked) blockedReason = (blockedResult.rows[0] as any).reason || null
   }
 
-  const conflict = await findRequestConflict(db, teamId, input)
+  const closedDay = isWorkingDay(request_date, openWeekendDays(settings.open_weekend_days))
+    ? null
+    : closedDayMessage(request_date)
+  const conflict = closedDay ? null : await findRequestConflict(db, teamId, input)
 
   const allPassed = Object.values(ruleResults).every((v) => v === true)
-  const status: 'approved' | 'rejected' = allPassed && !conflict ? 'approved' : 'rejected'
+  const status: 'approved' | 'rejected' = allPassed && !conflict && !closedDay ? 'approved' : 'rejected'
 
-  let rejectionReason: string | null = conflict
-  if (!conflict && !allPassed) {
+  let rejectionReason: string | null = closedDay ?? conflict
+  if (!rejectionReason && !allPassed) {
     const failed = Object.entries(ruleResults).filter(([, v]) => !v).map(([k]) => k)
     const labels: Record<string, string> = {
       advance_notice: `Requests must be made at least ${minBusinessDaysNotice} business day(s) in advance`,
@@ -270,5 +279,5 @@ export async function evaluateRequest(
     rejectionReason = failed.map((k) => labels[k] || k).join('; ')
   }
 
-  return { status, ruleResults, rejectionReason, requestedHours, cap, usedHours, conflict }
+  return { status, ruleResults, rejectionReason, requestedHours, cap, usedHours, conflict, closedDay }
 }

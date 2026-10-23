@@ -186,7 +186,7 @@
                 </button>
               </div>
             </div>
-            <div class="grid grid-cols-5 gap-2">
+            <div class="grid gap-2" :style="{ gridTemplateColumns: `repeat(${weekAvailability.length || 5}, minmax(0, 1fr))` }">
               <div
                 v-for="day in weekAvailability"
                 :key="day.date"
@@ -281,6 +281,9 @@
               required
               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900"
             />
+            <div v-if="closedDateMessage" class="mt-2 bg-amber-50 border border-amber-200 rounded-md p-2 text-xs text-amber-900">
+              {{ closedDateMessage }}
+            </div>
             <div v-if="selectedDateBlock" class="mt-2 bg-red-50 border border-red-200 rounded-md p-2 text-xs text-red-700">
               <strong>Date is blocked.</strong> Requests for this date will be auto-rejected.
               <span v-if="selectedDateBlock.reason">Reason: {{ selectedDateBlock.reason }}</span>
@@ -299,6 +302,7 @@
             <p class="text-xs text-gray-500 mt-1">
               Leave blank for a single day. A range submits one full-day request per day (each day is approved/rejected on its own — e.g. a blocked day in the middle is skipped).
             </p>
+            <p v-if="skippedDaysNote" class="text-xs text-gray-600 mt-1">{{ skippedDaysNote }}</p>
           </div>
 
           <!-- Leave early: new end time -->
@@ -400,7 +404,7 @@
           <!-- Submit -->
           <button
             type="submit"
-            :disabled="submitting || checkingRange"
+            :disabled="submitting || checkingRange || !!closedDateMessage"
             class="w-full px-4 py-2.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-medium"
           >
             {{ checkingRange ? 'Checking availability...' : submitting ? 'Submitting...' : 'Submit Request' }}
@@ -479,6 +483,7 @@
 </template>
 
 <script setup lang="ts">
+import { isWorkingDay, closedDayMessage, type WeekendKey } from '~/utils/requestRuleSettings'
 import type { SubmitResult } from '~/composables/useScheduleRequests'
 import { requestTypeLabel, requestTimeLabel } from '~/utils/requestDisplay'
 
@@ -645,10 +650,9 @@ const selectedDateBlock = computed(() => {
 // Presentation only — every number here is computed server-side by the same code
 // that runs the approval rule. This just adds the day labels.
 //
-// Weekends are dropped from the strip (Mon–Fri only) so the five weekday cards get
-// the full width. The endpoint still returns all seven and the weekend caps still
-// apply — a Saturday typed into the Date field is evaluated normally, it just isn't
-// clickable here.
+// Only the site's working days: Mon–Fri, plus a weekend day only if the team's
+// Request rules open it (open_weekend_days). A day the site doesn't work has no
+// limit to show — a request for it alone is refused, and a range skips it.
 const weekAvailability = computed(() => {
   const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
   return availabilityDays.value
@@ -658,7 +662,23 @@ const weekAvailability = computed(() => {
       dayNum: Number(day.date.split('-')[2]),
       weekdayIndex: i,
     }))
-    .filter((day) => day.weekdayIndex < 5)
+    .filter((day) => day.open !== false)
+})
+
+// Weekend days this site works, from the availability answer (none until it loads,
+// which is the default: sites are Mon–Fri).
+const openWeekend = ref<WeekendKey[]>([])
+/** Set when the date picked, on its own, is a day the site doesn't work. */
+const closedDateMessage = computed(() => {
+  const d = form.value.request_date
+  if (!d || (form.value.request_type === 'pto_full_day' && form.value.end_date > d)) return null
+  return isWorkingDay(d, openWeekend.value) ? null : closedDayMessage(d)
+})
+/** "Saturdays and Sundays are skipped …" when a range covers a day the site doesn't work. */
+const skippedDaysNote = computed(() => {
+  if (form.value.request_type !== 'pto_full_day' || !form.value.end_date || form.value.end_date <= form.value.request_date) return ''
+  const closed = (['sat', 'sun'] as const).filter((k) => !openWeekend.value.includes(k)).map((k) => (k === 'sat' ? 'Saturdays' : 'Sundays'))
+  return closed.length ? `${closed.join(' and ')} are skipped — this site doesn't work them.` : ''
 })
 
 // Clear type-specific fields when type changes
@@ -697,7 +717,9 @@ const datesToSubmit = (): string[] => {
   const cur = new Date(sy, sm - 1, sd)
   const last = new Date(ey, em - 1, ed)
   while (cur <= last) {
-    out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`)
+    const ymd = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}-${String(cur.getDate()).padStart(2, '0')}`
+    // A day the site doesn't work isn't asked for (it used to be charged a full shift).
+    if (isWorkingDay(ymd, openWeekend.value)) out.push(ymd)
     cur.setDate(cur.getDate() + 1)
   }
   return out
@@ -754,6 +776,10 @@ const handleSubmit = async () => {
   }
 
   const dates = datesToSubmit()
+  if (!dates.length) {
+    submitError.value = "That range has no working days at this site, so there's nothing to ask for."
+    return
+  }
 
   // Single day: submit straight away — the result banner already explains a rejection.
   if (dates.length === 1) {
@@ -836,11 +862,12 @@ const loadWeekAvailability = async () => {
     if (form.value.employee_id) params.employee_id = form.value.employee_id
 
     const [availability, blocked] = await Promise.all([
-      $fetch<{ days: any[] }>('/api/pto/availability', { params }),
+      $fetch<{ days: any[]; openWeekendDays?: WeekendKey[] }>('/api/pto/availability', { params }),
       $fetch<any[]>('/api/team-blocked-dates'),
     ])
 
     availabilityDays.value = availability?.days || []
+    openWeekend.value = availability?.openWeekendDays ?? []
     weekBlockedDates.value = blocked || []
   } catch (e: any) {
     availabilityDays.value = []

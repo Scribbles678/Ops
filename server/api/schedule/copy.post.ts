@@ -2,6 +2,7 @@ import { query, transaction } from '../../utils/db'
 import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
 import { describePto, subtractPto, ptoTimeToMinutes } from '../../../utils/ptoDisplay'
 import { DB_MIN_BLOCK_MINUTES } from '../../../utils/scheduleEngineV2/types'
+import { leaveDayRows } from '../../utils/leave'
 
 /**
  * Copy one day's schedule onto another, for the caller's team.
@@ -15,7 +16,8 @@ import { DB_MIN_BLOCK_MINUTES } from '../../../utils/scheduleEngineV2/types'
  * Absences on the target date come from the shared PTO helpers rather than a
  * local reading of start_time/end_time — the old clip ignored leave-early rows
  * (NULL end), copied a mid-shift absence unchanged, and could emit a sliver the
- * 15-minute CHECK then rejected.
+ * 15-minute CHECK then rejected. Someone on a leave of absence that day is off all
+ * day (server/utils/leave.ts).
  */
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -36,7 +38,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'Source and target dates are the same' })
   }
 
-  const [source, pto, swaps, employees] = await Promise.all([
+  const [source, pto, swaps, employees, leaveDays] = await Promise.all([
     query(
       `SELECT employee_id, job_function_id, shift_id, assignment_order, start_time, end_time
        FROM schedule_assignments WHERE schedule_date = $1 AND team_id = $2
@@ -46,6 +48,7 @@ export default defineEventHandler(async (event) => {
     query(`SELECT * FROM pto_days WHERE pto_date = $1 AND team_id = $2`, [to_date, teamId]),
     query(`SELECT employee_id FROM shift_swaps WHERE swap_date = $1 AND team_id = $2`, [to_date, teamId]),
     query(`SELECT id, first_name, last_name, is_active FROM employees WHERE team_id = $1`, [teamId]),
+    leaveDayRows({ query }, teamId, to_date, to_date),
   ])
 
   if (source.rows.length === 0) {
@@ -56,7 +59,7 @@ export default defineEventHandler(async (event) => {
   // for a date (arrive late AND leave early), so this is a list, not last-wins.
   const windowsByEmployee = new Map<string, { startMin: number; endMin: number }[]>()
   const outAllDay = new Set<string>()
-  for (const row of pto.rows as any[]) {
+  for (const row of [...(pto.rows as any[]), ...leaveDays]) {
     const d = describePto(row)
     if (!d || !row.employee_id) continue
     if (d.allDay) { outAllDay.add(row.employee_id); continue }

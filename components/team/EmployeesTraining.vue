@@ -35,7 +35,16 @@
     <div class="card mb-3">
       <div class="flex flex-wrap justify-between items-center gap-2">
         <h2 class="text-base md:text-lg font-semibold text-gray-800">Employees &amp; Training</h2>
-        <div class="flex space-x-2">
+        <div class="flex flex-wrap gap-2">
+          <!-- Deactivated people are kept in their own list at the bottom; this finds it. -->
+          <button
+            v-if="inactiveCount"
+            type="button"
+            class="px-3 py-1.5 rounded-md text-xs md:text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
+            @click="showInactive"
+          >
+            Inactive ({{ inactiveCount }})
+          </button>
           <NuxtLink
             to="/employee-overview"
             class="px-3 py-1.5 rounded-md text-xs md:text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
@@ -103,6 +112,11 @@
           >{{ retryingShifts ? 'Loading…' : 'Retry' }}</button>
         </div>
 
+        <p v-if="leavesError" role="alert" class="mb-3 text-xs text-amber-800">
+          Couldn't load who's on leave, so the leave badges are missing ({{ leavesError }}).
+          <button type="button" class="font-medium underline" @click="loadLeaves">Retry</button>
+        </p>
+
         <p v-if="noMatches" class="text-center py-6 text-gray-500 text-sm">No employees match '{{ searchQuery.trim() }}'</p>
         <p v-else-if="!activeShown.length" class="text-center py-6 text-gray-500 text-sm">
           {{ query ? `No active employees match '${searchQuery.trim()}' — see Inactive employees below.` : 'No active employees. Reactivate someone below, or add one.' }}
@@ -120,6 +134,11 @@
                 <div class="flex items-center space-x-1.5">
                   <h3 class="text-sm md:text-base font-semibold text-gray-800">{{ fullName(employee) }}</h3>
                   <span v-if="employee.upi" class="text-xs text-gray-400 tabular-nums" title="UPI">#{{ employee.upi }}</span>
+                  <span
+                    v-if="leaveByEmployee.get(employee.id)"
+                    class="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                    :class="leaveState(leaveByEmployee.get(employee.id)!, today) === 'current' ? 'bg-violet-100 text-violet-800' : 'bg-gray-100 text-gray-600'"
+                  >{{ leaveBadge(leaveByEmployee.get(employee.id)!, today) }}</span>
                 </div>
 
                 <!-- Shift: saves on pick. Stays enabled while saving — the newest pick wins. -->
@@ -170,6 +189,16 @@
                 >
                   Overview
                 </NuxtLink>
+                <!-- Supervisors set leaves; a Team Lead can open one that exists, read-only. -->
+                <button
+                  v-if="canSetLeave || leaveByEmployee.get(employee.id)"
+                  type="button"
+                  class="px-2.5 py-1 bg-violet-50 text-violet-700 rounded hover:bg-violet-100 transition text-xs md:text-sm"
+                  :title="`Leave of absence for ${fullName(employee)}`"
+                  @click="openLeave(employee)"
+                >
+                  Leave
+                </button>
                 <button
                   type="button"
                   class="px-2.5 py-1 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition text-xs md:text-sm"
@@ -232,7 +261,7 @@
       </div>
 
       <!-- Inactive employees: kept (with their history) but out of the matrix. -->
-      <div v-if="inactiveShown.length" class="card mt-3">
+      <div v-if="inactiveShown.length" ref="inactiveCard" class="card mt-3">
         <button
           type="button"
           :aria-expanded="inactiveOpen"
@@ -360,6 +389,10 @@
           />
           <label :for="`${uid}-active`" class="ml-2 block text-sm text-gray-700">Active</label>
         </div>
+        <p v-if="editing" class="-mt-3 pl-6 text-xs text-gray-500">
+          Untick only when someone has left the team: they move to Inactive employees, out of the schedule.
+          For time away, use <strong>Leave</strong> instead — it has dates and ends on its own.
+        </p>
 
         <!-- Unticking Active on someone active: what deactivating leaves behind, before Save. -->
         <div v-if="deactivating" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -379,6 +412,10 @@
             </template>
           </template>
           <p v-if="busyReason(editing.id)" class="mt-2 font-medium text-red-700">{{ busyReason(editing.id) }} — deactivating waits until it's done.</p>
+          <p v-if="canSetLeave" class="mt-2 border-t border-amber-200 pt-2">
+            Going on leave rather than leaving the team?
+            <button type="button" class="font-medium underline" @click="leaveInstead">Set a leave instead</button>
+          </p>
         </div>
 
         <p v-if="formError" role="alert" class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ formError }}</p>
@@ -458,11 +495,22 @@
         {{ busyReason(del.employee.id) }} — delete and deactivate wait until it's done.
       </p>
     </UiConfirmDialog>
+
+    <!-- Leave of absence -->
+    <TeamLeaveModal
+      v-if="leaveFor"
+      :employee="leaveFor"
+      :start-with-form="leaveStartForm"
+      @close="leaveFor = null"
+      @changed="onLeaveChanged"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { toLocalISO } from '~/utils/localDate'
+import { toLocalISO, getTZISODate } from '~/utils/localDate'
+import { canManageTeam } from '~/utils/roles'
+import { leaveBadge, leaveState, leaveToShow, type LeaveDates } from '~/utils/leaveDisplay'
 
 /** GET /api/employees/:id/usage (server/utils/deleteImpact.ts). */
 interface ImpactLine { count: number; label: string }
@@ -488,6 +536,10 @@ const { error: jobsError, fetchJobFunctions, getGroupedJobFunctions } = useJobFu
 const { shifts, error: shiftsError, fetchShifts } = useSchedule()
 const toast = useToast()
 const uid = useId()
+const { user } = useAuth()
+// Supervisors and up set leaves (server/api/leaves/* refuses anyone else).
+const canSetLeave = computed(() => canManageTeam(user.value))
+const today = computed(() => getTZISODate(user.value?.team_timezone || Intl.DateTimeFormat().resolvedOptions().timeZone))
 
 const fullName = (e: { first_name: string; last_name: string }) => `${e.last_name}, ${e.first_name}`
 const nameOf = (id: string) => {
@@ -583,7 +635,7 @@ const takeTraining = (map: Record<string, string[]> | null) => {
 const load = async () => {
   listLoading.value = true
   const training = fetchTraining()
-  await Promise.all([fetchEmployees(false), fetchShifts({ includeInactive: true })])
+  await Promise.all([fetchEmployees(false), fetchShifts({ includeInactive: true }), loadLeaves()])
   // These two don't throw; each composable keeps its failure in `error`.
   listError.value = employeesError.value ?? ''
   shiftsLoadError.value = shiftsError.value ?? ''
@@ -696,6 +748,64 @@ const inactiveOpen = ref(false)
 // A search that finds inactive people opens their section — a match hidden in a
 // collapsed list would read as "not found".
 watch(query, (q) => { if (q && inactiveShown.value.length) inactiveOpen.value = true })
+
+// Deactivated people move to that section at the bottom, folded shut. Below a long
+// list it read as "they're gone and I can't get them back" — the header button and
+// the save message both point at it now.
+const inactiveCount = computed(() => employees.value.filter((e) => !e.is_active).length)
+const inactiveCard = ref<HTMLElement | null>(null)
+const showInactive = async () => {
+  searchQuery.value = ''
+  inactiveOpen.value = true
+  await nextTick()
+  inactiveCard.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+const deactivatedMessage = (e: { first_name: string; last_name: string }) => {
+  inactiveOpen.value = true
+  return `Deactivated ${fullName(e)}. They're under Inactive employees at the bottom of this page, where Reactivate brings them back.`
+}
+
+// ── Leave of absence ──────────────────────────────────────────────────────────
+
+/** Every leave running or still to come (GET /api/leaves), for the badges. */
+const leaves = ref<(LeaveDates & { id: string; employee_id: string })[]>([])
+const leavesError = ref('')
+const loadLeaves = async () => {
+  try {
+    leaves.value = await $fetch('/api/leaves')
+    leavesError.value = ''
+  } catch (e) {
+    leavesError.value = reasonOf(e)
+  }
+}
+/** Per person: the leave running now, else the next one. */
+const leaveByEmployee = computed(() => {
+  const byPerson = new Map<string, typeof leaves.value>()
+  for (const l of leaves.value) byPerson.set(l.employee_id, [...(byPerson.get(l.employee_id) ?? []), l])
+  const out = new Map<string, LeaveDates>()
+  for (const [id, list] of byPerson) {
+    const shown = leaveToShow(list, today.value)
+    if (shown) out.set(id, shown)
+  }
+  return out
+})
+
+const leaveFor = ref<any | null>(null)
+const leaveStartForm = ref(false)
+const openLeave = (employee: any, startWithForm = false) => {
+  leaveStartForm.value = startWithForm
+  leaveFor.value = employee
+}
+const onLeaveChanged = async (message: string) => {
+  toast.success(message)
+  await loadLeaves()
+}
+/** From the Edit window's deactivate warning: they're going on leave, not leaving. */
+const leaveInstead = () => {
+  const employee = editing.value
+  closeForm()
+  if (employee) openLeave(employee, true)
+}
 
 // ── Reactivate ────────────────────────────────────────────────────────────────
 
@@ -815,7 +925,7 @@ const submitForm = async () => {
   // Someone new has no training: a known-empty baseline makes their boxes usable now.
   if (!target) trainingSaves.load({ [saved.id]: [] }, [saved.id])
   closeForm()
-  toast.success(`${target ? 'Saved' : 'Added'} ${fullName(saved)}`)
+  toast.success(body.is_active === false && target ? deactivatedMessage(saved) : `${target ? 'Saved' : 'Added'} ${fullName(saved)}`)
 }
 
 // ── Delete / deactivate ───────────────────────────────────────────────────────
@@ -884,6 +994,6 @@ const deactivateInstead = async () => {
     return
   }
   del.employee = null
-  toast.success(`Deactivated ${fullName(employee)}`)
+  toast.success(deactivatedMessage(employee))
 }
 </script>

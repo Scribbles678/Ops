@@ -8,7 +8,7 @@ import { requireSupervisor, getTeamFilter } from '../../utils/authorize'
  * Query params: entity (comma-separated entity types), employee_id, action,
  *               limit (default 15, max 100), offset
  */
-const ENTITIES = ['request', 'pto_day', 'attendance_point', 'performance_note', 'performance_error', 'account']
+const ENTITIES = ['request', 'pto_day', 'attendance_point', 'performance_note', 'performance_error', 'account', 'leave']
 const ACTIONS = ['approve', 'reject', 'delete', 'add', 'edit']
 
 export default defineEventHandler(async (event) => {

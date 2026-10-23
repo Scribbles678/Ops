@@ -1,16 +1,9 @@
 import { query } from '../../utils/db'
 import { requireSupervisor, getWriteTeamId } from '../../utils/authorize'
+import { isCalendarDate } from '../../../utils/localDate'
 
 /** Most dates one add may carry: a year of month-end blocks is ~60. */
 const MAX_DATES_PER_ADD = 400
-
-/** A real calendar date. Date.parse alone rolls Feb 31 over to Mar 3, which Postgres then refuses. */
-const isCalendarDate = (ymd: string): boolean => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false
-  const [y, m, d] = ymd.split('-').map(Number) as [number, number, number]
-  const dt = new Date(Date.UTC(y, m - 1, d))
-  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
-}
 
 /**
  * Add one or more blocked dates for the current team.

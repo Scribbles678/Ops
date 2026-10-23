@@ -9,6 +9,8 @@
  *   arrive_late  start_time = '00:00:00',        end_time = when they ARRIVE
  *   full_day     both NULL
  *   call_in      both NULL (unplanned)
+ *   leave        both NULL — not a pto_days row: one day of a leave of absence
+ *                (employee_leaves, server/utils/leave.ts), read alongside them
  *
  * Read literally, leave_early renders as "4:02 PM – " and arrive_late as
  * "12:00 AM – 9:38 AM". This module is the single place that knows better; the
@@ -60,10 +62,10 @@ export function describePto(pto: any): PtoDescription | null {
   const start = ptoTimeToMinutes(pto.start_time)
   const end = ptoTimeToMinutes(pto.end_time)
 
-  if (type === 'full_day' || type === 'call_in' || (start == null && end == null)) {
+  if (type === 'full_day' || type === 'call_in' || type === 'leave' || (start == null && end == null)) {
     return {
-      label: type === 'call_in' ? 'CALL-IN' : 'OFF',
-      timeText: 'All day',
+      label: type === 'call_in' ? 'CALL-IN' : type === 'leave' ? 'LEAVE' : 'OFF',
+      timeText: type === 'leave' ? 'On leave' : 'All day',
       startMin: 0,
       endMin: MINUTES_IN_DAY,
       allDay: true,
@@ -136,6 +138,7 @@ export function ptoTypeLabel(type: string | null | undefined): string {
     leave_early: 'Leave Early',
     arrive_late: 'Arrive Late',
     call_in: 'Call-In',
+    leave: 'Leave of Absence',
   }
   if (!type) return 'PTO'
   return labels[type] ?? type.replace(/_/g, ' ').replace(/\b\w/g, (ch) => ch.toUpperCase())

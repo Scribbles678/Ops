@@ -9,6 +9,14 @@
  * is that copy, made the only one.
  */
 
+/** A real calendar date. Date.parse alone rolls Feb 31 over to Mar 3, which Postgres then refuses. */
+export const isCalendarDate = (ymd: unknown): ymd is string => {
+  if (typeof ymd !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return false
+  const [y, m, d] = ymd.split('-').map(Number) as [number, number, number]
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d
+}
+
 /** A Date -> YYYY-MM-DD in the browser's local calendar. */
 export const toLocalISO = (d: Date): string => {
   const y = d.getFullYear()

@@ -12,7 +12,7 @@ import { ptoTypeLabel, ptoTimeLabel } from '../../utils/ptoDisplay'
  * correctly after the record it describes is gone.
  */
 export type AuditAction = 'approve' | 'reject' | 'delete' | 'add' | 'edit'
-export type AuditEntity = 'request' | 'pto_day' | 'attendance_point' | 'performance_note' | 'performance_error' | 'account'
+export type AuditEntity = 'request' | 'pto_day' | 'attendance_point' | 'performance_note' | 'performance_error' | 'account' | 'leave'
 
 /** A transaction client or the pool's query() — both expose the same call. */
 type Runner = { query: (sql: string, params?: unknown[]) => Promise<any> } | ((sql: string, params?: unknown[]) => Promise<any>)

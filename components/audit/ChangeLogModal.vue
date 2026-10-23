@@ -135,6 +135,7 @@ const ENTITY_LABELS: Record<string, string> = {
   performance_note: 'note',
   performance_error: 'error log',
   account: 'account',
+  leave: 'leave of absence',
 }
 const entityLabel = (t: string) => ENTITY_LABELS[t] ?? t
 const when = (iso: string) =>

@@ -1,6 +1,6 @@
-import { transaction } from '../../utils/db'
+import { query, transaction } from '../../utils/db'
 import { requireSupervisor, getWriteTeamId } from '../../utils/authorize'
-import { isRuleKey, ruleProblem, ruleStoredValue } from '../../../utils/requestRuleSettings'
+import { isRuleKey, ruleProblem, ruleStoredValue, openWeekendDays } from '../../../utils/requestRuleSettings'
 
 /**
  * Save a team's Request Rules (Settings → Request rules).
@@ -30,10 +30,22 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'Send the rules to save as { settings: { ... } }' })
   }
 
+  // Which weekend days the site works decides which daily limits must be filled in:
+  // from this save if it sets them, else as stored.
+  const sentWeekend = entries.find(([key]) => key === 'open_weekend_days')
+  const openWeekend = openWeekendDays(
+    sentWeekend
+      ? sentWeekend[1]
+      : (await query<{ v: string }>(
+          `SELECT setting_value AS v FROM team_settings WHERE team_id = $1 AND setting_key = 'open_weekend_days'`,
+          [teamId]
+        )).rows[0]?.v
+  )
+
   const rows: [string, string][] = []
   for (const [key, value] of entries) {
     if (!isRuleKey(key)) throw createError({ statusCode: 400, message: `Unknown setting: ${key}` })
-    const problem = ruleProblem(key, value)
+    const problem = ruleProblem(key, value, openWeekend)
     if (problem) throw createError({ statusCode: 400, message: problem })
     rows.push([key, ruleStoredValue(key, value)])
   }

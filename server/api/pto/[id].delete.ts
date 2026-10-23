@@ -2,6 +2,7 @@ import { transaction } from '../../utils/db'
 import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
 import { logChange, employeeDisplayName, describePtoDay } from '../../utils/auditLog'
 import { deleteRequestWithRecords } from '../../utils/timeOff'
+import { isLeaveDayId } from '../../utils/leave'
 
 /**
  * Remove a PTO day / call-in by hand (the schedule page). Logged to the change log.
@@ -17,6 +18,9 @@ export default defineEventHandler(async (event) => {
   const id = getRouterParam(event, 'id') || getRouterParam(event, 'date')
   if (!id) {
     throw createError({ statusCode: 400, message: 'Missing PTO record ID' })
+  }
+  if (isLeaveDayId(id)) {
+    throw createError({ statusCode: 400, message: "That's a day of a leave of absence, not time off. Change the leave on Team Setup." })
   }
 
   await transaction(async (client) => {

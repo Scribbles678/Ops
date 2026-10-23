@@ -2,7 +2,7 @@ import { transaction } from '../../utils/db'
 import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
 import { logChange, employeeDisplayName, describePtoDay } from '../../utils/auditLog'
 import { assertEmployeeOnTeam } from '../../utils/teamOwnership'
-import { lockTeamTimeOff, findTimeOffConflict, replaceTimeOffForCallIn } from '../../utils/timeOff'
+import { lockTeamTimeOff, findTimeOffConflict, findLeaveConflict, replaceTimeOffForCallIn } from '../../utils/timeOff'
 import { describePto } from '../../../utils/ptoDisplay'
 
 /**
@@ -37,6 +37,9 @@ export default defineEventHandler(async (event) => {
 
     let replaced: string[] = []
     if (pto_type === 'call_in') {
+      // Nobody calls in from a leave of absence; the leave already has the day off.
+      const onLeave = await findLeaveConflict(client, { teamId, employeeId: employee_id, date: pto_date })
+      if (onLeave) throw createError({ statusCode: 409, message: onLeave })
       replaced = await replaceTimeOffForCallIn(client, { teamId, employeeId: employee_id, date: pto_date, actor: user })
     } else {
       const conflict = await findTimeOffConflict(client, { teamId, employeeId: employee_id, date: pto_date, shape })

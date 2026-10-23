@@ -8,6 +8,13 @@
       <p class="mb-4 mt-1 text-sm text-gray-500">
         Requests from the kiosk and the PTO calendar are approved or rejected the moment they're submitted, by these limits.
       </p>
+      <!-- Team Leads see the rules but can't change them; the server refuses their save too. -->
+      <p v-if="readOnly" class="mb-4 flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+        <svg class="mt-0.5 h-4 w-4 shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+        <span>View only. Supervisors change these rules and blocked dates — ask yours if one needs to change.</span>
+      </p>
 
       <p v-if="state === 'loading'" class="text-sm text-gray-500">Loading the rules…</p>
 
@@ -21,7 +28,9 @@
         <p v-if="neverSaved" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           These rules have never been saved for this team, so the defaults below are in effect — including a limit of
           <strong>{{ DEFAULT_DAY_HOURS }} hours of time off per day for the whole team</strong>, which auto-rejects the
-          second full day off on any date. Check them and press <strong>Save rules</strong>.
+          second full day off on any date.
+          <template v-if="readOnly">Ask your supervisor to check and save them.</template>
+          <template v-else>Check them and press <strong>Save rules</strong>.</template>
         </p>
 
         <!-- Hours per weekday -->
@@ -29,25 +38,64 @@
           <legend class="text-sm font-semibold text-gray-900">Time off per day, whole team (hours)</legend>
           <p class="mt-0.5 text-xs text-gray-500">
             Approved requests plus time off entered on the schedule page and call-ins, each counted at the paid hours it removes. 0 means no time off that day.
+            Saturday and Sunday count only if the site works them: tick <strong>Open</strong> to give one a limit. A closed day is skipped in multi-day requests, and a request for it alone is refused.
           </p>
           <div class="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-7">
             <div v-for="d in WEEKDAYS" :key="d.key">
-              <label :for="`hours-${d.key}`" class="mb-1 block text-xs font-medium text-gray-500">{{ d.label }}</label>
+              <div class="mb-1 flex items-center justify-between gap-1">
+                <label :for="`hours-${d.key}`" class="block text-xs font-medium text-gray-500">{{ d.label }}</label>
+                <label v-if="isWeekend(d.key)" class="flex items-center gap-1 text-[11px] text-gray-500">
+                  <input
+                    type="checkbox"
+                    class="h-3.5 w-3.5"
+                    :checked="openWeekend.includes(d.key)"
+                    :disabled="readOnly"
+                    :aria-label="`The site works ${d.name}s`"
+                    @change="toggleWeekend(d.key)"
+                  />
+                  Open
+                </label>
+              </div>
+              <div
+                v-if="isWeekend(d.key) && !openWeekend.includes(d.key)"
+                class="flex h-[42px] items-center justify-center rounded-md border border-dashed border-gray-300 bg-gray-50 text-xs text-gray-400"
+              >Closed</div>
               <input
+                v-else
                 :id="`hours-${d.key}`"
                 v-model="hours[d.key]"
                 type="number"
                 inputmode="decimal"
                 min="0"
                 step="0.25"
-                :aria-invalid="!!hourProblems[d.key]"
-                :class="fieldClass(!!hourProblems[d.key])"
+                :disabled="readOnly"
+                :aria-invalid="!readOnly && !!hourProblems[d.key]"
+                :class="fieldClass(!readOnly && !!hourProblems[d.key])"
               />
             </div>
           </div>
-          <ul v-if="hourProblemList.length" class="mt-2 space-y-0.5 text-xs text-red-700">
+          <ul v-if="!readOnly && hourProblemList.length" class="mt-2 space-y-0.5 text-xs text-red-700">
             <li v-for="p in hourProblemList" :key="p">{{ p }}</li>
           </ul>
+
+          <!-- count_leave_in_pto_limit: off unless a supervisor turns it on. -->
+          <label class="mt-3 flex items-start gap-2 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800">
+            <input
+              v-model="countLeave"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4"
+              :disabled="readOnly"
+              aria-describedby="count-leave-help"
+            />
+            <span>
+              <span class="font-medium">Count people on leave of absence toward these limits</span>
+              <span id="count-leave-help" class="mt-0.5 block text-xs text-gray-500">
+                On: each working day someone is on leave uses their shift hours from that day's limit, like a full day off, so
+                everyone else has that much less to ask for. Off: leave doesn't use any of the limit. Leaves are set on Team
+                Setup → Employees.
+              </span>
+            </span>
+          </label>
         </fieldset>
 
         <!-- The scalar limits, in three groups -->
@@ -64,12 +112,13 @@
                 min="0"
                 step="1"
                 :placeholder="f.optional ? 'No limit' : undefined"
-                :aria-invalid="!!problems[f.key]"
+                :disabled="readOnly"
+                :aria-invalid="!readOnly && !!problems[f.key]"
                 :aria-describedby="`rule-${f.key}-hint`"
-                :class="fieldClass(!!problems[f.key])"
+                :class="fieldClass(!readOnly && !!problems[f.key])"
               />
-              <p :id="`rule-${f.key}-hint`" class="mt-1 text-xs" :class="problems[f.key] ? 'text-red-700' : 'text-gray-500'">
-                {{ problems[f.key] || f.hint }}
+              <p :id="`rule-${f.key}-hint`" class="mt-1 text-xs" :class="!readOnly && problems[f.key] ? 'text-red-700' : 'text-gray-500'">
+                {{ (!readOnly && problems[f.key]) || f.hint }}
               </p>
             </div>
           </div>
@@ -79,7 +128,7 @@
           Not saved: {{ saveError }}
         </p>
 
-        <div class="flex flex-wrap items-center justify-end gap-3 border-t border-gray-100 pt-4">
+        <div v-if="!readOnly" class="flex flex-wrap items-center justify-end gap-3 border-t border-gray-100 pt-4">
           <span v-if="dirty" class="mr-auto text-sm text-amber-700">Unsaved changes</span>
           <button
             v-if="dirty"
@@ -105,7 +154,7 @@
         Time-off, leave-early, arrive-late and leave-on-time requests for these dates are rejected automatically. Shift changes aren't affected.
       </p>
 
-      <div class="mb-4 flex flex-wrap gap-2">
+      <div v-if="!readOnly" class="mb-4 flex flex-wrap gap-2">
         <button type="button" class="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50" @click="openSingle">+ Add date</button>
         <button type="button" class="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50" @click="openPeriod('quarter')">+ Quarter-end block</button>
         <button type="button" class="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50" @click="openPeriod('month')">+ Month-end block</button>
@@ -122,7 +171,7 @@
           <li v-for="bd in upcoming" :key="bd.id" class="flex items-center gap-3 px-3 py-2 text-sm">
             <span class="w-36 shrink-0 text-gray-900">{{ longDate(dayOf(bd)) }}</span>
             <span class="min-w-0 flex-1 truncate text-gray-600" :title="bd.reason || undefined">{{ bd.reason || '—' }}</span>
-            <button type="button" class="text-xs text-red-600 hover:text-red-800" @click="removing = bd">Remove</button>
+            <button v-if="!readOnly" type="button" class="text-xs text-red-600 hover:text-red-800" @click="removing = bd">Remove</button>
           </li>
         </ul>
 
@@ -134,7 +183,7 @@
             <li v-for="bd in past" :key="bd.id" class="flex items-center gap-3 px-3 py-2 text-sm text-gray-500">
               <span class="w-36 shrink-0">{{ longDate(dayOf(bd)) }}</span>
               <span class="min-w-0 flex-1 truncate" :title="bd.reason || undefined">{{ bd.reason || '—' }}</span>
-              <button type="button" class="text-xs text-red-600 hover:text-red-800" @click="removing = bd">Remove</button>
+              <button v-if="!readOnly" type="button" class="text-xs text-red-600 hover:text-red-800" @click="removing = bd">Remove</button>
             </li>
           </ul>
         </div>
@@ -255,20 +304,28 @@ import {
   RULE_DEFAULTS,
   ruleProblem,
   weekdayHoursProblem,
+  openWeekendDays,
+  countsLeaveInLimit,
+  WEEKEND_KEYS,
   type RuleKey,
   type WeekdayKey,
+  type WeekendKey,
 } from '~/utils/requestRuleSettings'
 import { getTZISODate } from '~/utils/localDate'
+import { canManageTeam } from '~/utils/roles'
 
 defineProps<{ teamName: string | null }>()
 
 const { user } = useAuth()
+// Supervisors and up change the rules; a Team Lead sees them locked (POST
+// /api/team-settings and the blocked-date routes are requireSupervisor).
+const readOnly = computed(() => !canManageTeam(user.value))
 const toast = useToast()
 const registry = useSaveRegistry()
 const { fetchSettings, saveRules, settings, saving, error: settingsError } = useTeamSettings()
 
 // ---- The form --------------------------------------------------------------------
-type ScalarKey = Exclude<RuleKey, 'max_pto_hours_by_dow'>
+type ScalarKey = Exclude<RuleKey, 'max_pto_hours_by_dow' | 'open_weekend_days' | 'count_leave_in_pto_limit'>
 const GROUPS = [
   { key: 'day', title: 'Whole team, per day' },
   { key: 'week', title: 'Each employee, per week (Mon–Sun)' },
@@ -291,9 +348,20 @@ const neverSaved = ref(false)
 type Box = string | number
 const hours = ref<Record<WeekdayKey, Box>>(Object.fromEntries(WEEKDAYS.map((d) => [d.key, ''])) as Record<WeekdayKey, Box>)
 const values = ref<Record<ScalarKey, Box>>(Object.fromEntries(FIELDS.map((f) => [f.key, ''])) as Record<ScalarKey, Box>)
+// Weekend days the site works (open_weekend_days): none until a supervisor opens one.
+const openWeekend = ref<WeekendKey[]>([])
+const isWeekend = (day: WeekdayKey): day is WeekendKey => day === 'sat' || day === 'sun'
+const toggleWeekend = (day: WeekendKey) => {
+  openWeekend.value = openWeekend.value.includes(day)
+    ? openWeekend.value.filter((d) => d !== day)
+    : WEEKEND_KEYS.filter((d) => d === day || openWeekend.value.includes(d))
+}
+// Leave of absence days use up the daily limits (count_leave_in_pto_limit); off by default.
+const countLeave = ref(false)
 const savedSnapshot = ref('')
 const asText = (o: Record<string, Box>) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, String(v ?? '').trim()]))
-const snapshot = () => JSON.stringify({ hours: asText(hours.value), values: asText(values.value) })
+const snapshot = () =>
+  JSON.stringify({ hours: asText(hours.value), values: asText(values.value), weekend: openWeekend.value, countLeave: countLeave.value })
 
 /**
  * The form from the stored settings, showing exactly what the rule engine applies:
@@ -319,6 +387,8 @@ const fillForm = (stored: Record<string, string>) => {
       return [f.key, f.optional ? '' : String(RULE_DEFAULTS[f.key as keyof typeof RULE_DEFAULTS])]
     })
   ) as Record<ScalarKey, Box>
+  openWeekend.value = openWeekendDays(stored.open_weekend_days)
+  countLeave.value = countsLeaveInLimit(stored.count_leave_in_pto_limit)
   savedSnapshot.value = snapshot()
 }
 
@@ -336,7 +406,10 @@ const load = async () => {
 }
 
 const hourProblems = computed(() =>
-  Object.fromEntries(WEEKDAYS.map((d) => [d.key, weekdayHoursProblem(d.key, hours.value[d.key])])) as Record<WeekdayKey, string | null>
+  // A closed weekend day has no limit to fill in.
+  Object.fromEntries(
+    WEEKDAYS.map((d) => [d.key, isWeekend(d.key) && !openWeekend.value.includes(d.key) ? null : weekdayHoursProblem(d.key, hours.value[d.key])])
+  ) as Record<WeekdayKey, string | null>
 )
 const hourProblemList = computed(() => Object.values(hourProblems.value).filter((p): p is string => !!p))
 const problems = computed(() =>
@@ -346,7 +419,7 @@ const hasProblems = computed(() => hourProblemList.value.length > 0 || Object.va
 const dirty = computed(() => state.value === 'ready' && snapshot() !== savedSnapshot.value)
 
 const fieldClass = (bad: boolean) => [
-  'w-full rounded-md border px-2 py-2 shadow-sm focus:outline-none focus:ring-2',
+  'w-full rounded-md border px-2 py-2 shadow-sm focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500 disabled:shadow-none',
   bad ? 'border-red-400 bg-red-50 focus:ring-red-400' : 'border-gray-300 focus:border-blue-500 focus:ring-blue-500',
 ]
 
@@ -357,7 +430,12 @@ const save = async () => {
   registry.mark(LEAVE_KEY, 'busy')
   try {
     // One request, all or nothing. The server re-checks every value.
-    const stored = await saveRules({ max_pto_hours_by_dow: hours.value, ...values.value })
+    const stored = await saveRules({
+      max_pto_hours_by_dow: hours.value,
+      ...values.value,
+      open_weekend_days: openWeekend.value.join(','),
+      count_leave_in_pto_limit: countLeave.value ? 'true' : 'false',
+    })
     neverSaved.value = false
     fillForm(stored)
     toast.success('Request rules saved.')
@@ -371,6 +449,8 @@ const undo = () => {
   const s = JSON.parse(savedSnapshot.value)
   hours.value = s.hours
   values.value = s.values
+  openWeekend.value = s.weekend
+  countLeave.value = s.countLeave
   saveError.value = ''
 }
 

@@ -1454,6 +1454,7 @@ const toYMD = (d: any): string => {
 
 /**
  * The absence this popup edits. Never a call-in: those belong to the CI button.
+ * Never a day of a leave of absence either: that's changed on Team Setup.
  * This used to pick up a call-in as "the existing absence", so Save PTO or
  * Cancel PTO silently deleted the call-in record.
  */
@@ -1461,7 +1462,7 @@ const resolvedPtoRecord = computed(() => {
   if (!showPTOModal.value || !ptoForm.value.employee_id) return null
   const recs = ptoByEmployeeId.value?.[ptoForm.value.employee_id] || []
   const target = toYMD(ptoForm.value.pto_date || scheduleDate.value)
-  return recs.find((r: any) => toYMD(r.pto_date) === target && r.pto_type !== 'call_in') || null
+  return recs.find((r: any) => toYMD(r.pto_date) === target && r.pto_type !== 'call_in' && r.pto_type !== 'leave') || null
 })
 
 /** A call-in the same day — shown as a note so it isn't mistaken for this absence. */
@@ -1486,7 +1487,7 @@ const openPTOModal = (employee: any) => {
   ptoForm.value.pto_date = scheduleDate.value
   const recs = ptoByEmployeeId.value?.[id] || []
   const target = toYMD(scheduleDate.value)
-  const existing = recs.find((r: any) => toYMD(r.pto_date) === target && r.pto_type !== 'call_in') || null
+  const existing = recs.find((r: any) => toYMD(r.pto_date) === target && r.pto_type !== 'call_in' && r.pto_type !== 'leave') || null
   const shiftWin = shiftWindowFor(id)
   const d = existing ? describePto(existing) : null
 
@@ -1591,7 +1592,7 @@ const callInReplaces = computed((): string[] => {
   const recs = ptoByEmployeeId.value?.[callInForm.value.employee_id] || []
   const target = toYMD(callInForm.value.pto_date || scheduleDate.value)
   return recs
-    .filter((r: any) => toYMD(r.pto_date) === target && r.pto_type !== 'call_in')
+    .filter((r: any) => toYMD(r.pto_date) === target && r.pto_type !== 'call_in' && r.pto_type !== 'leave')
     .map((r: any) => {
       const time = ptoTimeLabel(r)
       return `${ptoTypeLabel(r.pto_type)}${time ? `, ${time}` : ''}`

@@ -41,9 +41,10 @@
       </div>
 
       <!-- Legend -->
-      <div class="flex items-center gap-4 mb-4 text-xs">
+      <div class="flex flex-wrap items-center gap-4 mb-4 text-xs">
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-green-500 inline-block"></span> Approved</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-yellow-400 inline-block"></span> Pending</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-violet-400 inline-block"></span> On leave of absence</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-red-200 border border-red-400 inline-block"></span> Blocked (no requests allowed)</span>
       </div>
 
@@ -92,9 +93,11 @@
               v-for="entry in getEntriesForDate(day.date)"
               :key="entry.id"
               class="text-xs rounded px-1.5 py-1 leading-tight"
-              :class="entry.status === 'approved'
-                ? 'bg-green-100 text-green-800 border border-green-200'
-                : 'bg-yellow-100 text-yellow-800 border border-yellow-200'"
+              :class="entry.status === 'leave'
+                ? 'bg-violet-100 text-violet-800 border border-violet-200'
+                : entry.status === 'approved'
+                  ? 'bg-green-100 text-green-800 border border-green-200'
+                  : 'bg-yellow-100 text-yellow-800 border border-yellow-200'"
               :title="`${entry.employee_name} - ${entry.typeLabel}${entry.time ? ' (' + entry.time + ')' : ''}${entry.notes ? ': ' + entry.notes : ''}`"
             >
               <div class="font-medium truncate">{{ entry.employee_name }}</div>
@@ -119,6 +122,9 @@
               </div>
               <div v-if="hoursFor(day.date).manual > 0" class="flex justify-between text-gray-500">
                 <span>Manual</span><span>{{ fmtHours(hoursFor(day.date).manual) }}</span>
+              </div>
+              <div v-if="hoursFor(day.date).leave > 0" class="flex justify-between text-violet-700">
+                <span>Leave</span><span>{{ fmtHours(hoursFor(day.date).leave) }}</span>
               </div>
               <div class="flex justify-between font-semibold text-gray-800 mt-0.5 pt-0.5 border-t border-gray-100">
                 <span>Total</span><span>{{ fmtHours(hoursFor(day.date).total) }}</span>
@@ -162,9 +168,11 @@
                 v-for="entry in monthEntriesFor(day.date)"
                 :key="entry.id"
                 class="text-[10px] rounded px-1 py-0.5 leading-tight"
-                :class="entry.status === 'approved'
-                  ? 'bg-green-100 text-green-800'
-                  : 'bg-yellow-100 text-yellow-800'"
+                :class="entry.status === 'leave'
+                  ? 'bg-violet-100 text-violet-800'
+                  : entry.status === 'approved'
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-yellow-100 text-yellow-800'"
                 :title="entry.employee_name + ' - ' + entry.typeLabel + (entry.time ? ' (' + entry.time + ')' : '')"
               >
                 <div class="truncate">{{ entry.employee_name }}</div>
@@ -380,7 +388,7 @@ const onRequestSubmitted = () => {
 const isAdmin = computed(() => canLead(user.value))
 
 // Calendar data from the PTO calendar API
-const calendarData = ref<{ pto_days: any[]; requests: any[]; hours_by_date?: Record<string, DayHours> }>({ pto_days: [], requests: [] })
+const calendarData = ref<{ pto_days: any[]; leave_days?: any[]; requests: any[]; hours_by_date?: Record<string, DayHours> }>({ pto_days: [], requests: [] })
 
 const todayStr = computed(() => {
   const d = new Date()
@@ -464,7 +472,8 @@ const dateTo = computed(() => {
 interface CalendarEntry {
   id: string
   employee_name: string
-  status: 'approved' | 'pending'
+  /** 'leave': a day of a leave of absence (Team Setup), not a request. */
+  status: 'approved' | 'pending' | 'leave'
   typeLabel: string
   time: string
   notes: string | null
@@ -486,6 +495,19 @@ const entriesByDate = computed(() => {
       time: ptoTimeLabel(pto),
       notes: pto.notes,
       date,
+    })
+  }
+
+  // Days of a leave of absence. No note: the calendar never says why.
+  for (const day of calendarData.value.leave_days ?? []) {
+    ;(map[day.pto_date] ??= []).push({
+      id: day.id,
+      employee_name: day.employee_name || 'Unknown',
+      status: 'leave',
+      typeLabel: 'Leave of absence',
+      time: '',
+      notes: null,
+      date: day.pto_date,
     })
   }
 
@@ -514,8 +536,8 @@ const getEntriesForDate = (date: string): CalendarEntry[] => {
   return entriesByDate.value[date] || []
 }
 
-interface DayHours { approved: number; callIn: number; manual: number; total: number }
-const NO_HOURS: DayHours = { approved: 0, callIn: 0, manual: 0, total: 0 }
+interface DayHours { approved: number; callIn: number; manual: number; leave: number; total: number }
+const NO_HOURS: DayHours = { approved: 0, callIn: 0, manual: 0, leave: 0, total: 0 }
 
 /**
  * Hours off for a date, itemised. Supplied by the API — never derived here, so it
@@ -669,7 +691,7 @@ const loadCalendar = async () => {
   calendarError.value = ''
   try {
     const [calData] = await Promise.all([
-      $fetch<{ pto_days: any[]; requests: any[] }>('/api/pto-calendar', {
+      $fetch<{ pto_days: any[]; leave_days: any[]; requests: any[] }>('/api/pto-calendar', {
         params: { date_from: dateFrom.value, date_to: dateTo.value },
       }),
       loadRequests(),

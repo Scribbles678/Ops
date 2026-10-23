@@ -86,6 +86,9 @@ scheduling-app-v2/
 │   │   │                             #   many trained people are on shift (regular shifts, no
 │   │   │                             #   date), against job_functions.training_target. Target
 │   │   │                             #   boxes save as you go (PUT /api/job-functions/:id)
+│   │   ├── LeaveModal.vue            # Leave of absence for one person (Oct 2026): list, set,
+│   │   │                             #   change, remove; shows what saving cancels first
+│   │   │                             #   (POST /api/leaves/preview). See PTO-AND-REQUESTS.md
 │   │   └── EmployeesTraining.vue     # Employees & Training tab of Team Setup — the old
 │   │                                 #   /training page moved here whole (auto-saving matrix,
 │   │                                 #   add/edit employee, shift per employee, Overview button).
@@ -347,7 +350,7 @@ The signed token carries: `id`, `email`, `username`, `full_name`, `team_id`, `is
 |------|-------------|
 | **Super Admin** | Everything on every team: teams (and their time zones), every team's accounts |
 | **Supervisor** | Team-scoped data + approvals + review material + Request Rules / blocked dates + **their team's accounts** (never a Super Admin's; Sep 2026) (was "Admin") |
-| **Team Lead / Coordinator** | Same as Supervisor minus Request Rules / blocked dates / accounts; Settings shows only their own account (Sep 2026) |
+| **Team Lead / Coordinator** | Same as Supervisor minus changing Request Rules / blocked dates and accounts; Settings shows their own account and the Request rules **view only** (Oct 2026) |
 | **Kiosk** | Locked to `/display`; submits requests and looks them up by UPI |
 
 Exactly one role per account; **no role = no access** (kept on `/settings` until their supervisor or a Super Admin assigns one).

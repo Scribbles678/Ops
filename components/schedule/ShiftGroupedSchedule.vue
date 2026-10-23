@@ -53,11 +53,19 @@
           <div class="employee-name flex items-center justify-between gap-2">
             <span class="whitespace-nowrap truncate flex-1" :title="`${employee.last_name}, ${employee.first_name}`">{{ employee.last_name }}, {{ employee.first_name }}</span>
             <div class="flex items-center gap-1 flex-shrink-0">
-              <span v-if="hasPTO(employee.id)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-700 border border-red-200">PTO</span>
-              <span v-if="hasCallIn(employee.id)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-orange-100 text-orange-700 border border-orange-200">CI</span>
-              <button @click="emit('addPTO', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors duration-150 shadow-sm">PTO</button>
-              <button @click="emit('addShiftSwap', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-blue-300 text-blue-700 hover:bg-blue-100 transition-colors duration-150 shadow-sm">SS</button>
-              <button @click="emit('addCallIn', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-orange-300 text-orange-700 hover:bg-orange-100 transition-colors duration-150 shadow-sm">CI</button>
+              <!-- On a leave of absence: off all day, nothing to add here (Team Setup changes the leave). -->
+              <span
+                v-if="leaveRecord(employee.id)"
+                class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-violet-100 text-violet-800 border border-violet-200"
+                :title="`On leave of absence ${leaveSpan({ start_date: leaveRecord(employee.id).leave_start, end_date: leaveRecord(employee.id).leave_end })}. Change it on Team Setup → Employees.`"
+              >Leave</span>
+              <template v-else>
+                <span v-if="hasPTO(employee.id)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-700 border border-red-200">PTO</span>
+                <span v-if="hasCallIn(employee.id)" class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-orange-100 text-orange-700 border border-orange-200">CI</span>
+                <button @click="emit('addPTO', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors duration-150 shadow-sm">PTO</button>
+                <button @click="emit('addShiftSwap', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-blue-300 text-blue-700 hover:bg-blue-100 transition-colors duration-150 shadow-sm">SS</button>
+                <button @click="emit('addCallIn', employee)" class="px-1.5 py-0.5 text-[10px] rounded-md border border-orange-300 text-orange-700 hover:bg-orange-100 transition-colors duration-150 shadow-sm">CI</button>
+              </template>
             </div>
           </div>
 
@@ -327,6 +335,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { describePto, formatTimeOfDay, ptoTimeLabel } from '~/utils/ptoDisplay'
+import { leaveSpan } from '~/utils/leaveDisplay'
 
 const BLOCK_WIDTH = 24
 
@@ -645,8 +654,12 @@ const getEmployeeAssignmentRanges = (employeeId: string, shift: any) => {
 const hasPTO = (employeeId: string) => {
   const recs = props.ptoByEmployeeId?.[employeeId]
   if (!Array.isArray(recs) || recs.length === 0) return false
-  return recs.some((r: any) => r.pto_type !== 'call_in')
+  return recs.some((r: any) => r.pto_type !== 'call_in' && r.pto_type !== 'leave')
 }
+
+/** Their leave-of-absence day row (server/utils/leave.ts), when they're on leave today. */
+const leaveRecord = (employeeId: string): any =>
+  props.ptoByEmployeeId?.[employeeId]?.find((r: any) => r.pto_type === 'leave') ?? null
 
 const hasCallIn = (employeeId: string) => {
   const recs = props.ptoByEmployeeId?.[employeeId]
@@ -687,6 +700,7 @@ const getAbsenceRanges = (employeeId: string, shift: any) => {
 /** "PTO", "Call-in", "Arrives 9:38 AM", "Leaves 4:02 PM", "PTO 8:00 AM – 10:00 AM". */
 const absenceLabel = (record: any, allDay: boolean): string => {
   if (record.pto_type === 'call_in') return 'Call-in'
+  if (record.pto_type === 'leave') return 'On leave'
   if (allDay) return 'PTO'
   const when = ptoTimeLabel(record)
   if (when.startsWith('arrives') || when.startsWith('leaves')) return when.charAt(0).toUpperCase() + when.slice(1)
@@ -926,6 +940,10 @@ const saveAssignment = () => {
     return
   }
   // PTO overlap check
+  if (leaveRecord(selectedEmployee.value.id)) {
+    modalError.value = "They're on leave of absence today. Change the leave on Team Setup → Employees if they're back."
+    return
+  }
   if (props.ptoByEmployeeId && isOverlappingPTO(selectedEmployee.value.id, startMinutes, endMinutes)) {
     modalError.value = 'They have time off during this time. Change the times, or remove the time off first.'
     return

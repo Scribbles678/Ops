@@ -49,12 +49,13 @@
 </template>
 
 <script setup lang="ts">
-import { canManageTeam } from '~/utils/roles'
+import { canLead, canManageTeam } from '~/utils/roles'
 
 /**
  * Settings, in tabs (Oct 2026), each addressable as ?tab=:
- *   account — everyone: who you are, your password (and a Super Admin's team)
- *   rules   — Supervisor and up: the team's Request Rules and Blocked Dates
+ *   account — everyone: who you are, your password (and the team switcher)
+ *   rules   — Team Lead and up: the team's Request Rules and Blocked Dates — only
+ *             Supervisors and up change them; a Team Lead sees them locked
  *   users   — Supervisor and up: the team's accounts (every team's, for a Super Admin)
  *   teams   — Super Admin: create, rename, time zones, delete
  * Until then it was one narrow column: a Super Admin's page ran 2,800px and the user
@@ -76,9 +77,8 @@ useLeaveGuard('Your Request Rules changes are not saved. Leave without saving?')
 const isSuperAdmin = computed(() => !!user.value?.is_super_admin)
 const tabs = computed(() => [
   { key: 'account' as const, label: 'My account' },
-  ...(canManageTeam(user.value)
-    ? [{ key: 'rules' as const, label: 'Request rules' }, { key: 'users' as const, label: 'Users' }]
-    : []),
+  ...(canLead(user.value) ? [{ key: 'rules' as const, label: 'Request rules' }] : []),
+  ...(canManageTeam(user.value) ? [{ key: 'users' as const, label: 'Users' }] : []),
   ...(isSuperAdmin.value ? [{ key: 'teams' as const, label: 'Teams' }] : []),
 ])
 
@@ -137,6 +137,7 @@ const subtitle = computed(() => {
   const team = teamName.value ?? 'your team'
   if (isSuperAdmin.value) return `Your account, ${team}'s request rules and user accounts, and every team`
   if (canManageTeam(user.value)) return `Your account, and ${team}'s request rules and user accounts`
+  if (canLead(user.value)) return `Your account, and ${team}'s request rules (view only)`
   return 'Your account and password'
 })
 
