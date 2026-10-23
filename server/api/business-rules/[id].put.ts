@@ -1,8 +1,10 @@
 import { query } from '../../utils/db'
-import { requireAuth } from '../../utils/authorize'
+import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
 
+// Legacy table; scoped to the caller's team since Sep 2026 (it updated any team's row).
 export default defineEventHandler(async (event) => {
-  requireAuth(event)
+  const user = requireTeamLead(event)
+  const teamId = getTeamFilter(user)
   const id = getRouterParam(event, 'id')
   const body = await readBody(event)
   const {
@@ -25,12 +27,12 @@ export default defineEventHandler(async (event) => {
          fan_out_prefix     = $10,
          is_active          = COALESCE($11, is_active),
          updated_at         = NOW()
-     WHERE id = $12
+     WHERE id = $12 AND team_id = $13
      RETURNING *`,
     [job_function_name ?? null, time_slot_start ?? null, time_slot_end ?? null,
      min_staff ?? null, max_staff ?? null, block_size_minutes ?? null,
      priority ?? null, notes ?? null, fan_out_enabled ?? null, fan_out_prefix ?? null,
-     is_active ?? null, id]
+     is_active ?? null, id, teamId]
   )
 
   if (result.rows.length === 0) {

@@ -1,114 +1,168 @@
 <!--
   Employees & Training — the first tab of Team Setup (pages/details.vue).
 
-  This was the standalone /training page until Sep 2026 and moved here as a unit:
-  the logic below is the page's, untouched, so the auto-save and the Meter-group
-  handling behave exactly as before. The one addition is the flush on unmount —
-  switching tabs is not a route change, so the route-leave guard alone would let a
-  checkbox clicked just before a tab switch go unsaved.
+  Every change saves on its own, the moment it's made:
+  - a training box sends just that change (useTrainingSaves → POST
+    /api/employees/:id/training { add | remove }), one at a time per person;
+  - the shift dropdown saves that one field (useBoxSave, namespace 'employee-shift');
+  - add / edit / delete / deactivate go through a window and end in a toast.
+  Each inline save shows its own status beside the control (<UiSaveStatus>).
+
+  What this replaced: a 1.5 s debounce that sent each person's WHOLE training set,
+  then reloaded everyone's training and wiped everyone's unsent clicks — so ticking
+  two people a second apart lost the second tick, and a failed load ("trained on
+  nothing") plus one tick erased all of someone's training.
+
+  Both savers keep their state outside this component, so switching tabs mid-save
+  loses nothing and a failure after the tab closed comes back as a toast. Warning
+  on leaving the page mid-save is the page's job (useLeaveGuard), not this tab's.
 -->
 <template>
-  <div class="training-matrix text-xs md:text-sm">
-    <div>
-      <!-- Search Bar -->
-      <div class="card mb-3">
-        <input
-          v-model="searchQuery"
-          type="text"
-          placeholder="Search employees..."
-          class="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs md:text-sm"
-        />
-      </div>
+  <div class="text-xs md:text-sm">
+    <!-- Search -->
+    <div class="card mb-3">
+      <label :for="`${uid}-search`" class="sr-only">Search employees by name or UPI</label>
+      <input
+        :id="`${uid}-search`"
+        v-model="searchQuery"
+        type="search"
+        placeholder="Search by name or UPI…"
+        class="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs md:text-sm"
+      />
+    </div>
 
-      <!-- Loading State -->
-      <div v-if="loading" class="card text-center py-6">
-        <p class="text-gray-600 text-sm">Loading job functions...</p>
-      </div>
-
-      <!-- Error State -->
-      <div v-else-if="error" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-        <p class="text-red-600">{{ error }}</p>
-      </div>
-
-      <!-- Employee Management Header -->
-      <div v-else class="card mb-3">
-        <div class="flex justify-between items-center">
-          <h2 class="text-base md:text-lg font-semibold text-gray-800">Employees &amp; Training</h2>
-          <div class="flex space-x-2">
-            <NuxtLink
-              to="/employee-overview"
-              class="px-3 py-1.5 rounded-md text-xs md:text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
-            >
-              Employee Overview
-            </NuxtLink>
-            <button
-              @click="openAddEmployeeModal"
-              class="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-xs md:text-sm"
-            >
-              + Add Employee
-            </button>
-          </div>
+    <!-- Header -->
+    <div class="card mb-3">
+      <div class="flex flex-wrap justify-between items-center gap-2">
+        <h2 class="text-base md:text-lg font-semibold text-gray-800">Employees &amp; Training</h2>
+        <div class="flex space-x-2">
+          <NuxtLink
+            to="/employee-overview"
+            class="px-3 py-1.5 rounded-md text-xs md:text-sm font-medium bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
+          >
+            Employee Overview
+          </NuxtLink>
+          <button
+            type="button"
+            :disabled="listLoading || !!listError"
+            :title="listError ? `Employees didn't load — Retry first` : undefined"
+            class="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            @click="openForm(null)"
+          >
+            + Add Employee
+          </button>
         </div>
       </div>
+    </div>
 
-      <!-- Training Matrix -->
-      <div v-if="!loading && !error" class="card">
-        <!-- Debug info -->
-        <div v-if="employees.length === 0" class="text-center py-6 text-gray-500 text-sm">
-          <p>No employees found. {{ employeesLoading ? 'Still loading employees...' : 'Try adding some employees.' }}</p>
+    <!-- No list yet: the first load (names, shifts and training together, so a
+         dropdown never renders before its options), its failure, or an empty team.
+         load() only runs then, so once there is a list nothing here replaces it — a
+         failed save or refetch leaves it on screen. -->
+    <div v-if="listLoading || !employees.length" class="card text-center py-6 text-sm">
+      <p v-if="listLoading" class="text-gray-600">Loading employees…</p>
+      <div v-else-if="listError" role="alert" class="space-y-2">
+        <p class="text-red-700">Couldn't load employees: {{ listError }}</p>
+        <button
+          type="button"
+          class="px-3 py-1.5 rounded-md border border-red-300 bg-white text-red-700 hover:bg-red-50 text-xs md:text-sm"
+          @click="load"
+        >Retry</button>
+      </div>
+      <p v-else class="text-gray-500">No employees yet — add one with “+ Add Employee”.</p>
+    </div>
+
+    <template v-else>
+      <div class="card">
+        <!-- A part that didn't load: say so above the matrix and keep the rest usable. -->
+        <div
+          v-if="trainingError"
+          role="alert"
+          class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
+          <span>Couldn't load training — the boxes stay off until it loads. <span class="text-red-600">({{ trainingError }})</span></span>
+          <button
+            type="button"
+            :disabled="retryingTraining"
+            class="rounded-md border border-red-300 bg-white px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+            @click="retryTraining"
+          >{{ retryingTraining ? 'Loading…' : 'Retry' }}</button>
         </div>
+
+        <div
+          v-if="shiftsLoadError"
+          role="alert"
+          class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
+          <span>Couldn't load shifts — the shift dropdowns stay off until they load. <span class="text-red-600">({{ shiftsLoadError }})</span></span>
+          <button
+            type="button"
+            :disabled="retryingShifts"
+            class="rounded-md border border-red-300 bg-white px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+            @click="retryShifts"
+          >{{ retryingShifts ? 'Loading…' : 'Retry' }}</button>
+        </div>
+
+        <p v-if="noMatches" class="text-center py-6 text-gray-500 text-sm">No employees match '{{ searchQuery.trim() }}'</p>
+        <p v-else-if="!activeShown.length" class="text-center py-6 text-gray-500 text-sm">
+          {{ query ? `No active employees match '${searchQuery.trim()}' — see Inactive employees below.` : 'No active employees. Reactivate someone below, or add one.' }}
+        </p>
+
         <div class="space-y-2.5">
           <div
-            v-for="employee in filteredEmployees"
+            v-for="employee in activeShown"
             :key="employee.id"
             :data-employee-id="employee.id"
             class="border-b border-gray-200 pb-2 last:border-b-0"
           >
-            <!-- Employee Header with Controls -->
-            <div class="flex justify-between items-start mb-2">
-              <div class="flex items-center space-x-3">
+            <div class="flex flex-wrap justify-between items-start gap-2 mb-2">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <div class="flex items-center space-x-1.5">
-                  <h3 class="text-sm md:text-base font-semibold text-gray-800">
-                    {{ employee.last_name }}, {{ employee.first_name }}
-                  </h3>
+                  <h3 class="text-sm md:text-base font-semibold text-gray-800">{{ fullName(employee) }}</h3>
                   <span v-if="employee.upi" class="text-xs text-gray-400 tabular-nums" title="UPI">#{{ employee.upi }}</span>
                 </div>
-                
-                <!-- Shift Selection -->
-                <div class="flex items-center space-x-1.5">
-                  <label class="text-xs md:text-sm text-gray-600">Shift:</label>
+
+                <!-- Shift: saves on pick. Stays enabled while saving — the newest pick wins. -->
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <label :for="`${uid}-shift-${employee.id}`" class="text-xs md:text-sm text-gray-600">Shift:</label>
                   <select
-                    :value="employeeShifts[employee.id] || ''"
-                    @change="updateEmployeeShift(employee.id, $event)"
-                    class="text-xs md:text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    :id="`${uid}-shift-${employee.id}`"
+                    :value="shiftBoxes.draftOf(employee.id) ?? ''"
+                    :disabled="!!shiftsLoadError"
+                    :title="shiftsLoadError ? `Shifts didn't load — use Retry above` : undefined"
+                    class="text-xs md:text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100"
+                    @change="onShiftChange(employee.id, $event)"
                   >
-                    <option value="">Select Shift</option>
-                    <option v-for="shift in shifts" :key="shift.id" :value="shift.id">
+                    <option value="">No shift</option>
+                    <option v-if="offListShifts[employee.id]" :value="offListShifts[employee.id]?.id" disabled>
+                      {{ offListShifts[employee.id]?.name }}
+                    </option>
+                    <option v-for="shift in activeShifts" :key="shift.id" :value="shift.id">
                       {{ shift.name }}
                     </option>
                   </select>
+                  <UiSaveStatus
+                    :state="shiftBoxes.stateOf(employee.id)"
+                    :message="shiftBoxes.messageOf(employee.id)"
+                    :label="`Shift for ${fullName(employee)}`"
+                    :retryable="shiftBoxes.retryableOf(employee.id)"
+                    undoable
+                    @retry="shiftBoxes.retry(employee.id)"
+                    @undo="shiftBoxes.undo(employee.id)"
+                  />
                 </div>
               </div>
-              
-              <!-- Employee Actions -->
-              <div class="flex items-center space-x-1.5">
-                <span v-if="employeeSaveState[employee.id] === 'saving'" class="px-2.5 py-1 bg-yellow-100 text-yellow-700 rounded text-xs md:text-sm flex items-center space-x-1">
-                  <svg class="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                  <span>Saving...</span>
-                </span>
-                <span v-else-if="employeeSaveState[employee.id] === 'saved'" class="px-2.5 py-1 bg-green-100 text-green-700 rounded text-xs md:text-sm flex items-center space-x-1">
-                  <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                  <span>Saved</span>
-                </span>
-                <span v-else-if="employeeSaveState[employee.id] === 'error'" class="px-2.5 py-1 bg-red-100 text-red-700 rounded text-xs md:text-sm cursor-pointer hover:bg-red-200" @click="saveEmployeeTraining(employee.id)">
-                  Error - Click to Retry
-                </span>
-                <span v-else-if="employeeSaveState[employee.id] === 'pending'" class="px-2.5 py-1 bg-blue-100 text-blue-600 rounded text-xs md:text-sm">
-                  Unsaved
-                </span>
-                <span v-else class="px-2.5 py-1 bg-gray-100 text-gray-400 rounded text-xs md:text-sm">
-                  No Changes
-                </span>
+
+              <div class="flex flex-wrap items-center gap-1.5">
+                <UiSaveStatus
+                  :state="trainingSaves.stateOf(employee.id)"
+                  :message="trainingSaves.messageOf(employee.id)"
+                  :label="`Training for ${fullName(employee)}`"
+                  :retryable="trainingSaves.retryableOf(employee.id)"
+                  undoable
+                  @retry="trainingSaves.retry(employee.id)"
+                  @undo="trainingSaves.undo(employee.id)"
+                />
                 <NuxtLink
                   :to="{ path: '/employee-overview', query: { employee: employee.id } }"
                   class="px-2.5 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition text-xs md:text-sm"
@@ -117,570 +171,719 @@
                   Overview
                 </NuxtLink>
                 <button
-                  @click="openEditEmployeeModal(employee)"
+                  type="button"
                   class="px-2.5 py-1 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition text-xs md:text-sm"
+                  @click="openForm(employee)"
                 >
                   Edit
                 </button>
                 <button
-                  @click="deleteEmployee(employee.id)"
-                  class="px-2.5 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200 transition text-xs md:text-sm"
+                  type="button"
+                  :disabled="!!busyReason(employee.id)"
+                  :title="busyReason(employee.id) || undefined"
+                  class="px-2.5 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200 transition text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  @click="openDelete(employee)"
                 >
                   Delete
                 </button>
               </div>
             </div>
-            
-            <!-- Training Matrix -->
+
+            <!-- Training boxes: each click saves that one change. -->
             <div class="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-9 gap-1.5">
               <label
-                v-for="jobFunction in getGroupedJobFunctions()"
+                v-for="jobFunction in gridJobs"
                 :key="jobFunction.id"
-                class="flex items-center space-x-1 cursor-pointer hover:bg-gray-50 p-1 rounded text-[11px] md:text-xs transition-colors"
+                class="flex items-center space-x-1 p-1 rounded text-[11px] md:text-xs transition-colors"
+                :class="trainingOpen(employee.id) ? 'cursor-pointer hover:bg-gray-50' : 'cursor-not-allowed opacity-60'"
               >
                 <input
                   type="checkbox"
                   :data-employee-id="employee.id"
                   :data-job-function-id="jobFunction.id"
-                  :checked="isEmployeeTrained(employee.id, jobFunction.id)"
-                  @change="toggleTraining(employee.id, jobFunction.id, $event)"
+                  :aria-label="`${jobFunction.name} training for ${fullName(employee)}`"
+                  :checked="isTrained(employee.id, jobFunction)"
+                  :disabled="!trainingOpen(employee.id)"
                   class="w-3 h-3 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  @change="onTrainingChange(employee.id, jobFunction, $event)"
                 />
-                <div class="flex items-center space-x-1">
-                  <div
-                    class="w-2.5 h-2.5 rounded border border-gray-300"
-                    :style="{ backgroundColor: jobFunction.color_code }"
-                  ></div>
-                  <span class="text-[11px] md:text-xs text-gray-700 truncate">{{ jobFunction.name }}</span>
-                </div>
+                <span
+                  class="w-2.5 h-2.5 shrink-0 rounded border border-gray-300"
+                  :style="{ backgroundColor: jobFunction.color_code }"
+                  aria-hidden="true"
+                ></span>
+                <span class="text-[11px] md:text-xs text-gray-700 truncate">{{ jobFunction.name }}</span>
               </label>
             </div>
           </div>
         </div>
 
-        <!-- Save Instructions -->
+        <!-- Help line -->
         <div class="mt-3 pt-3 border-t border-gray-200 text-xs md:text-sm">
-          <div class="flex items-center justify-center">
-            <div class="text-gray-500">
-              <span class="inline-flex items-center">
-                <svg class="w-3.5 h-3.5 mr-1 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2H4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
-                </svg>
-                Click checkboxes to update training — changes auto-save after a moment
-              </span>
-            </div>
-          </div>
-          
-          <!-- Training Data Loading Indicator -->
-          <div v-if="trainingDataLoading" class="mt-2 text-center">
-            <div class="inline-flex items-center text-sm text-blue-500">
-              <svg class="animate-spin h-3.5 w-3.5 mr-2" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          <div class="flex items-center justify-center text-gray-500">
+            <span class="inline-flex items-center">
+              <svg class="w-3.5 h-3.5 mr-1 text-blue-500" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                <path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2H4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"></path>
               </svg>
-              Loading training data...
-            </div>
+              Tick a box to add that training, untick to remove it — each change saves as soon as you click.
+            </span>
           </div>
         </div>
       </div>
 
-      <!-- Add/Edit Employee Modal -->
-      <div v-if="showEmployeeModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-          <h3 class="text-xl font-bold mb-4">
-            {{ editingEmployee ? 'Edit Employee' : 'Add New Employee' }}
-          </h3>
-          
-          <form @submit.prevent="handleEmployeeSubmit" class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">First Name</label>
-              <input
-                v-model="employeeFormData.first_name"
-                type="text"
-                required
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
+      <!-- Inactive employees: kept (with their history) but out of the matrix. -->
+      <div v-if="inactiveShown.length" class="card mt-3">
+        <button
+          type="button"
+          :aria-expanded="inactiveOpen"
+          :aria-controls="`${uid}-inactive`"
+          class="flex w-full items-center justify-between text-left text-sm md:text-base font-semibold text-gray-700"
+          @click="inactiveOpen = !inactiveOpen"
+        >
+          <span>Inactive employees ({{ inactiveShown.length }})</span>
+          <svg
+            class="h-4 w-4 text-gray-500 transition-transform"
+            :class="inactiveOpen ? 'rotate-180' : ''"
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+          </svg>
+        </button>
+        <ul v-show="inactiveOpen" :id="`${uid}-inactive`" class="mt-3 divide-y divide-gray-100">
+          <li
+            v-for="employee in inactiveShown"
+            :key="employee.id"
+            :data-employee-id="employee.id"
+            class="flex flex-wrap items-center justify-between gap-2 py-2"
+          >
+            <div class="flex items-center gap-2 text-gray-500">
+              <span class="text-sm font-medium">{{ fullName(employee) }}</span>
+              <span v-if="employee.upi" class="text-xs text-gray-400 tabular-nums" title="UPI">#{{ employee.upi }}</span>
+              <span class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Inactive</span>
             </div>
-
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
-              <input
-                v-model="employeeFormData.last_name"
-                type="text"
-                required
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">UPI</label>
-              <input
-                v-model="employeeFormData.upi"
-                type="text"
-                inputmode="numeric"
-                pattern="[0-9]*"
-                placeholder="Numbers only"
-                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <span class="block text-xs text-gray-500 mt-1">The employee types this at the kiosk to check their own requests. Leave blank if they don't have one.</span>
-            </div>
-
-            <div class="flex items-center">
-              <input
-                v-model="employeeFormData.is_active"
-                type="checkbox"
-                id="is_active"
-                class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              />
-              <label for="is_active" class="ml-2 block text-sm text-gray-700">
-                Active
-              </label>
-            </div>
-
-            <p v-if="employeeFormError" class="text-sm text-red-600">{{ employeeFormError }}</p>
-
-            <div class="flex justify-end space-x-3 pt-4">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <NuxtLink
+                :to="{ path: '/employee-overview', query: { employee: employee.id } }"
+                class="px-2.5 py-1 bg-gray-100 text-gray-600 rounded hover:bg-gray-200 transition text-xs md:text-sm"
+                title="Open this employee's overview"
+              >
+                Overview
+              </NuxtLink>
               <button
                 type="button"
-                @click="closeEmployeeModal"
-                class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+                :disabled="reactivating.has(employee.id)"
+                class="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded hover:bg-emerald-200 transition text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                @click="reactivate(employee)"
               >
-                Cancel
+                {{ reactivating.has(employee.id) ? 'Reactivating…' : 'Reactivate' }}
               </button>
               <button
-                type="submit"
-                class="btn-primary"
+                type="button"
+                class="px-2.5 py-1 bg-blue-100 text-blue-600 rounded hover:bg-blue-200 transition text-xs md:text-sm"
+                @click="openForm(employee)"
               >
-                {{ editingEmployee ? 'Update' : 'Create' }}
+                Edit
+              </button>
+              <button
+                type="button"
+                :disabled="!!busyReason(employee.id)"
+                :title="busyReason(employee.id) || undefined"
+                class="px-2.5 py-1 bg-red-100 text-red-600 rounded hover:bg-red-200 transition text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                @click="openDelete(employee)"
+              >
+                Delete
               </button>
             </div>
-          </form>
+          </li>
+        </ul>
+      </div>
+    </template>
+
+    <!-- Add / Edit employee -->
+    <UiModal
+      v-if="formOpen"
+      :title="editing ? 'Edit Employee' : 'Add Employee'"
+      :busy="formSaving"
+      @close="closeForm"
+    >
+      <form :id="`${uid}-form`" class="space-y-4" novalidate @submit.prevent="submitForm">
+        <div>
+          <label :for="`${uid}-first`" class="block text-sm font-medium text-gray-700 mb-1">First name</label>
+          <input
+            :id="`${uid}-first`"
+            v-model="form.first_name"
+            type="text"
+            required
+            maxlength="100"
+            autocomplete="off"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <label :for="`${uid}-last`" class="block text-sm font-medium text-gray-700 mb-1">Last name</label>
+          <input
+            :id="`${uid}-last`"
+            v-model="form.last_name"
+            type="text"
+            required
+            maxlength="100"
+            autocomplete="off"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        <div>
+          <label :for="`${uid}-upi`" class="block text-sm font-medium text-gray-700 mb-1">UPI</label>
+          <input
+            :id="`${uid}-upi`"
+            v-model="form.upi"
+            type="text"
+            inputmode="numeric"
+            maxlength="20"
+            autocomplete="off"
+            placeholder="Numbers only"
+            :aria-describedby="`${uid}-upi-help`"
+            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <span :id="`${uid}-upi-help`" class="block text-xs text-gray-500 mt-1">The employee types this at the kiosk to check their own requests. Leave blank if they don't have one.</span>
+        </div>
+
+        <div class="flex items-center">
+          <input
+            :id="`${uid}-active`"
+            v-model="form.is_active"
+            type="checkbox"
+            class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          />
+          <label :for="`${uid}-active`" class="ml-2 block text-sm text-gray-700">Active</label>
+        </div>
+
+        <!-- Unticking Active on someone active: what deactivating leaves behind, before Save. -->
+        <div v-if="deactivating" class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p v-if="formUsage.loading">Checking what deactivating affects…</p>
+          <p v-else-if="formUsage.error">Couldn't check what deactivating affects ({{ formUsage.error }}). Deactivating keeps everything, so you can still save.</p>
+          <template v-else>
+            <p class="font-medium">If you deactivate {{ fullName(editing) }}:</p>
+            <ul v-if="formUsage.notes.length" class="mt-1 list-disc space-y-0.5 pl-5">
+              <li v-for="(note, i) in formUsage.notes" :key="i">{{ note }}</li>
+            </ul>
+            <p v-else class="mt-1">Everything is kept, and you can reactivate them later.</p>
+            <template v-if="formUsage.blockers.length">
+              <p class="mt-2 font-medium text-red-700">Can't deactivate yet:</p>
+              <ul class="mt-1 list-disc space-y-0.5 pl-5 text-red-700">
+                <li v-for="(blocker, i) in formUsage.blockers" :key="i">{{ blocker }}</li>
+              </ul>
+            </template>
+          </template>
+          <p v-if="busyReason(editing.id)" class="mt-2 font-medium text-red-700">{{ busyReason(editing.id) }} — deactivating waits until it's done.</p>
+        </div>
+
+        <p v-if="formError" role="alert" class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ formError }}</p>
+      </form>
+
+      <template #footer>
+        <button
+          type="button"
+          :disabled="formSaving"
+          class="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          @click="closeForm"
+        >Cancel</button>
+        <button
+          type="submit"
+          :form="`${uid}-form`"
+          :disabled="!canSubmit"
+          class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        >{{ formSaving ? 'Saving…' : editing ? 'Save' : 'Add Employee' }}</button>
+      </template>
+    </UiModal>
+
+    <!-- Delete (or deactivate instead) -->
+    <UiConfirmDialog
+      v-if="del.employee"
+      :title="`Delete ${fullName(del.employee)}?`"
+      message="Deleting is permanent — it can't be undone."
+      :loading="del.loading"
+      confirm-label="Delete permanently"
+      :busy-label="del.busy === 'delete' ? 'Deleting…' : 'Delete permanently'"
+      danger
+      :confirm-disabled="!del.usage || del.usage.blockers.length > 0 || !!busyReason(del.employee.id)"
+      :secondary-label="del.employee.is_active ? (del.busy === 'deactivate' ? 'Deactivating…' : 'Deactivate instead') : undefined"
+      :secondary-disabled="!!deactivateRefusal"
+      :secondary-disabled-reason="deactivateRefusal || undefined"
+      :busy="!!del.busy"
+      :error="del.error || (del.loadError ? `Couldn't check what deleting would erase (${del.loadError}), so Delete stays off. Close and try again.` : '')"
+      @confirm="confirmDelete"
+      @secondary="deactivateInstead"
+      @cancel="closeDelete"
+    >
+      <div v-if="del.usage && !del.loading" class="mt-3 space-y-3 text-sm text-gray-700">
+        <div>
+          <p class="font-medium text-gray-900">Delete permanently erases:</p>
+          <ul v-if="del.usage.erases.length" class="mt-1 list-disc space-y-0.5 pl-5">
+            <li v-for="(l, i) in del.usage.erases" :key="i">{{ line(l) }}</li>
+          </ul>
+          <p v-else class="mt-1">Nothing else — they have nothing else on record.</p>
+        </div>
+        <div v-if="del.usage.changes.length">
+          <p class="font-medium text-gray-900">It also changes:</p>
+          <ul class="mt-1 list-disc space-y-0.5 pl-5">
+            <li v-for="(l, i) in del.usage.changes" :key="i">{{ line(l) }}</li>
+          </ul>
+        </div>
+        <div v-if="del.usage.blockers.length" class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-700">
+          <p class="font-medium">Can't delete permanently:</p>
+          <ul class="mt-1 list-disc space-y-0.5 pl-5">
+            <li v-for="(l, i) in del.usage.blockers" :key="i">{{ line(l) }}</li>
+          </ul>
+          <p v-if="del.employee.is_active" class="mt-1">Deactivate them instead — that keeps everything.</p>
+        </div>
+        <div v-if="del.employee.is_active">
+          <p class="font-medium text-gray-900">If you deactivate instead:</p>
+          <ul v-if="del.usage.deactivate.notes.length" class="mt-1 list-disc space-y-0.5 pl-5">
+            <li v-for="(l, i) in del.usage.deactivate.notes" :key="i">{{ line(l) }}</li>
+          </ul>
+          <p v-else class="mt-1">Everything is kept, and you can reactivate them later.</p>
+          <template v-if="del.usage.deactivate.blockers.length">
+            <p class="mt-2 font-medium text-red-700">Can't deactivate yet:</p>
+            <ul class="mt-1 list-disc space-y-0.5 pl-5 text-red-700">
+              <li v-for="(l, i) in del.usage.deactivate.blockers" :key="i">{{ line(l) }}</li>
+            </ul>
+          </template>
         </div>
       </div>
-    </div>
+      <p v-if="busyReason(del.employee.id)" class="mt-3 text-sm font-medium text-amber-800">
+        {{ busyReason(del.employee.id) }} — delete and deactivate wait until it's done.
+      </p>
+    </UiConfirmDialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeRouteLeave } from 'vue-router'
+import { toLocalISO } from '~/utils/localDate'
 
-const { 
-  employees, 
-  loading: employeesLoading, 
-  error: employeesError, 
-  fetchEmployees, 
-  updateEmployeeTraining, 
-  getEmployeeTraining,
+/** GET /api/employees/:id/usage (server/utils/deleteImpact.ts). */
+interface ImpactLine { count: number; label: string }
+interface Usage {
+  name: string
+  erases: ImpactLine[]
+  changes: ImpactLine[]
+  blockers: ImpactLine[]
+  deactivate: { notes: ImpactLine[]; blockers: ImpactLine[] }
+}
+interface EmployeeFields { first_name: string; last_name: string; upi: string; is_active: boolean }
+
+const {
+  employees,
+  error: employeesError,
+  fetchEmployees,
   getAllEmployeeTraining,
   createEmployee,
   updateEmployee,
-  deleteEmployee: deleteEmployeeApi
+  deleteEmployee: deleteEmployeeApi,
 } = useEmployees()
-const { jobFunctions, loading: functionsLoading, fetchJobFunctions, getGroupedJobFunctions, getAllMeterJobFunctions, getMeterParentJobFunction, isMeterJobFunction } = useJobFunctions()
-const { shifts, fetchShifts } = useSchedule()
+const { error: jobsError, fetchJobFunctions, getGroupedJobFunctions } = useJobFunctions()
+const { shifts, error: shiftsError, fetchShifts } = useSchedule()
+const toast = useToast()
+const uid = useId()
+
+const fullName = (e: { first_name: string; last_name: string }) => `${e.last_name}, ${e.first_name}`
+const nameOf = (id: string) => {
+  const e = employees.value.find((x) => x.id === id)
+  return e ? fullName(e) : 'an employee'
+}
+/** A $fetch error's reason, for loads (the savers word their own failures). */
+const reasonOf = (e: any): string => {
+  const status = Number(e?.statusCode ?? e?.status ?? 0)
+  return e?.data?.message || e?.statusMessage || (status ? `error ${status}` : "couldn't reach the server")
+}
+const line = (l: ImpactLine) => `${l.count.toLocaleString()} ${l.label}`
+const fetchUsage = (id: string) =>
+  $fetch<Usage>(`/api/employees/${id}/usage`, { params: { from: toLocalISO(new Date()) } })
+
+// ── Savers ────────────────────────────────────────────────────────────────────
+
+const trainingSaves = useTrainingSaves({ nameOf })
+
+const shiftBoxes = useBoxSave<string>({
+  namespace: 'employee-shift',
+  label: (id) => `the shift for ${nameOf(id)}`,
+  save: async (id, value) => {
+    // $fetch itself, not updateEmployee: its error keeps the status, so Retry is
+    // offered only where sending again could help (not for a shift deleted meanwhile).
+    const saved = await $fetch<any>(`/api/employees/${id}`, { method: 'PUT', body: { shift_id: value || null } })
+    // Patch just this row from the reply. A whole-list refetch per pick would land
+    // on top of other rows' picks still in flight.
+    employees.value = employees.value.map((e) => (e.id === id ? { ...e, ...saved } : e))
+  },
+})
+
+// Every load or refetch feeds the boxes; init() leaves a box alone mid-edit or mid-save.
+watch(employees, (list) => {
+  for (const e of list) shiftBoxes.init(e.id, e.shift_id ?? '')
+}, { immediate: true })
+
+/**
+ * Why this person can't be deleted or deactivated right now, or ''. A save still
+ * out would fail under a delete; a failed one would lose its Retry / Undo with the
+ * row. Inactive people have no boxes, so a failed save of theirs (deactivated from
+ * another screen meanwhile) has no Retry / Undo to lose and doesn't block.
+ */
+const busyReason = (id: string): string => {
+  const active = employees.value.find((e) => e.id === id)?.is_active !== false
+  if (trainingSaves.pending(id)) {
+    if (trainingSaves.stateOf(id) !== 'error') return 'Still saving training…'
+    if (active) return "Training didn't save — Retry or Undo it first"
+  }
+  const shift = shiftBoxes.stateOf(id)
+  if (shift === 'saving') return 'Still saving the shift…'
+  if (shift === 'error' && active) return "The shift didn't save — Retry or Undo it first"
+  return ''
+}
+
+/** Drop what's left of a failed save for someone deleted (else the leave guard keeps warning). */
+const dropSaves = (id: string) => {
+  trainingSaves.forget(id)
+  shiftBoxes.undo(id)
+}
+
+// ── Loading ───────────────────────────────────────────────────────────────────
+
+const listLoading = ref(true)
+const listError = ref('')
+const shiftsLoadError = ref('')
+const retryingShifts = ref(false)
+/** This visit's training load succeeded. Until then every box stays off. */
+const trainingReady = ref(false)
+const trainingError = ref('')
+const retryingTraining = ref(false)
+
+/** Job functions (the columns) and everyone's training; null (and trainingError set) if either failed. */
+const fetchTraining = async (): Promise<Record<string, string[]> | null> => {
+  try {
+    const [, map] = await Promise.all([fetchJobFunctions(), getAllEmployeeTraining({ strict: true })])
+    if (jobsError.value) throw { data: { message: jobsError.value } }
+    return map
+  } catch (e) {
+    trainingError.value = reasonOf(e)
+    return null
+  }
+}
+
+const takeTraining = (map: Record<string, string[]> | null) => {
+  if (!map) return
+  // Everyone, inactive too: someone reactivated comes back with their boxes ready.
+  trainingSaves.load(map, employees.value.map((e) => e.id))
+  trainingError.value = ''
+  trainingReady.value = true
+}
+
+const load = async () => {
+  listLoading.value = true
+  const training = fetchTraining()
+  await Promise.all([fetchEmployees(false), fetchShifts({ includeInactive: true })])
+  // These two don't throw; each composable keeps its failure in `error`.
+  listError.value = employeesError.value ?? ''
+  shiftsLoadError.value = shiftsError.value ?? ''
+  const map = await training
+  if (!listError.value) takeTraining(map)
+  listLoading.value = false
+}
+onMounted(load)
+
+let catchingUp = false
+watch(employees, async (list) => {
+  if (!trainingReady.value || catchingUp) return
+  const missing = list.filter((e) => !trainingSaves.loaded(e.id)).map((e) => e.id)
+  if (!missing.length) return
+  catchingUp = true
+  try {
+    trainingSaves.load(await getAllEmployeeTraining({ strict: true }), missing)
+  } catch (e) {
+    toast.error(`Couldn't load training for ${missing.length === 1 ? nameOf(missing[0]!) : `${missing.length} people`}: ${reasonOf(e)}`)
+  } finally {
+    catchingUp = false
+  }
+})
+
+const retryTraining = async () => {
+  retryingTraining.value = true
+  takeTraining(await fetchTraining())
+  retryingTraining.value = false
+}
+
+const retryShifts = async () => {
+  retryingShifts.value = true
+  await fetchShifts()
+  shiftsLoadError.value = shiftsError.value ?? ''
+  retryingShifts.value = false
+}
+
+// ── Shift dropdown ────────────────────────────────────────────────────────────
+
+const activeShifts = computed(() => shifts.value.filter((s) => s.is_active))
+
+/**
+ * Per employee: a saved shift that isn't one of the choices (it was deactivated),
+ * listed as a disabled option so the dropdown shows what is really saved. Without
+ * it the select showed a blank, as if the person had no shift.
+ */
+const offListShifts = computed(() => {
+  const out: Record<string, { id: string; name: string }> = {}
+  if (shiftsLoadError.value) return out // nothing to name them by; the dropdowns are off
+  const byId = new Map(shifts.value.map((s) => [s.id, s]))
+  for (const e of employees.value) {
+    const id = shiftBoxes.savedOf(e.id)
+    if (!id) continue
+    const s = byId.get(id)
+    if (s?.is_active) continue
+    out[e.id] = { id, name: s ? `${s.name} (inactive)` : 'Unknown shift' }
+  }
+  return out
+})
+
+const onShiftChange = (id: string, e: Event) => {
+  shiftBoxes.setDraft(id, (e.target as HTMLSelectElement).value)
+  shiftBoxes.commit(id)
+}
+
+// ── Training boxes ────────────────────────────────────────────────────────────
+
+const gridJobs = computed(() => getGroupedJobFunctions())
+
+/**
+ * The job ids one box stands for. The Meter box is the "Meter" parent itself when
+ * there is one (a single training record); otherwise it's a stand-in group for
+ * every "Meter N", ticked when any of them is.
+ */
+const idsFor = (jf: any): string[] => (jf._isGroup ? jf._meters.map((m: any) => m.id) : [jf.id])
+
+const isTrained = (employeeId: string, jf: any) => {
+  const want = trainingSaves.want(employeeId)
+  return idsFor(jf).some((id) => want.includes(id))
+}
+
+const trainingOpen = (employeeId: string) => trainingReady.value && trainingSaves.loaded(employeeId)
+
+const onTrainingChange = (employeeId: string, jf: any, e: Event) => {
+  trainingSaves.toggle(employeeId, idsFor(jf), (e.target as HTMLInputElement).checked)
+}
+
+// ── Search and the two lists ──────────────────────────────────────────────────
 
 const searchQuery = ref('')
-const employeeTraining = ref<Record<string, string[]>>({})
-const originalTraining = ref<Record<string, string[]>>({})
-const employeeShifts = ref<Record<string, string>>({})
-const trainingDataLoading = ref(false)
+const query = computed(() => searchQuery.value.trim().toLowerCase())
 
-// Non-reactive state for pending changes (no Vue reactivity)
-const pendingChanges = new Map<string, string[]>()
-const saveStates = new Map<string, 'idle' | 'saving' | 'saved' | 'error'>()
-const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>()
-
-// Reactive save state for Vue-driven UI (replaces DOM manipulation)
-const employeeSaveState = ref<Record<string, 'idle' | 'pending' | 'saving' | 'saved' | 'error'>>({})
-
-const AUTOSAVE_DELAY = 1500 // ms to wait after last checkbox click before saving
-
-// Employee modal state
-// (The Employee Overview is its own page now — the header button and the per-row
-// "Overview" button link to /employee-overview.)
-const showEmployeeModal = ref(false)
-const editingEmployee = ref(null)
-const employeeFormData = ref({
-  first_name: '',
-  last_name: '',
-  upi: '',
-  is_active: true
-})
-
-const loading = computed(() => functionsLoading.value)
-const error = computed(() => employeesError.value)
-
-const filteredEmployees = computed(() => {
-  if (!searchQuery.value) return employees.value
-
-  const query = searchQuery.value.toLowerCase()
-  return employees.value.filter((emp: any) => {
-    const fullName = `${emp.first_name} ${emp.last_name}`.toLowerCase()
-    return fullName.includes(query)
-  })
-})
-
-// hasChanges computed property removed since we're auto-saving
-
-// Reload training data when needed
-const reloadTrainingData = async () => {
-  if (employees.value.length > 0) {
-    await loadTrainingData()
-  }
+/** Name either way round ("mark smith", "smith, m") or UPI ("1555", "#1555"). */
+const matches = (e: any) => {
+  const q = query.value
+  if (!q) return true
+  const upi = q.replace(/^#/, '')
+  return `${e.first_name} ${e.last_name}`.toLowerCase().includes(q)
+    || fullName(e).toLowerCase().includes(q)
+    || (!!upi && String(e.upi ?? '').includes(upi))
 }
 
-onMounted(async () => {
-  try {
-    // Load core data in parallel for immediate UI display
-    await Promise.all([
-      fetchEmployees(),
-      fetchJobFunctions(),
-      fetchShifts()
-    ])
-    
-    // Load training data and employee shifts - wait for them to complete
-    // This ensures data is loaded before allowing edits
-    await Promise.all([
-      loadTrainingData().catch(error => {
-        console.error('Error loading training data:', error)
-      }),
-      loadEmployeeShifts().catch(error => {
-        console.error('Error loading employee shifts:', error)
-      })
-    ])
-  } catch (error) {
-    console.error('Error loading initial data:', error)
-  }
-})
+// Someone with a save out or failed stays on screen whatever the search, so the
+// status and its Retry / Undo can't be filtered out of sight.
+const activeShown = computed(() => employees.value.filter((e) => e.is_active && (matches(e) || !!busyReason(e.id))))
+const inactiveShown = computed(() => employees.value.filter((e) => !e.is_active && matches(e)))
+const noMatches = computed(() => !!query.value && !activeShown.value.length && !inactiveShown.value.length)
 
-// Reload training data when employees list changes
-watch(() => employees.value.length, async (newLength, oldLength) => {
-  if (newLength > 0 && newLength !== oldLength) {
-    await reloadTrainingData()
-  }
-})
+const inactiveOpen = ref(false)
+// A search that finds inactive people opens their section — a match hidden in a
+// collapsed list would read as "not found".
+watch(query, (q) => { if (q && inactiveShown.value.length) inactiveOpen.value = true })
 
-// Fire all pending debounced saves immediately.
-const flushPendingSaves = async () => {
-  for (const [employeeId, timer] of debounceTimers) {
-    clearTimeout(timer)
-    debounceTimers.delete(employeeId)
-    await saveEmployeeTraining(employeeId)
-  }
+// ── Reactivate ────────────────────────────────────────────────────────────────
+
+const reactivating = reactive(new Set<string>())
+
+const reactivate = async (employee: any) => {
+  if (reactivating.has(employee.id)) return
+  reactivating.add(employee.id)
+  const saved = await updateEmployee(employee.id, { is_active: true }, { refetch: false })
+  reactivating.delete(employee.id)
+  if (saved) toast.success(`Reactivated ${fullName(saved)}`)
+  else toast.error(`Couldn't reactivate ${fullName(employee)}: ${employeesError.value || 'unknown error'}`)
 }
 
-// Flush before leaving the page…
-onBeforeRouteLeave(async (to, from, next) => {
-  await flushPendingSaves()
-  next()
-})
+// ── Add / Edit window ─────────────────────────────────────────────────────────
 
-// …and before this tab is switched away from. The saves run to completion on
-// their own; unmounting only means their "saved" tick has nowhere to show.
-onBeforeUnmount(() => {
-  flushPendingSaves()
-})
+const NAME_MAX = 100
+const blankFields = (): EmployeeFields => ({ first_name: '', last_name: '', upi: '', is_active: true })
 
-const loadTrainingData = async () => {
-  if (employees.value.length === 0) {
-    return
-  }
-  
-  trainingDataLoading.value = true
-  
+const formOpen = ref(false)
+const editing = ref<any | null>(null)
+const form = reactive<EmployeeFields>(blankFields())
+/** The fields as the window opened with them: an edit sends only what differs. */
+const opened = ref<EmployeeFields>(blankFields())
+const formSaving = ref(false)
+const formError = ref('')
+const formUsage = reactive({ loading: false, notes: [] as string[], blockers: [] as string[], error: '' })
+let formUsageSeq = 0
+
+const openForm = (employee: any | null) => {
+  const fields: EmployeeFields = employee
+    ? { first_name: employee.first_name, last_name: employee.last_name, upi: employee.upi ?? '', is_active: employee.is_active }
+    : blankFields()
+  editing.value = employee
+  Object.assign(form, fields)
+  opened.value = { ...fields }
+  formError.value = ''
+  formUsageSeq++
+  Object.assign(formUsage, { loading: false, notes: [], blockers: [], error: '' })
+  formOpen.value = true
+}
+
+const closeForm = () => {
+  if (formSaving.value) return
+  formOpen.value = false
+  formUsageSeq++ // a usage reply still out has nowhere to go
+}
+
+/** Editing someone active, with the Active box now unticked. */
+const deactivating = computed(() => !!editing.value && opened.value.is_active && !form.is_active)
+
+// Unticking Active shows what deactivating leaves behind before Save, not after.
+watch(deactivating, async (now) => {
+  const mine = ++formUsageSeq
+  Object.assign(formUsage, { loading: now, notes: [], blockers: [], error: '' })
+  if (!now) return
   try {
-    // Use bulk fetch for much faster loading
-    const employeeIds = employees.value.map(emp => emp.id)
-    const training = await getAllEmployeeTraining(employeeIds)
-    
-    // Clean and normalize the training data (remove any null/undefined values)
-    const cleanedTraining: Record<string, string[]> = {}
-    Object.keys(training).forEach(empId => {
-      cleanedTraining[empId] = Array.from(new Set(training[empId].filter(id => id && id !== 'meter-group')))
-    })
-    
-    // Ensure every employee has an entry (even if no training assigned)
-    const withDefaults: Record<string, string[]> = {}
-    employees.value.forEach(emp => {
-      withDefaults[emp.id] = cleanedTraining[emp.id] ? [...cleanedTraining[emp.id]] : []
-    })
-    
-    employeeTraining.value = withDefaults
-    originalTraining.value = JSON.parse(JSON.stringify(withDefaults))
-    
-    // Clear any stale pending state or save indicators
-    pendingChanges.clear()
-    saveStates.clear()
-  } catch (error) {
-    console.error('Error loading training data:', error)
-    throw error
+    const usage = await fetchUsage(editing.value.id)
+    if (mine !== formUsageSeq) return
+    formUsage.notes = usage.deactivate.notes.map(line)
+    formUsage.blockers = usage.deactivate.blockers.map(line)
+  } catch (e) {
+    if (mine === formUsageSeq) formUsage.error = reasonOf(e)
   } finally {
-    trainingDataLoading.value = false
+    if (mine === formUsageSeq) formUsage.loading = false
   }
+})
+
+const canSubmit = computed(() => {
+  if (formSaving.value) return false
+  if (!deactivating.value) return true
+  return !formUsage.loading && !formUsage.blockers.length && !busyReason(editing.value.id)
+})
+
+const validationError = (first: string, last: string, upi: string): string => {
+  if (!first || !last) return 'First and last name are both required.'
+  if (first.length > NAME_MAX || last.length > NAME_MAX) return `Names can be at most ${NAME_MAX} characters.`
+  if (upi && !/^\d{1,20}$/.test(upi)) return 'UPI must be numbers only (up to 20 digits), or left blank.'
+  return ''
 }
 
-const loadEmployeeShifts = async () => {
-  if (employees.value.length === 0) return
-  const shiftsMap: Record<string, string> = {}
-  employees.value.forEach((emp: any) => {
-    if (emp.shift_id) shiftsMap[emp.id] = emp.shift_id
-  })
-  employeeShifts.value = shiftsMap
-}
+const submitForm = async () => {
+  if (!canSubmit.value) return // Enter in a field submits even when the button is off
+  const first = form.first_name.trim()
+  const last = form.last_name.trim()
+  const upi = form.upi.trim()
+  formError.value = validationError(first, last, upi)
+  if (formError.value) return
 
-const isEmployeeTrained = (employeeId: string, jobFunctionId: string): boolean => {
-  // Special handling for meter group: check Meter parent (one record) or any Meter N
-  if (jobFunctionId === 'meter-group') {
-    const meterParent = getMeterParentJobFunction()
-    if (meterParent) {
-      if (pendingChanges.has(employeeId)) {
-        return pendingChanges.get(employeeId)!.includes(meterParent.id)
-      }
-      return employeeTraining.value[employeeId]?.includes(meterParent.id) || false
-    }
-    const allMeters = getAllMeterJobFunctions()
-    return allMeters.some(meter => {
-      if (pendingChanges.has(employeeId)) {
-        return pendingChanges.get(employeeId)!.includes(meter.id)
-      }
-      return employeeTraining.value[employeeId]?.includes(meter.id) || false
-    })
-  }
-
-  // Check pending changes first (for immediate UI updates)
-  if (pendingChanges.has(employeeId)) {
-    return pendingChanges.get(employeeId)!.includes(jobFunctionId)
-  }
-  // Fall back to reactive state
-  return employeeTraining.value[employeeId]?.includes(jobFunctionId) || false
-}
-
-
-// Completely non-reactive checkbox handling
-const toggleTraining = (employeeId: string, jobFunctionId: string, event?: Event) => {
-  // Ensure training data is loaded before allowing changes
-  if (trainingDataLoading.value) {
-    console.warn('Training data is still loading. Please wait...')
-    return
-  }
-  
-  // Get the checkbox element to read its CURRENT state (from DOM, not reactive state)
-  const checkbox = event?.target as HTMLInputElement || 
-    document.querySelector(`[data-employee-id="${employeeId}"][data-job-function-id="${jobFunctionId}"]`) as HTMLInputElement
-  
-  if (!checkbox) {
-    console.error('Checkbox not found for:', employeeId, jobFunctionId)
-    return
-  }
-  
-  // Read the ACTUAL checked state from the DOM (what the user just clicked)
-  // This is critical - we must read the actual state, not infer it
-  const isNowChecked = checkbox.checked
-  
-  // Get current state from pendingChanges or initialize from saved state
-  if (!pendingChanges.has(employeeId)) {
-    // Initialize from current training state, or empty array if not loaded yet
-    const currentTrainingState = employeeTraining.value[employeeId] || []
-    // Clean the training state (remove duplicates and invalid IDs)
-    const cleanTrainingState = Array.from(new Set(currentTrainingState.filter(id => id && id !== 'meter-group')))
-    pendingChanges.set(employeeId, [...cleanTrainingState])
-  }
-  
-  const currentTraining = pendingChanges.get(employeeId)!
-  
-  // Special handling for meter group: save only Meter parent (one record) when it exists
-  if (jobFunctionId === 'meter-group') {
-    const meterParent = getMeterParentJobFunction()
-    if (meterParent) {
-      if (isNowChecked) {
-        if (!currentTraining.includes(meterParent.id)) {
-          currentTraining.push(meterParent.id)
-        }
-      } else {
-        const index = currentTraining.indexOf(meterParent.id)
-        if (index > -1) currentTraining.splice(index, 1)
-      }
-    } else {
-      const allMeters = getAllMeterJobFunctions()
-      if (isNowChecked) {
-        allMeters.forEach(meter => {
-          if (!currentTraining.includes(meter.id)) currentTraining.push(meter.id)
-        })
-      } else {
-        allMeters.forEach(meter => {
-          const idx = currentTraining.indexOf(meter.id)
-          if (idx > -1) currentTraining.splice(idx, 1)
-        })
-      }
-    }
-  } else {
-    // Regular job function handling - use the ACTUAL checkbox state
-    if (isNowChecked) {
-      // Checkbox is now checked - add to training
-      if (!currentTraining.includes(jobFunctionId)) {
-        currentTraining.push(jobFunctionId)
-      }
-    } else {
-      // Checkbox is now unchecked - remove from training
-      const index = currentTraining.indexOf(jobFunctionId)
-      if (index > -1) {
-        currentTraining.splice(index, 1)
-      }
-    }
-  }
-  
-  // Ensure we have a clean array (no duplicates, no invalid IDs)
-  const cleanTraining = Array.from(new Set(currentTraining.filter(id => id && id !== 'meter-group')))
-  pendingChanges.set(employeeId, cleanTraining)
-
-  // Mark as pending and schedule auto-save
-  employeeSaveState.value[employeeId] = 'pending'
-  scheduleAutoSave(employeeId)
-}
-
-// Debounced auto-save: waits for user to stop clicking, then saves
-const scheduleAutoSave = (employeeId: string) => {
-  // Clear any existing timer for this employee
-  if (debounceTimers.has(employeeId)) {
-    clearTimeout(debounceTimers.get(employeeId)!)
-  }
-  // Set a new timer
-  debounceTimers.set(employeeId, setTimeout(() => {
-    debounceTimers.delete(employeeId)
-    saveEmployeeTraining(employeeId)
-  }, AUTOSAVE_DELAY))
-}
-
-// Save changes for a specific employee (called automatically via debounce)
-const saveEmployeeTraining = async (employeeId: string) => {
-  if (!pendingChanges.has(employeeId)) return
-
-  if (trainingDataLoading.value) return
-
-  employeeSaveState.value[employeeId] = 'saving'
-
-  try {
-    const newTraining = pendingChanges.get(employeeId)!
-    const cleanTraining = Array.from(new Set(newTraining.filter(id => id && id !== 'meter-group')))
-
-    const result = await updateEmployeeTraining(employeeId, cleanTraining)
-    if (!result) throw new Error('Save operation returned false')
-
-    // Reload from database to ensure consistency
-    await loadTrainingData()
-
-    // Clear pending changes
-    pendingChanges.delete(employeeId)
-    employeeSaveState.value[employeeId] = 'saved'
-
-    // Reset to idle after 2 seconds
-    setTimeout(() => {
-      if (employeeSaveState.value[employeeId] === 'saved') {
-        employeeSaveState.value[employeeId] = 'idle'
-      }
-    }, 2000)
-  } catch (e: any) {
-    console.error('Error saving training:', e)
-    employeeSaveState.value[employeeId] = 'error'
-    // Don't clear pending changes on error - user can retry
-  }
-}
-
-// Auto-save functionality is now handled in toggleTraining()
-
-// Employee management functions
-const openAddEmployeeModal = () => {
-  editingEmployee.value = null
-  employeeFormData.value = {
-    first_name: '',
-    last_name: '',
-    upi: '',
-    is_active: true
-  }
-  showEmployeeModal.value = true
-}
-
-const openEditEmployeeModal = (employee: any) => {
-  editingEmployee.value = employee
-  employeeFormData.value = {
-    first_name: employee.first_name,
-    last_name: employee.last_name,
-    upi: employee.upi ?? '',
-    is_active: employee.is_active
-  }
-  showEmployeeModal.value = true
-}
-
-const closeEmployeeModal = () => {
-  showEmployeeModal.value = false
-  editingEmployee.value = null
-  employeeFormError.value = ''
-}
-
-const employeeFormError = ref('')
-// Was referenced but never declared (a ReferenceError after every employee save,
-// swallowed by the catch below). Nothing renders it; declared so the save path
-// completes cleanly.
-const showSuccess = ref(false)
-
-const handleEmployeeSubmit = async () => {
-  employeeFormError.value = ''
-  try {
-    const saved = editingEmployee.value
-      ? await updateEmployee(editingEmployee.value.id, employeeFormData.value)
-      : await createEmployee(employeeFormData.value)
-    if (!saved) {
-      // Show the server's reason (a duplicate UPI, say) in the form and keep it
-      // open, rather than letting the page-level error box replace the matrix.
-      employeeFormError.value = employeesError.value || 'Could not save the employee'
-      employeesError.value = null
+  const target = editing.value
+  let body: Record<string, unknown> = { first_name: first, last_name: last, upi, is_active: form.is_active }
+  if (target) {
+    // Only what changed in this window: an untouched Active box (or name) must not
+    // overwrite a change someone else saved after it opened.
+    const was = opened.value
+    body = {}
+    if (form.first_name !== was.first_name) body.first_name = first
+    if (form.last_name !== was.last_name) body.last_name = last
+    if (form.upi !== was.upi) body.upi = upi
+    if (form.is_active !== was.is_active) body.is_active = form.is_active
+    if (!Object.keys(body).length) {
+      closeForm()
       return
     }
-
-    await fetchEmployees()
-    closeEmployeeModal()
-    showSuccess.value = true
-    
-    setTimeout(() => {
-      showSuccess.value = false
-    }, 3000)
-  } catch (e) {
-    console.error('Error saving employee:', e)
   }
+
+  formSaving.value = true
+  // Both refetch the list themselves (in name order, inactive included).
+  const saved: any = target ? await updateEmployee(target.id, body) : await createEmployee(body)
+  formSaving.value = false
+  if (!saved) {
+    // The server's reason (a UPI already used by "Hang, Allen (inactive)", say) stays
+    // in the window with what was typed.
+    formError.value = employeesError.value || "Couldn't save the employee"
+    return
+  }
+  // Someone new has no training: a known-empty baseline makes their boxes usable now.
+  if (!target) trainingSaves.load({ [saved.id]: [] }, [saved.id])
+  closeForm()
+  toast.success(`${target ? 'Saved' : 'Added'} ${fullName(saved)}`)
 }
 
-const deleteEmployee = async (employeeId: string) => {
-  if (confirm('Are you sure you want to delete this employee? This will also remove all their training records.')) {
-    try {
-      await deleteEmployeeApi(employeeId)
-      await fetchEmployees()
-      showSuccess.value = true
-      
-      setTimeout(() => {
-        showSuccess.value = false
-      }, 3000)
-    } catch (e) {
-      console.error('Error deleting employee:', e)
-    }
-  }
-}
+// ── Delete / deactivate ───────────────────────────────────────────────────────
 
-const updateEmployeeShift = async (employeeId: string, event: Event) => {
-  const shiftId = (event.target as HTMLSelectElement).value
-  employeeShifts.value[employeeId] = shiftId
-  const selectElement = event.target as HTMLSelectElement
-  selectElement.disabled = true
+const del = reactive({
+  employee: null as any,
+  usage: null as Usage | null,
+  loading: false,
+  loadError: '',
+  busy: '' as '' | 'delete' | 'deactivate',
+  error: '',
+})
+let delSeq = 0
 
+const openDelete = async (employee: any) => {
+  const mine = ++delSeq
+  Object.assign(del, { employee, usage: null, loading: true, loadError: '', busy: '', error: '' })
   try {
-    const result = await updateEmployee(employeeId, { shift_id: shiftId || null })
-    if (!result) throw new Error('Update failed')
-    selectElement.style.backgroundColor = '#d4edda'
-    setTimeout(() => { selectElement.style.backgroundColor = '' }, 1000)
-  } catch {
-    alert('Failed to save shift assignment. Please try again.')
+    const usage = await fetchUsage(employee.id)
+    if (mine === delSeq) del.usage = usage
+  } catch (e) {
+    if (mine === delSeq) del.loadError = reasonOf(e)
   } finally {
-    selectElement.disabled = false
+    if (mine === delSeq) del.loading = false
   }
+}
+
+const closeDelete = () => {
+  if (del.busy) return
+  delSeq++
+  del.employee = null
+}
+
+/** Why "Deactivate instead" is off, or ''. */
+const deactivateRefusal = computed(() => {
+  if (!del.employee) return ''
+  const blockers = del.usage?.deactivate.blockers ?? []
+  return busyReason(del.employee.id) || (blockers.length ? `Can't deactivate: ${blockers.map(line).join('; ')}` : '')
+})
+
+const confirmDelete = async () => {
+  const employee = del.employee
+  if (!employee || del.busy || !del.usage || del.usage.blockers.length || busyReason(employee.id)) return
+  del.busy = 'delete'
+  del.error = ''
+  const ok = await deleteEmployeeApi(employee.id)
+  del.busy = ''
+  if (!ok) {
+    del.error = employeesError.value || "Couldn't delete the employee"
+    return
+  }
+  dropSaves(employee.id)
+  del.employee = null
+  toast.success(`Deleted ${fullName(employee)}`)
+}
+
+const deactivateInstead = async () => {
+  const employee = del.employee
+  if (!employee || del.busy || deactivateRefusal.value) return
+  del.busy = 'deactivate'
+  del.error = ''
+  const saved = await updateEmployee(employee.id, { is_active: false }, { refetch: false })
+  del.busy = ''
+  if (!saved) {
+    del.error = employeesError.value || "Couldn't deactivate the employee"
+    return
+  }
+  del.employee = null
+  toast.success(`Deactivated ${fullName(employee)}`)
 }
 </script>
-

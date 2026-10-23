@@ -1,6 +1,6 @@
 import { query } from '../../utils/db'
 import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
-import { normalizeUpi, isUpiTaken } from '../../utils/upi'
+import { normalizeUpi, isUpiTaken, upiTakenError } from '../../utils/upi'
 import { assertShiftOnTeam } from '../../utils/teamOwnership'
 
 export default defineEventHandler(async (event) => {
@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
     )
     return result.rows[0]
   } catch (e: any) {
-    if (isUpiTaken(e)) throw createError({ statusCode: 409, message: `UPI ${upi} is already assigned to another employee` })
+    if (isUpiTaken(e)) throw await upiTakenError(upi, teamId)
     throw e
   }
 })

@@ -29,7 +29,8 @@ export const useTeamBlockedDates = () => {
     loading.value = true
     error.value = null
     try {
-      const res = await $fetch<{ inserted: BlockedDate[]; count: number }>(
+      // `skipped`: dates that were already blocked; they keep the reason they had.
+      const res = await $fetch<{ inserted: BlockedDate[]; count: number; skipped: string[] }>(
         '/api/team-blocked-dates',
         { method: 'POST', body: { dates, reason: reason ?? null } }
       )

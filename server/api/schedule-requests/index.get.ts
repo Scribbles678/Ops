@@ -1,12 +1,12 @@
 import { query } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
 
 /**
  * List schedule requests with optional filters: status, date_from, date_to,
  * employee_id, q (case-insensitive match on the employee's first or last name).
  */
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getTeamFilter(user)
   const params = getQuery(event)
 

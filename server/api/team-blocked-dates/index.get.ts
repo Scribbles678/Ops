@@ -10,7 +10,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const result = await query(
-    `SELECT id, team_id, blocked_date, reason, created_at
+    `SELECT id, team_id, blocked_date::text AS blocked_date, reason, created_at
      FROM team_blocked_dates
      WHERE team_id = $1
      ORDER BY blocked_date ASC`,

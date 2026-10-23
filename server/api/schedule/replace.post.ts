@@ -1,8 +1,9 @@
 import { transaction } from '../../utils/db'
-import { requireAuth, getWriteTeamId } from '../../utils/authorize'
+import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
+import { assertScheduleRowsOnTeam } from '../../utils/teamOwnership'
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   // Use the writer's own team for BOTH the delete-scope and the insert stamp so a
   // super admin replacing their team's schedule can't wipe another team's day.
   const teamId = getWriteTeamId(user)
@@ -27,6 +28,8 @@ export default defineEventHandler(async (event) => {
   if (!Array.isArray(assignments)) {
     throw createError({ statusCode: 400, message: 'assignments array is required' })
   }
+  // Checked before the day is deleted, so a refused save changes nothing.
+  await assertScheduleRowsOnTeam(assignments, teamId)
 
   try {
     const inserted = await transaction(async (client) => {

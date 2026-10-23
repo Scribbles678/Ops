@@ -18,21 +18,24 @@
 -- FAIL if any 15-29 minute assignments already exist — delete those first.
 --
 -- Re-run safe (the bootstrap plugin applies every migration on each startup).
+-- Until Sep 2026 it dropped and re-added the CHECK on EVERY boot, which locks
+-- schedule_assignments and re-scans it each restart — slower as sites add history.
+-- It now changes the constraint only when it isn't already the 15-minute version.
 
 DO $$
 BEGIN
-  IF EXISTS (
+  IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conname = 'check_schedule_assignment_min_duration'
       AND conrelid = 'schedule_assignments'::regclass
+      AND pg_get_constraintdef(oid) LIKE '%>= (15)::numeric%'
   ) THEN
     ALTER TABLE schedule_assignments
-      DROP CONSTRAINT check_schedule_assignment_min_duration;
+      DROP CONSTRAINT IF EXISTS check_schedule_assignment_min_duration;
+    ALTER TABLE schedule_assignments
+      ADD CONSTRAINT check_schedule_assignment_min_duration
+      CHECK ((EXTRACT(EPOCH FROM (end_time - start_time)) / 60::numeric) >= 15::numeric);
   END IF;
-
-  ALTER TABLE schedule_assignments
-    ADD CONSTRAINT check_schedule_assignment_min_duration
-    CHECK ((EXTRACT(EPOCH FROM (end_time - start_time)) / 60::numeric) >= 15::numeric);
 END $$;
 
 -- Verify:

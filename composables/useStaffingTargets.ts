@@ -20,7 +20,7 @@ export const useStaffingTargets = () => {
       targets.value = await $fetch<any[]>('/api/staffing-targets')
       return targets.value
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return []
     } finally {
       loading.value = false
@@ -35,7 +35,7 @@ export const useStaffingTargets = () => {
       await fetchTargets()
       return result
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return null
     } finally {
       loading.value = false
@@ -50,7 +50,7 @@ export const useStaffingTargets = () => {
       await fetchTargets()
       return true
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return false
     } finally {
       loading.value = false

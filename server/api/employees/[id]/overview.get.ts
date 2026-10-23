@@ -1,8 +1,9 @@
 import { query } from '../../../utils/db'
-import { requireAuth, getTeamFilter } from '../../../utils/authorize'
+import { requireTeamLead, getTeamFilter } from '../../../utils/authorize'
 import { countBusinessDaysBetween, fmtDate } from '../../../utils/ptoHours'
 import { getEmployeeAbsences } from '../../../utils/ptoUsage'
 import { canLead } from '../../../../utils/roles'
+import { teamToday, dateOnly } from '../../../utils/teamTime'
 
 /**
  * Employee Overview — every metric behind the dashboard, aggregated in SQL.
@@ -17,6 +18,9 @@ import { canLead } from '../../../../utils/roles'
  * agree with the PTO calendar.
  *
  * Query params: from, to (YYYY-MM-DD; default = trailing 12 months)
+ *
+ * Team Lead and above. The kiosk (the only role below that) could otherwise read any
+ * teammate's absence notes, call-ins and rejection reasons; it never opens this page.
  */
 
 /** Trailing window the error trend reports on. */
@@ -33,7 +37,7 @@ const ASSIGNMENTS_UNION = `
 `
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const viewerTeam = getTeamFilter(user)
   const employeeId = getRouterParam(event, 'id')
   const params = getQuery(event)
@@ -42,7 +46,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'Employee id is required' })
   }
 
-  const today = new Date()
+  // The site's today (teams.timezone): the server's clock is UTC.
+  const today = dateOnly(await teamToday({ query }, viewerTeam))
   const defaultFrom = new Date(today)
   defaultFrom.setFullYear(defaultFrom.getFullYear() - 1)
 
@@ -223,9 +228,9 @@ export default defineEventHandler(async (event) => {
   const bench = benchResult.rows[0] ?? {}
 
   // --- Performance: errors + notes (ADMIN ONLY) -----------------------------
-  // Regular Users keep every other panel but must not see review material, so
-  // these come back null rather than empty — the UI hides the sections entirely.
   // Team Lead and above (utils/roles.ts) — the same line the write endpoints draw.
+  // Everyone past requireTeamLead meets it now; the check stays so the review
+  // material can't come back for a lower role if that gate ever changes.
   const isAdmin = canLead(user)
   let performance: any = null
   // Attendance points (migration 019): half or full points on a date. Admin-only

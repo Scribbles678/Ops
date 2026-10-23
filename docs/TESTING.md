@@ -232,6 +232,13 @@ page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE:', m.
 Always attach the `pageerror` / `console` listeners — a silent JS error is exactly
 what a build will not catch.
 
+To test how a screen handles slow or failing saves, answer the request in the browser
+with `page.route()` (a delay, or `route.fulfill({ status: 500 })`). Two gotchas:
+**`$fetch` retries a failed GET once by itself**, so a one-off injected load failure
+heals unseen; keep failing until the test clicks Retry. And **Chromium fires `change`
+when a focused input is removed** (a tab switch while typing), so that value saves as
+if the box had been left.
+
 **Screenshot, then actually open the image.** A pass/fail line does not tell you the
 banner is red on a successful build, or that the time is clipped off a chip. Both
 were found by looking.
@@ -313,6 +320,29 @@ GROUP BY 1,2,3;
 ```
 
 One row, all three columns the same team. Anything else is a leak.
+
+Any change to a **write** endpoint, the roles, or account management should also confirm:
+
+4. A write that names another team's row is refused. Signed in as `siteb.admin`, a
+   request, time-off entry, schedule row, required assignment or target naming a
+   Default Team employee, job or shift gets 400 or 404, and nothing is written.
+   Migration 024's `…_same_team` foreign keys refuse it in the database too, so a
+   **500** mentioning one of them means an API check is missing
+   (`server/utils/teamOwnership.ts`).
+5. The kiosk gets 403 on everything except the board's reads, submitting a request
+   and the UPI lookup, and the employee list it reads has no `upi`.
+6. `siteb.admin` (a Supervisor) sees only Site B's accounts in Settings → Users, and
+   is refused when creating a Super Admin, adding an account to Default Team, or
+   editing or resetting an account on another team or a Super Admin's. Nobody can
+   deactivate themselves or change their own role.
+7. "Today" follows the team's time zone. Give Site B a zone whose date differs from
+   the server's at the time of the test (e.g. `Pacific/Kiritimati`, UTC+14): the
+   availability strip, request notice and display board use that zone's date.
+8. **A multi-team account** (migration 027). As a Super Admin, give a Default Team
+   supervisor Site B under More teams. Signed in as them: working in one team shows and
+   saves only that team; a switch (home page or the bar) moves this browser only — a
+   second session stays put; Site B's supervisor sees them but can't edit them;
+   taking Site B away signs out a session working in Site B.
 
 ### Before deploying a team-scoping change to work
 

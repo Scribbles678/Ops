@@ -21,6 +21,9 @@
         <p class="text-sm sm:text-base md:text-lg text-gray-600">
           Distribution Center Schedule Management
         </p>
+        <!-- For an account that works in more than one team (migration 027): every
+             card below opens the team picked here. -->
+        <TeamSwitcher variant="buttons" class="mt-4 justify-center" />
       </div>
 
       <!-- Main Menu Buttons -->

@@ -4,6 +4,7 @@ import {
   hoursForRequest,
   type ShiftInfo,
 } from './ptoHours'
+import { PTO_TYPE_FOR_REQUEST } from './timeOff'
 
 /**
  * Team-wide PTO hours already committed, per date.
@@ -201,13 +202,6 @@ export interface PricedAbsence {
   notes: string | null
 }
 
-const REQUEST_KIND: Record<string, string> = {
-  pto_full_day: 'full_day',
-  pto_partial: 'partial',
-  leave_early: 'leave_early',
-  arrive_late: 'arrive_late',
-}
-
 /**
  * One employee's absences over a range, each priced in paid hours by the same
  * helpers the approval rule uses. Approved requests plus any pto_days with no
@@ -241,7 +235,7 @@ export async function getEmployeeAbsences(
   for (const r of requests.rows) {
     out.push({
       date: r.date,
-      kind: REQUEST_KIND[r.request_type] ?? r.request_type,
+      kind: PTO_TYPE_FOR_REQUEST[r.request_type] ?? r.request_type,
       hours: hoursForRequest(r.request_type, r.start_time, r.end_time, shiftFrom(r)),
       source: 'request',
       startTime: r.start_time,

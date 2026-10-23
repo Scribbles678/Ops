@@ -11,6 +11,7 @@
  * stay in. For the standard 8.5h-span/30m-lunch shifts a full day is exactly 8.0h,
  * which is what the old hardcoded constant assumed.
  */
+import { DEFAULT_DAY_HOURS } from '../../utils/requestRuleSettings'
 
 /** Minimal shift shape needed to price an absence. */
 export interface ShiftInfo {
@@ -218,7 +219,7 @@ const DOW_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 export function ptoCapForDate(settings: Record<string, string>, dateStr: string): number {
   const legacy = (() => {
     const v = parseInt(settings['max_pto_hours_per_day'] ?? '', 10)
-    return isNaN(v) ? 8 : v
+    return isNaN(v) ? DEFAULT_DAY_HOURS : v
   })()
 
   const [y, m, d] = dateStr.split('-').map(Number)
@@ -229,8 +230,12 @@ export function ptoCapForDate(settings: Record<string, string>, dateStr: string)
     const raw = settings['max_pto_hours_by_dow']
     if (raw) {
       const map = JSON.parse(raw)
-      const v = Number(map?.[dowName])
-      if (!isNaN(v) && map?.[dowName] != null) return v
+      const entry = map?.[dowName]
+      // A blank weekday is unset, not 0. Number('') is 0, so a box cleared on the
+      // Settings page (saved as "" until Oct 2026) silently became a 0-hour limit
+      // that auto-rejected every request that weekday.
+      const v = entry == null || String(entry).trim() === '' ? NaN : Number(entry)
+      if (!isNaN(v)) return v
     }
   } catch {
     /* malformed JSON — fall back */

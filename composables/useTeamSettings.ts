@@ -15,28 +15,31 @@ export const useTeamSettings = () => {
       settings.value = map
       return settings.value
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return {}
     } finally {
       loading.value = false
     }
   }
 
-  const saveSetting = async (key: string, value: string | number) => {
-    loading.value = true
-    error.value = null
+  /**
+   * Save the whole Request Rules form in ONE request — all of it or none (the server
+   * checks every value against utils/requestRuleSettings.ts). Uses `saving`, not
+   * `loading`: sharing `loading` made the form vanish behind "Loading settings…"
+   * on every save. Throws on failure; the caller shows the server's message.
+   */
+  const saving = ref(false)
+  const saveRules = async (values: Record<string, unknown>) => {
+    saving.value = true
     try {
-      await $fetch('/api/team-settings', {
+      const saved = await $fetch<Record<string, string>>('/api/team-settings', {
         method: 'POST',
-        body: { setting_key: key, setting_value: String(value) },
+        body: { settings: values },
       })
-      settings.value[key] = String(value)
-      return true
-    } catch (e: any) {
-      error.value = e.message
-      return false
+      settings.value = { ...settings.value, ...saved }
+      return settings.value
     } finally {
-      loading.value = false
+      saving.value = false
     }
   }
 
@@ -52,9 +55,10 @@ export const useTeamSettings = () => {
   return {
     settings,
     loading,
+    saving,
     error,
     fetchSettings,
-    saveSetting,
+    saveRules,
     getSetting,
     getSettingNumber,
   }

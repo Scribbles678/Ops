@@ -1,0 +1,16 @@
+# The database and its nightly backups:  kubectl apply -k deploy/k8s
+#
+# Not included, on purpose:
+#   storageclass.yaml          cluster-scoped (cluster-admin); apply once, first
+#   db-secret.example.yaml     a template; create the real Secret by hand
+#   restore-job.example.yaml   only when restoring
+#
+# Runbook, including moving over from the hand-made "scheduling-db" workload:
+# docs/RANCHER-DEPLOYMENT.md, "Durable database and nightly backups".
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - db-service.yaml
+  - db-statefulset.yaml
+  - db-backups-pvc.yaml
+  - backup-cronjob.yaml

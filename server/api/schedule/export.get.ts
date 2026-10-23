@@ -1,5 +1,5 @@
 import { query } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
 
 /**
  * Rows for a historical schedule export over a date range.
@@ -12,7 +12,7 @@ import { requireAuth, getTeamFilter } from '../../utils/authorize'
  * Query params: date_from, date_to (required, YYYY-MM-DD, inclusive)
  */
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getTeamFilter(user)
   const params = getQuery(event)
 

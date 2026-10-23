@@ -1,0 +1,79 @@
+# Nightly backup: pg_dump to the backups share. Each daily file is kept 30 days;
+# on Sundays a copy also goes to weekly/ and is kept 12 weeks.
+#
+# The job FAILS, and shows as failed in Rancher, if the dump is under 10 KB or
+# pg_restore can't read the accounts back out of it. An empty "backup" is worse
+# than none. Each run prints a few row counts. Those should only ever grow; a
+# sudden drop means the database was emptied.
+#
+# Run one now:  kubectl -n ns-operations-scheduler create job --from=cronjob/scheduling-db-backup backup-now
+# Restore:      restore-job.example.yaml, and the runbook in docs/RANCHER-DEPLOYMENT.md.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: scheduling-db-backup
+  namespace: ns-operations-scheduler
+spec:
+  schedule: "0 2 * * *"
+  timeZone: America/Chicago   # 02:00 Central; the app is idle
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 70
+            runAsGroup: 70
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: pg-dump
+              image: postgres:16-alpine   # same major version as the database
+              env:
+                # Until the move to the StatefulSet, point this at the current database:
+                # value: scheduling-db. The Secret must then hold THAT database's password.
+                - { name: PGHOST, value: scheduling-postgres }
+                - { name: PGUSER, value: postgres }
+                - { name: PGDATABASE, value: scheduling }
+                - name: PGPASSWORD
+                  valueFrom: { secretKeyRef: { name: scheduling-postgres, key: POSTGRES_PASSWORD } }
+              command: [/bin/sh, -c]
+              args:
+                - |
+                  set -eu
+                  mkdir -p /backups/daily /backups/weekly
+                  out=/backups/daily/scheduling-$(date +%F).dump
+                  tmp="$out.partial"
+                  rm -f /backups/daily/*.partial   # left by a failed run
+                  pg_dump -Fc -f "$tmp"
+                  size=$(stat -c %s "$tmp")
+                  if [ "$size" -lt 10240 ]; then echo "FAILED: the dump is only $size bytes"; exit 1; fi
+                  if ! pg_restore -l "$tmp" | grep -q 'TABLE DATA public user_profiles '; then
+                    echo "FAILED: the dump has no user accounts in it"; exit 1
+                  fi
+                  mv "$tmp" "$out"
+                  if [ "$(date +%u)" = 7 ]; then cp "$out" /backups/weekly/; fi
+                  find /backups/daily -name 'scheduling-*.dump' -mtime +30 -delete
+                  find /backups/weekly -name 'scheduling-*.dump' -mtime +84 -delete
+                  psql -At -c "SELECT 'teams ' || count(*) FROM teams
+                               UNION ALL SELECT 'accounts ' || count(*) FROM user_profiles
+                               UNION ALL SELECT 'employees ' || count(*) FROM employees
+                               UNION ALL SELECT 'assignments ' || count(*) FROM schedule_assignments"
+                  echo "OK: $out ($size bytes)"
+              volumeMounts:
+                - { name: backups, mountPath: /backups }
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits: { memory: 512Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: [ALL] }
+          volumes:
+            - name: backups
+              persistentVolumeClaim: { claimName: scheduling-db-backups }

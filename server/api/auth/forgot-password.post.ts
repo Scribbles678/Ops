@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { query } from '../../utils/db'
-import { sendEmail, getAppBaseUrl } from '../../utils/email'
+import { sendEmail, getAppBaseUrl, isEmailConfigured } from '../../utils/email'
 
 const TOKEN_EXPIRY_HOURS = 1
 const TOKEN_BYTES = 32
@@ -12,6 +12,16 @@ export default defineEventHandler(async (event) => {
 
   if (!email) {
     throw createError({ statusCode: 400, message: 'Email is required' })
+  }
+
+  // No email on this site: say so, rather than store a link nobody will receive and
+  // promise an email that never comes. The same answer for every address.
+  if (!isEmailConfigured()) {
+    return {
+      success: false,
+      emailLinks: false,
+      message: "This site can't send email, so no reset link can be sent. Ask your supervisor to set a new password for you (Settings → Users).",
+    }
   }
 
   // Fetch user by email (only if active)

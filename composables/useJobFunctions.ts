@@ -6,21 +6,26 @@ export const useJobFunctions = () => {
   // (so a deactivated job can be switched back on); every other page gets active
   // only. Remembered so a save refreshes the same list it came from.
   let includeInactive = false
+  // Only the newest request's answer lands. Two quick saves each refetch the list,
+  // and the older reply can arrive last — it used to overwrite the newer one.
+  let fetchSeq = 0
 
   const fetchJobFunctions = async (opts?: { includeInactive?: boolean }) => {
     if (typeof opts?.includeInactive === 'boolean') includeInactive = opts.includeInactive
+    const mine = ++fetchSeq
     loading.value = true
     error.value = null
     try {
-      jobFunctions.value = await $fetch<any[]>('/api/job-functions', {
+      const rows = await $fetch<any[]>('/api/job-functions', {
         params: includeInactive ? { include_inactive: 'true' } : {},
       })
+      if (mine === fetchSeq) jobFunctions.value = rows
       return jobFunctions.value
     } catch (e: any) {
-      error.value = e.message
+      if (mine === fetchSeq) error.value = e.data?.message ?? e.message
       return []
     } finally {
-      loading.value = false
+      if (mine === fetchSeq) loading.value = false
     }
   }
 

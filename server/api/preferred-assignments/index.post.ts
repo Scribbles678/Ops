@@ -1,5 +1,6 @@
 import { transaction } from '../../utils/db'
-import { requireAuth, getWriteTeamId } from '../../utils/authorize'
+import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
+import { assertEmployeeOnTeam, assertJobFunctionsOnTeam } from '../../utils/teamOwnership'
 
 interface BlockInput {
   start_time: string
@@ -8,7 +9,7 @@ interface BlockInput {
 }
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const {
@@ -41,6 +42,14 @@ export default defineEventHandler(async (event) => {
   if (!employee_id || !baseJfId) {
     throw createError({ statusCode: 400, message: 'employee_id and at least one job function (block) are required' })
   }
+  // The person and every job named must be this team's. Before Sep 2026 another
+  // team's employee could be linked here, and the list then handed back that
+  // person's whole record.
+  await assertEmployeeOnTeam(employee_id, teamId)
+  await assertJobFunctionsOnTeam(
+    [baseJfId, am_job_function_id, pm_job_function_id, ...validBlocks.map((b) => b.job_function_id)].filter(Boolean) as string[],
+    teamId
+  )
 
   const result = await transaction(async (client) => {
     const inserted = await client.query(

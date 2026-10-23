@@ -1,0 +1,29 @@
+# The address the app connects to:
+#   DATABASE_URL=postgresql://postgres:<password>@scheduling-postgres:5432/scheduling
+#
+# The name deliberately differs from the hand-made "scheduling-db" workload, so both
+# can run side by side during the cutover and rolling back is one DATABASE_URL change.
+apiVersion: v1
+kind: Service
+metadata:
+  name: scheduling-postgres
+  namespace: ns-operations-scheduler
+  labels: { app: scheduling-postgres }
+spec:
+  selector: { app: scheduling-postgres }
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }
+---
+# Headless service that gives the StatefulSet's pod its stable identity
+# (scheduling-postgres-0). Not used by the app.
+apiVersion: v1
+kind: Service
+metadata:
+  name: scheduling-postgres-hl
+  namespace: ns-operations-scheduler
+  labels: { app: scheduling-postgres }
+spec:
+  clusterIP: None
+  selector: { app: scheduling-postgres }
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }

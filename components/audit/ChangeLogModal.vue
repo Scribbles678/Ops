@@ -1,7 +1,8 @@
 <!--
-  Change log — the read-only audit view. One component, two windows: the PTO
+  Change log — the read-only audit view. One component, three windows: the PTO
   calendar opens it for request changes across the team; the Employee Overview
-  opens it for every kind of change to one person. Supervisor and above only
+  opens it for every kind of change to one person; Settings → Users opens it for
+  password resets and changes (entity 'account'). Supervisor and above only
   (the endpoint refuses anyone else).
 -->
 <template>
@@ -133,6 +134,7 @@ const ENTITY_LABELS: Record<string, string> = {
   attendance_point: 'attendance point',
   performance_note: 'note',
   performance_error: 'error log',
+  account: 'account',
 }
 const entityLabel = (t: string) => ENTITY_LABELS[t] ?? t
 const when = (iso: string) =>

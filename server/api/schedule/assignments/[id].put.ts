@@ -1,12 +1,15 @@
 import { query } from '../../../utils/db'
-import { requireAuth, getTeamFilter } from '../../../utils/authorize'
+import { requireTeamLead, getTeamFilter } from '../../../utils/authorize'
+import { assertScheduleRowsOnTeam } from '../../../utils/teamOwnership'
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getTeamFilter(user)
   const id = getRouterParam(event, 'id')
   const body = await readBody(event)
   const { employee_id, job_function_id, shift_id, schedule_date, start_time, end_time, assignment_order } = body
+  // Re-pointing a row at another team's person, job or shift is refused.
+  await assertScheduleRowsOnTeam([{ employee_id, job_function_id, shift_id }], teamId)
 
   const params: unknown[] = [employee_id ?? null, job_function_id ?? null, shift_id ?? null,
      schedule_date ?? null, start_time ?? null, end_time ?? null,

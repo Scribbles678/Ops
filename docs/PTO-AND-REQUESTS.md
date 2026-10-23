@@ -16,6 +16,7 @@ apart — so treat a second implementation as a bug, not a shortcut.
 | `server/utils/ptoHours.ts` | How many paid hours an absence costs. Business-day math. Per-weekday caps. |
 | `server/utils/ptoUsage.ts` | How many hours a team has already committed on a date, in total (`getUsedHoursByDate`) or itemised by source (`getUsedHoursBreakdownByDate`). |
 | `server/utils/requestRules.ts` | `evaluateRequest()` — the auto-approval rule engine. |
+| `server/utils/timeOff.ts` | Whether a person is **already off** at that time (one absence at a time), the request → `pto_days` row mapping, the team lock on time-off writes, deleting a request with its rows. See [One absence at a time](#one-absence-at-a-time). |
 | `utils/ptoDisplay.ts` | How a `pto_days` row should be READ and DISPLAYED (client + server). |
 | `utils/requestDisplay.ts` | How a `schedule_requests` row is LABELLED (type name, "leaves 4:00 PM"). The PTO calendar and the request modal both use it. |
 
@@ -117,6 +118,40 @@ shows a state the app cannot produce.
 | Max leave-early per employee per week | `max_leave_early_per_employee_per_week` | *unset = no limit* |
 | Date not blocked | `team_blocked_dates` | — |
 
+**Where they're set, and what's accepted.** Settings → Request rules (Supervisor and
+up). `utils/requestRuleSettings.ts` is the one list of these keys, what each
+accepts and the defaults above; the form checks each box with it and
+`POST /api/team-settings` refuses anything else, saving the whole form in one
+transaction. Counts are whole numbers 0–1000, notice 0–260 business days, daily hours
+0–10,000 in quarter hours with **every weekday filled in** (0 means no time off that
+day), and only the two opt-in limits may be blank. Until Oct 2026 the endpoint stored
+whatever it was sent: a cleared weekday box was saved as `""` and read as a **0-hour
+limit** that auto-rejected every request that weekday, and `-1` shift changes a day
+rejected every shift change. `ptoCapForDate` now reads a blank weekday as unset (the
+legacy single value, else 8h), so an install that already has one changes from
+"refuse all" to that fallback on deploy. To see which teams that affects, and any other stored value the
+form would now refuse, run this read-only query on the work database before deploying:
+
+```sql
+SELECT t.name AS team, s.setting_key, s.setting_value
+FROM team_settings s JOIN teams t ON t.id = s.team_id
+WHERE (s.setting_key = 'max_pto_hours_by_dow' AND s.setting_value ~ '""|-')
+   OR (s.setting_key IN ('max_shift_swaps_per_day', 'max_shift_change_per_employee_per_week',
+                         'max_leave_on_time_per_employee_per_week', 'min_business_days_notice')
+       AND s.setting_value !~ '^\d+$')
+   OR (s.setting_key IN ('max_leave_on_time_per_day', 'max_leave_early_per_employee_per_week')
+       AND s.setting_value !~ '^\d*$')
+ORDER BY 1, 2;
+```
+
+Opening a listed team's rules shows a blank weekday as the fallback it now gets
+(what you see is what's applied); any other bad value is marked red, and the rules
+can't be saved until it's fixed.
+
+**Blocked dates** are added from the same tab. Adding a date that's already blocked
+leaves it as it is — its reason too — and the response lists it under `skipped`
+(a month-end block over quarter-end days used to relabel them silently).
+
 ⚠ Two dead keys, `max_leave_early_per_employee_per_day` and
 `max_shift_change_per_employee_per_day`, survived from when those limits were daily
 rather than weekly. **Nothing reads them**, and their names sit one word away from
@@ -170,7 +205,92 @@ They did not: the PUT wrote `request.request_type` straight into
 partial landed as **`pto_partial`** where the submit path writes **`partial`**.
 Nothing failed loudly because `describePto()` and `hoursForPtoDay()` both have a
 catch-all branch, so the row simply read as an untyped legacy record everywhere.
-The mapping now lives in one table, `PTO_TYPE_FOR_REQUEST`.
+The mapping now lives in one place, `ptoShapeForRequest()` / `PTO_TYPE_FOR_REQUEST`
+in `server/utils/timeOff.ts`, used by the submit, the override and `ptoUsage.ts`.
+
+### One absence at a time
+
+**Until Oct 2026 nothing checked whether the person was already off.** The rules
+above only measure the team's daily budget, so the same day off could be approved
+twice — the form's "Submit another", the kiosk and a supervisor at once, a range
+over a day already booked — and every copy was charged. On one test day the budget
+read 52h used where people were really off for 33.5h, and that phantom time got
+other people's requests refused.
+
+`server/utils/timeOff.ts` now answers "is this person already off then?" for every
+path that records time off:
+
+| Path | A duplicate |
+|---|---|
+| Submit (`POST /api/schedule-requests`) | **409** with the reason, and **nothing is saved** — no rejected row. A duplicate is a mistake, not a request to record |
+| Range dry run (`POST /api/schedule-requests/preview`) | that day is listed as unavailable with the reason, so "submit the rest" skips it |
+| Supervisor approves a rejected request (`PUT /api/schedule-requests/:id`) | **409** — the rules can be overridden, a duplicate cannot |
+| PTO entered on the schedule page (`POST /api/pto`) | **409** |
+| A call-in (`POST /api/pto`, `pto_type: 'call_in'`) | **replaces** the time off already there (each removal logged), listed in the response's `replaced` |
+
+- **"Already off"** is exactly what the budget charges (`ptoUsage.ts`): approved
+  requests, plus `pto_days` rows no request created.
+- **A conflict is an overlap** of the two time windows (`describePto`). Still
+  allowed: an arrive-late plus a leave-early, two separate partials. Refused: a
+  full day twice, anything inside a full day or a call-in, a second leave-early,
+  overlapping partials.
+- `leave_on_time` refuses a second approved one on the same day; `shift_swap`
+  refuses when a swap is already on file for that day (a second one used to
+  overwrite the first in place).
+- `lockTeamTimeOff()` (a per-team advisory lock) serialises these writes, so two
+  submits in the same instant cannot both pass — the daily cap had the same race.
+- **A new path that writes `pto_days` or approves a request must use these helpers.**
+
+**The schedule page's PTO popup edits in place** (`PUT /api/pto/:id`). It used to
+delete the row and add a new one, and there is no foreign key on
+`schedule_requests.created_pto_id`, so a day off a request had created lost its
+request and both were charged — Save on an unchanged day turned 8h into 16h.
+Editing keeps the link and updates the approved request to match, because the
+budget prices the request, not the row. **Cancel PTO** on such a day deletes the
+request with it (`deleteRequestWithRecords`, the same delete as the Requests
+table); deleting only the row left the request approved, charged and on the
+calendar.
+
+**Duplicates from before Oct 2026 are still in the data.** Nothing rewrites them —
+clean them up by hand: delete the extra request from the PTO calendar's Requests
+table, which removes both its rows. Read-only queries to find them:
+
+```sql
+-- Person-days charged more than once, counted the way the budget counts. Some can
+-- be legitimate (an arrive-late plus a leave-early on one day).
+WITH charged AS (
+  SELECT team_id, employee_id, request_date AS day, 'request ' || request_type AS what
+  FROM schedule_requests
+  WHERE status = 'approved'
+    AND request_type IN ('pto_full_day', 'pto_partial', 'leave_early', 'arrive_late')
+  UNION ALL
+  SELECT p.team_id, p.employee_id, p.pto_date, 'entered ' || COALESCE(p.pto_type, 'untyped')
+  FROM pto_days p
+  WHERE NOT EXISTS (SELECT 1 FROM schedule_requests r WHERE r.created_pto_id = p.id)
+)
+SELECT t.name AS team, e.first_name || ' ' || e.last_name AS employee, c.day,
+       count(*) AS times_charged, string_agg(c.what, ' + ') AS records
+FROM charged c
+JOIN employees e ON e.id = c.employee_id
+JOIN teams t ON t.id = c.team_id
+GROUP BY 1, 2, 3 HAVING count(*) > 1
+ORDER BY c.day DESC, 1, 2;
+
+-- Approved requests whose day-off row was deleted (the old popup edit/delete):
+-- still charged to the budget and still shown on the PTO calendar.
+SELECT t.name AS team, e.first_name || ' ' || e.last_name AS employee,
+       r.request_date, r.request_type
+FROM schedule_requests r
+JOIN employees e ON e.id = r.employee_id
+JOIN teams t ON t.id = r.team_id
+WHERE r.status = 'approved' AND r.created_pto_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM pto_days p WHERE p.id = r.created_pto_id)
+ORDER BY r.request_date DESC;
+```
+
+**No database constraint, on purpose.** An overlap rule needs the `btree_gist`
+extension, and a unique index would fail to build on an install that already has
+duplicates — the pod would crashloop on deploy.
 
 ⚠ **A `pto_days` row with no `pto_type` and no times is indistinguishable from a
 full day**, and `display.vue` treats it as out-all-day — so a malformed row
@@ -213,7 +333,10 @@ change**, by `logChange()` in `server/utils/auditLog.ts`:
 | change | logged as |
 |---|---|
 | request approved / rejected / deleted by hand | `approve` / `reject` / `delete` on `request`, e.g. *"Deleted Max Kangas's Full Day Off for Sep 15 (was approved)"* |
-| PTO day or call-in added / removed on the schedule page | `add` / `delete` on `pto_day` |
+| PTO day or call-in added / removed on the schedule page | `add` / `delete` on `pto_day`; removing a day an approved request created deletes the request: `delete` on `request`, *"… (was approved; removed on the schedule page)"* |
+| PTO day changed in the schedule page's popup | `edit` on `pto_day`, *"… (and the approved request)"* when its request was updated to match; an unchanged Save writes nothing |
+| time off replaced by a call-in | `delete` on `request` / `pto_day`, *"… (replaced by a call-in)"* |
+| a password reset (Settings → Users), the person's own change, or an emailed reset link | `edit` on `account` (migration 026), *"Reset the password for … They were signed out on every device"* — never the password. Logged under the account's team, with no employee |
 | attendance point given / removed | `add` / `delete` on `attendance_point` |
 | performance note added / edited / deleted, error logged / removed | `add` / `edit` / `delete` on `performance_note` / `performance_error` |
 
@@ -225,7 +348,8 @@ blur who did what.
 **Read-only, Supervisor and above.** `GET /api/audit-log` is the only route; there
 is no update or delete. The **Change log** button on the PTO calendar's Requests
 card shows request changes for the team; the one on the Employee Overview shows
-every kind of change for the selected person. Both are `components/audit/
+every kind of change for the selected person; the one on Settings → Users shows
+password resets and changes on the team's accounts. All three are `components/audit/
 ChangeLogModal.vue`, paged 15 at a time with an action filter. Team Leads never
 see the button and the endpoint refuses them.
 
@@ -396,4 +520,4 @@ as pseudo-assignments in slate `#94a3b8`.
 
 ---
 
-**Last Updated**: September 2026
+**Last Updated**: October 2026

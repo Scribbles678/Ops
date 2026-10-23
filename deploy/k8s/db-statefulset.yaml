@@ -1,0 +1,63 @@
+# The database, on a disk that survives node drains and pod moves.
+#
+# Sep 2026: the hand-made Deployment came back EMPTY after IT drained the nodes
+# (docs/DB-DATA-LOSS-INCIDENT.md). A StatefulSet creates its disk from the claim
+# template below: nobody picks the volume type in a form, and deleting the pod, draining
+# the node or even deleting the StatefulSet leaves the disk and its data in place.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: scheduling-postgres
+  namespace: ns-operations-scheduler
+  labels: { app: scheduling-postgres }
+spec:
+  serviceName: scheduling-postgres-hl
+  replicas: 1
+  selector:
+    matchLabels: { app: scheduling-postgres }
+  template:
+    metadata:
+      labels: { app: scheduling-postgres }
+    spec:
+      # Room for a clean shutdown on a drain. The image stops Postgres with SIGINT
+      # ("fast": finishes cleanly within seconds).
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70      # postgres in postgres:16-alpine
+        runAsGroup: 70
+        fsGroup: 70        # makes the new disk writable by that user
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: postgres
+          image: postgres:16-alpine   # pin a digest if your registry policy requires it
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          env:
+            - { name: POSTGRES_DB, value: scheduling }
+            - { name: POSTGRES_USER, value: postgres }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: scheduling-postgres, key: POSTGRES_PASSWORD } }
+            # One level below the mount: a new Azure disk holds lost+found, and
+            # Postgres refuses to set up in a directory that isn't empty.
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          readinessProbe:
+            exec: { command: [pg_isready, -U, postgres, -d, scheduling] }
+            periodSeconds: 5
+          # No liveness probe on purpose: after a crash Postgres replays its log
+          # before accepting connections, and a probe that restarts it then only
+          # makes that take longer.
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: managed-csi-retain
+        resources: { requests: { storage: 16Gi } }

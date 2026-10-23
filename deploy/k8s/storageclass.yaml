@@ -1,0 +1,41 @@
+# Storage classes whose disks OUTLIVE their claim (reclaimPolicy: Retain).
+#
+# AKS's built-in managed-csi / azurefile-csi classes use Delete: deleting the claim
+# deletes the Azure disk or share, and the data with it. With Retain, a deleted claim
+# leaves the disk behind, recoverable by rebinding it.
+#
+# Cluster-scoped, so it needs cluster-admin. Apply it ONCE, before the rest of this
+# directory. It is not in kustomization.yaml, so a namespace-level apply never needs
+# that right. Runbook: docs/RANCHER-DEPLOYMENT.md, "Durable database and nightly
+# backups".
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: managed-csi-retain
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: StandardSSD_LRS   # or Premium_LRS
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+---
+# For the backups share: Azure Files, readable by a restore pod while the
+# database is running (ReadWriteMany).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: azurefile-csi-retain
+provisioner: file.csi.azure.com
+parameters:
+  skuName: Standard_LRS
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+mountOptions:
+  - dir_mode=0770
+  - file_mode=0660
+  - uid=70   # the postgres user in postgres:16-alpine, which the backup job runs as
+  - gid=70
+  - mfsymlinks
+  - cache=strict
+  - nosharesock

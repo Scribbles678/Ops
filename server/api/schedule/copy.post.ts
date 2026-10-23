@@ -1,5 +1,5 @@
 import { query, transaction } from '../../utils/db'
-import { requireAuth, getWriteTeamId } from '../../utils/authorize'
+import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
 import { describePto, subtractPto, ptoTimeToMinutes } from '../../../utils/ptoDisplay'
 import { DB_MIN_BLOCK_MINUTES } from '../../../utils/scheduleEngineV2/types'
 
@@ -23,7 +23,7 @@ const minsToTime = (n: number): string =>
   `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const from_date = String(body?.from_date ?? '')

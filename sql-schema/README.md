@@ -72,6 +72,8 @@ docker exec -i t psql -v ON_ERROR_STOP=1 -U postgres -d scheduling
 | 021-add-team-lead-role | `user_profiles.is_team_lead` |
 | 022-add-audit-log | `audit_log` |
 | 023-add-job-function-training-target | `job_functions.training_target` (Training Matrix goal; nullable, CHECK ≥ 0) |
+| 024-same-team-references | composite `(id, team_id)` foreign keys: no row may point at another team's employee, job or shift; `team_id` NOT NULL where clean; indexes for 5–10 sites. Existing violations stay NOT VALID with a boot-log WARNING |
+| 025-team-timezone | `teams.timezone` (default `America/Chicago`); the swap-date trigger judges "past" in it |
 
 Full descriptions and rationale: [../docs/CONTEXT.md](../docs/CONTEXT.md#migrations-sql-schemamigrations).
 

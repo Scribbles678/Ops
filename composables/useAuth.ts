@@ -19,10 +19,24 @@ export interface AppUser {
   is_display_user: boolean
   is_active: boolean
   employee_id: string | null
+  /** The team's time zone, e.g. "America/New_York" (from /api/auth/me). */
+  team_timezone?: string | null
+  /** The account's own team. `team_id` is the one this session works in (migration 027). */
+  home_team_id?: string | null
+}
+
+/** A team this account may work in (server/utils/teamMembership.ts). */
+export interface TeamOption {
+  id: string
+  name: string
+  timezone: string
+  home: boolean
 }
 
 // Global reactive state - shallowRef avoids Nuxt context dependency
 const currentUser = shallowRef<AppUser | null>(null)
+/** Every team the signed-in account may work in; more than one shows the team switcher. */
+const myTeams = shallowRef<TeamOption[]>([])
 const authLoading = shallowRef(false)
 /**
  * Set by plugins/session.client.ts when an API call comes back 401: the session
@@ -57,11 +71,13 @@ export const useAuth = () => {
    */
   const fetchCurrentUser = async (): Promise<AppUser | null> => {
     try {
-      const data = await $fetch<{ user: AppUser }>('/api/auth/me')
+      const data = await $fetch<{ user: AppUser; teams?: TeamOption[] }>('/api/auth/me')
       currentUser.value = data.user
+      myTeams.value = data.teams ?? []
       return data.user
     } catch {
       currentUser.value = null
+      myTeams.value = []
       return null
     }
   }
@@ -69,13 +85,15 @@ export const useAuth = () => {
   /**
    * `kioskOnly`: on the wall display, refuse anything but a kiosk account — a
    * supervisor signing in there used to leave the board running as them for good.
+   * `teamId`: carry on in that team if this account works in it (the "session
+   * ended" prompt passes the team its page showed); otherwise the home team.
    */
-  const login = async (email: string, password: string, opts: { kioskOnly?: boolean } = {}): Promise<AppUser> => {
+  const login = async (email: string, password: string, opts: { kioskOnly?: boolean; teamId?: string | null } = {}): Promise<AppUser> => {
     authLoading.value = true
     try {
       const data = await $fetch<{ success: boolean; user: AppUser }>('/api/auth/login', {
         method: 'POST',
-        body: { email, password },
+        body: { email, password, team_id: opts.teamId ?? undefined },
       })
       if (opts.kioskOnly && !data.user.is_display_user) {
         await $fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
@@ -85,7 +103,7 @@ export const useAuth = () => {
       // that drops it (cookies blocked, or an old build's HTTPS-only cookie on an
       // http:// address) looked signed in while every later call failed with 401.
       try {
-        await $fetch('/api/auth/me')
+        myTeams.value = (await $fetch<{ teams?: TeamOption[] }>('/api/auth/me')).teams ?? []
       } catch {
         throw new Error("Signed in, but this browser didn't keep the session, so nothing would load. Check that cookies aren't blocked for this site, or ask IT.")
       }
@@ -108,6 +126,7 @@ export const useAuth = () => {
       return
     }
     currentUser.value = null
+    myTeams.value = []
     announceAuthChange(null)
     // A full page load, not an in-app navigation, so nothing from this session
     // stays in memory.
@@ -121,8 +140,34 @@ export const useAuth = () => {
     })
   }
 
+  /**
+   * Work in another of this account's teams. A plain form POST, so the browser asks
+   * about unsaved edits BEFORE anything changes — cancel and nothing switched. The
+   * server re-issues this browser's session and sends it back to this page (only a
+   * `tab` kept: an id in the address would belong to the old team); the page then
+   * tells this browser's other tabs (components/TeamBar.vue).
+   */
+  const switchTeam = (teamId: string) => {
+    const here = new URL(window.location.href)
+    const tab = here.searchParams.get('tab')
+    const form = document.createElement('form')
+    form.method = 'POST'
+    form.action = '/api/auth/switch-team'
+    for (const [name, value] of [['team_id', teamId], ['return_to', here.pathname + (tab ? `?tab=${encodeURIComponent(tab)}` : '')]]) {
+      const input = document.createElement('input')
+      input.type = 'hidden'
+      input.name = name!
+      input.value = value!
+      form.appendChild(input)
+    }
+    document.body.appendChild(form)
+    form.submit()
+  }
+
   return {
     user: currentUser,
+    myTeams,
+    switchTeam,
     isAuthenticated,
     authLoading,
     sessionEnded,

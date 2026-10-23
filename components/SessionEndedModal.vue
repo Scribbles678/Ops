@@ -81,6 +81,10 @@ const signIn = async () => {
       // The wall display runs as its kiosk account. Whoever was already signed in
       // there (a supervisor viewing Display Mode on their own PC) may sign back in.
       kioskOnly: onDisplay.value && !(before && email.value.trim().toLowerCase() === before.email),
+      // Carry on in the team this page shows, if this account works in it — an
+      // account with several teams would otherwise sign back in to its home team and
+      // lose the page (migration 027).
+      teamId: before?.team_id ?? null,
     })
     if (!before || now.id !== before.id || now.team_id !== before.team_id) {
       window.location.reload()

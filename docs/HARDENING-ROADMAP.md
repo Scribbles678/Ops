@@ -1,9 +1,17 @@
 # Hardening Roadmap — Durable, Sustainable Deployment
 
-**Status:** proposal. **Nothing here has been implemented.** This is the plan for
-making the deployment survive routine cluster operations (node drains, upgrades,
-pod rescheduling, workload redeploys) without data loss, and for making any
+**Status (2026-09-24):** partly written, nothing applied to the cluster yet. This is
+the plan for making the deployment survive routine cluster operations (node drains,
+upgrades, pod rescheduling, workload redeploys) without data loss, and for making any
 future data loss loud, bounded and recoverable.
+
+| Layer | State |
+|---|---|
+| 1 Durable storage | **Written**: `deploy/k8s/storageclass.yaml`, `db-service.yaml`, `db-statefulset.yaml`, tested in Docker (non-root, a disk with `lost+found`, clean stop and restart). Named `scheduling-postgres`, not `scheduling-db` as sketched below, so the old and new databases run side by side during the move. The move itself is `RANCHER-DEPLOYMENT.md` → "For IT" §3 |
+| 2 Refuse to silently rebuild | Partly: a failed startup now exits so the pod restarts (see the correction in §3). The `BOOTSTRAP_ALLOW_INIT` guard is **not** built |
+| 3 Backups | **Written**: `db-backups-pvc.yaml`, `backup-cronjob.yaml`, `restore-job.example.yaml`; backup, prune, weekly copy, the failure checks and two restores tested in Docker against a copy of the dev database. Setup: "For IT" §2 |
+| 4 Detection | Partly: `/api/health` says whether the tables exist. `_meta` is not built |
+| 5 Runbook + tests | The runbook and the persistence test are in "For IT" §3; the full `deploy/k8s/` (app, ingress) is not written |
 
 Context for why this exists: `DB-DATA-LOSS-INCIDENT.md`.
 

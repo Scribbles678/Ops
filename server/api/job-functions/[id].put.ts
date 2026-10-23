@@ -1,7 +1,11 @@
 import { query } from '../../utils/db'
 import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
+import { rethrowJobFunctionError, assertCanDeactivate } from '../../utils/jobFunctionInput'
 
 /** A cleared number box arrives as '' — Postgres rejects that for an integer. */
+// People on shift at once; far above any real team, well inside an integer column.
+const MAX_TRAINING_TARGET = 1000
+
 const numberOrNull = (v: unknown): number | null => (v === '' || v == null ? null : Number(v))
 
 export default defineEventHandler(async (event) => {
@@ -31,12 +35,25 @@ export default defineEventHandler(async (event) => {
   // Training Matrix target (migration 023): the fewest trained people wanted on shift
   // in any hour the job is worked. Sent on its own by the matrix, never by the form.
   const trainingTarget = numberOrNull(body?.training_target)
-  if (trainingTarget !== null && !(Number.isInteger(trainingTarget) && trainingTarget >= 0)) {
-    throw createError({ statusCode: 400, message: 'Training target must be a whole number, 0 or more.' })
+  if (trainingTarget !== null && !(Number.isInteger(trainingTarget) && trainingTarget >= 0 && trainingTarget <= MAX_TRAINING_TARGET)) {
+    throw createError({ statusCode: 400, message: `Training target must be a whole number from 0 to ${MAX_TRAINING_TARGET}.` })
   }
 
+  // A name is trimmed and must not be blank, as when creating.
+  const newName = sent('name') ? String(name ?? '').trim() : null
+  if (sent('name') && !newName) {
+    throw createError({ statusCode: 400, message: 'The job function needs a name.' })
+  }
+
+  const current = (await query<{ name: string; is_active: boolean }>(
+    'SELECT name, is_active FROM job_functions WHERE id = $1 AND team_id = $2',
+    [id, teamId]
+  )).rows[0]
+  if (!current) throw createError({ statusCode: 404, message: 'Job function not found' })
+  if (current.is_active && is_active === false) await assertCanDeactivate(current.name, teamId)
+
   const params: unknown[] = [
-    name ?? null,
+    newName,
     color_code ?? null,
     numberOrNull(body.productivity_rate),
     sort_order ?? null,
@@ -83,9 +100,14 @@ export default defineEventHandler(async (event) => {
   sql += ' RETURNING *'
 
 
-  const result = await query(sql, params)
+  let result
+  try {
+    result = await query(sql, params)
+  } catch (e: any) {
+    await rethrowJobFunctionError(e, newName ?? current.name, teamId)
+  }
 
-  if (result.rows.length === 0) {
+  if (!result || result.rows.length === 0) {
     throw createError({ statusCode: 404, message: 'Job function not found' })
   }
   return result.rows[0]

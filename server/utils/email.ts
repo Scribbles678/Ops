@@ -15,6 +15,14 @@ export interface EmailOptions {
 }
 
 /**
+ * True when this deployment can send email (SMTP_HOST, SMTP_USER, SMTP_PASS set).
+ * Without it the "Forgot your password?" page says to ask a supervisor instead of
+ * promising a link that would never arrive.
+ */
+export const isEmailConfigured = (): boolean =>
+  !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)
+
+/**
  * Send an email. Returns true if sent, false if email is not configured or failed.
  * Never throws - log errors and return false so caller can show generic success message.
  */
@@ -25,7 +33,7 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
   const pass = process.env.SMTP_PASS
   const from = process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@example.com'
 
-  if (!host || !user || !pass) {
+  if (!isEmailConfigured()) {
     console.warn('[email] SMTP not configured (SMTP_HOST, SMTP_USER, SMTP_PASS). Skipping send.')
     return false
   }

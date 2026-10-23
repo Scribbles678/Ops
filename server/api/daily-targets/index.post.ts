@@ -1,8 +1,9 @@
 import { query } from '../../utils/db'
-import { requireAuth, getWriteTeamId } from '../../utils/authorize'
+import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
+import { assertJobFunctionsOnTeam } from '../../utils/teamOwnership'
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const { schedule_date, job_function_id, target_units, notes } = body
@@ -10,6 +11,7 @@ export default defineEventHandler(async (event) => {
   if (!schedule_date || !job_function_id || target_units === undefined) {
     throw createError({ statusCode: 400, message: 'schedule_date, job_function_id, and target_units are required' })
   }
+  await assertJobFunctionsOnTeam([job_function_id], teamId)
 
   const result = await query(
     `INSERT INTO daily_targets (schedule_date, job_function_id, target_units, notes, team_id)

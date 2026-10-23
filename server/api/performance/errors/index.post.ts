@@ -1,12 +1,14 @@
-import { query, transaction } from '../../../utils/db'
-import { requireTeamLead } from '../../../utils/authorize'
+import { transaction } from '../../../utils/db'
+import { requireTeamLead, getWriteTeamId } from '../../../utils/authorize'
 import { logChange, employeeDisplayName, describeError } from '../../../utils/auditLog'
+import { assertEmployeeOnTeam, assertJobFunctionsOnTeam } from '../../../utils/teamOwnership'
 
 /**
- * Log a performance error against an employee. ADMIN ONLY.
+ * Log a performance error against an employee. TEAM LEAD AND ABOVE.
  *
- * team_id is taken from the EMPLOYEE, not the logged-in user, so the record lands
- * with the team that owns the employee even when a super admin logs it.
+ * The employee (and job function, if given) must be on the writer's own team, and
+ * the record is stamped with that team. It used to take the employee's team,
+ * unchecked, so one site could log errors against another site's people.
  */
 export default defineEventHandler(async (event) => {
   const user = requireTeamLead(event)
@@ -26,13 +28,9 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'error_count must be a whole number of at least 1' })
   }
 
-  const emp = await query<{ team_id: string | null }>(
-    'SELECT team_id FROM employees WHERE id = $1',
-    [employee_id]
-  )
-  if (!emp.rows[0]) {
-    throw createError({ statusCode: 404, message: 'Employee not found' })
-  }
+  const teamId = getWriteTeamId(user)
+  await assertEmployeeOnTeam(employee_id, teamId)
+  if (job_function_id) await assertJobFunctionsOnTeam([job_function_id], teamId)
 
   return transaction(async (client) => {
     const result = await client.query(
@@ -48,7 +46,7 @@ export default defineEventHandler(async (event) => {
         count,
         error_type || null,
         notes || null,
-        emp.rows[0].team_id,
+        teamId,
         user.id,
       ]
     )
@@ -58,7 +56,7 @@ export default defineEventHandler(async (event) => {
       ? (await client.query('SELECT name FROM job_functions WHERE id = $1', [job_function_id])).rows[0]?.name
       : null
     await logChange(client, {
-      teamId: emp.rows[0].team_id,
+      teamId,
       actor: user,
       action: 'add',
       entity: 'performance_error',

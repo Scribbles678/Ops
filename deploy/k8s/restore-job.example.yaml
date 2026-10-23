@@ -1,0 +1,65 @@
+# TEMPLATE: restore one backup over the database. Only when restoring, and only
+# after the app is scaled to 0. Runbook: docs/RANCHER-DEPLOYMENT.md, "Restoring a
+# backup".
+#
+#   1. Set BACKUP_FILE below (list the files: see the runbook).
+#   2. kubectl -n ns-operations-scheduler scale deployment/<app workload> --replicas=0
+#   3. kubectl apply -f restore-job.example.yaml
+#      kubectl -n ns-operations-scheduler logs -f job/scheduling-db-restore
+#   4. Scale the app back to 1; check the data; delete the job.
+#
+# It refuses to run while anything else is connected to the database. Before
+# restoring, it saves the CURRENT database to pre-restore-<time>.dump on the share,
+# so a restore of the wrong file can itself be undone. The restore is one
+# transaction: if any part fails, the database is left as it was.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: scheduling-db-restore
+  namespace: ns-operations-scheduler
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: pg-restore
+          image: postgres:16-alpine
+          env:
+            - { name: BACKUP_FILE, value: daily/scheduling-YYYY-MM-DD.dump }   # CHANGE ME
+            - { name: PGHOST, value: scheduling-postgres }
+            - { name: PGUSER, value: postgres }
+            - { name: PGDATABASE, value: scheduling }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: scheduling-postgres, key: POSTGRES_PASSWORD } }
+          command: [/bin/sh, -c]
+          args:
+            - |
+              set -eu
+              f="/backups/$BACKUP_FILE"
+              if [ ! -s "$f" ]; then echo "STOPPED: $f not found"; ls -l /backups/daily /backups/weekly; exit 1; fi
+              pg_restore -l "$f" > /dev/null
+              others=$(psql -At -c "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() AND backend_type = 'client backend'")
+              if [ "$others" != 0 ]; then echo "STOPPED: $others other connection(s) to the database. Scale the app to 0 first."; exit 1; fi
+              safety="/backups/pre-restore-$(date +%Y%m%d-%H%M%S).dump"
+              pg_dump -Fc -f "$safety"
+              echo "Saved the current database to $safety"
+              pg_restore --clean --if-exists --no-owner --single-transaction -d "$PGDATABASE" "$f"
+              psql -At -c "SELECT 'teams ' || count(*) FROM teams
+                           UNION ALL SELECT 'accounts ' || count(*) FROM user_profiles
+                           UNION ALL SELECT 'employees ' || count(*) FROM employees
+                           UNION ALL SELECT 'assignments ' || count(*) FROM schedule_assignments"
+              echo "RESTORED: $f"
+          volumeMounts:
+            - { name: backups, mountPath: /backups }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+      volumes:
+        - name: backups
+          persistentVolumeClaim: { claimName: scheduling-db-backups }

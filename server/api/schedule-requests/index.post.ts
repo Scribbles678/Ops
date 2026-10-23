@@ -1,6 +1,8 @@
-import { query, transaction } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
-import { evaluateRequest, loadTeamSettings } from '../../utils/requestRules'
+import { transaction } from '../../utils/db'
+import { requireAuth, getWriteTeamId } from '../../utils/authorize'
+import { evaluateRequest, loadTeamSettings, assertRequestDate } from '../../utils/requestRules'
+import { assertEmployeeOnTeam, assertShiftsOnTeam } from '../../utils/teamOwnership'
+import { lockTeamTimeOff, ptoShapeForRequest } from '../../utils/timeOff'
 
 /**
  * Submit a schedule request (leave early, PTO, shift swap).
@@ -9,6 +11,9 @@ import { evaluateRequest, loadTeamSettings } from '../../utils/requestRules'
  *
  * The rules themselves live in server/utils/requestRules.ts so the preview
  * endpoint evaluates exactly the same conditions.
+ *
+ * Time off the person already has (server/utils/timeOff.ts) is refused with a 409
+ * and nothing is saved: a duplicate is a mistake, not a request to record.
  */
 export default defineEventHandler(async (event) => {
   const user = requireAuth(event)
@@ -51,26 +56,32 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'Arrive late requires start_time (the new arrival time)' })
   }
 
-  // Resolve team_id from the employee
-  const empResult = await query<{ team_id: string | null }>(
-    'SELECT team_id FROM employees WHERE id = $1',
-    [employee_id]
-  )
-  if (!empResult.rows[0]) {
-    throw createError({ statusCode: 404, message: 'Employee not found' })
+  assertRequestDate(request_date)
+
+  // The request belongs to the submitter's team, and the employee (and any shifts
+  // in a swap) must be on it. The team used to come from the employee's row, so any
+  // account — the kiosk included — could file an auto-approved request straight into
+  // another site's data, given that employee's id (Sep 2026 audit).
+  const teamId = getWriteTeamId(user)
+  await assertEmployeeOnTeam(employee_id, teamId)
+  if (request_type === 'shift_swap') {
+    await assertShiftsOnTeam([original_shift_id, requested_shift_id], teamId)
   }
-  const teamId = empResult.rows[0].team_id
 
   // Run auto-approval in a transaction
   const result = await transaction(async (client) => {
+    await lockTeamTimeOff(client, teamId)
     const settings = await loadTeamSettings(client, teamId)
 
-    const { status, ruleResults, rejectionReason } = await evaluateRequest(
+    const { status, ruleResults, rejectionReason, conflict } = await evaluateRequest(
       client,
       teamId,
       settings,
       { employee_id, request_type, request_date, start_time, end_time }
     )
+    if (conflict) {
+      throw createError({ statusCode: 409, message: conflict })
+    }
 
     // Insert the request
     const insertResult = await client.query(
@@ -92,55 +103,25 @@ export default defineEventHandler(async (event) => {
 
     // If approved, create downstream records
     if (status === 'approved') {
-      if (request_type === 'pto_full_day') {
-        const ptoResult = await client.query(
-          `INSERT INTO pto_days (employee_id, pto_date, pto_type, notes, team_id)
-           VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-          [employee_id, request_date, 'full_day', notes || 'Auto-approved request', teamId]
-        )
-        await client.query(
-          'UPDATE schedule_requests SET created_pto_id = $1 WHERE id = $2',
-          [(ptoResult.rows[0] as any).id, request.id]
-        )
-        request.created_pto_id = (ptoResult.rows[0] as any).id
-      } else if (request_type === 'pto_partial') {
+      // The time-off row the board, the builder and the calendar read. An
+      // arrive-late runs from the start of the shift to the arrival, so the
+      // builder clips the morning. 'leave_on_time' is informational: no row.
+      const pto = ptoShapeForRequest(request_type, start_time, end_time)
+      if (pto) {
         const ptoResult = await client.query(
           `INSERT INTO pto_days (employee_id, pto_date, start_time, end_time, pto_type, notes, team_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-          [employee_id, request_date, start_time, end_time, 'partial', notes || 'Auto-approved request', teamId]
+          [employee_id, request_date, pto.start_time, pto.end_time, pto.pto_type, notes || 'Auto-approved request', teamId]
         )
         await client.query(
           'UPDATE schedule_requests SET created_pto_id = $1 WHERE id = $2',
           [(ptoResult.rows[0] as any).id, request.id]
         )
         request.created_pto_id = (ptoResult.rows[0] as any).id
-      } else if (request_type === 'leave_early') {
-        const ptoResult = await client.query(
-          `INSERT INTO pto_days (employee_id, pto_date, start_time, pto_type, notes, team_id)
-           VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-          [employee_id, request_date, start_time, 'leave_early', notes || 'Auto-approved request', teamId]
-        )
-        await client.query(
-          'UPDATE schedule_requests SET created_pto_id = $1 WHERE id = $2',
-          [(ptoResult.rows[0] as any).id, request.id]
-        )
-        request.created_pto_id = (ptoResult.rows[0] as any).id
-      } else if (request_type === 'arrive_late') {
-        // Absence runs from the start of the shift until the arrival time, so the
-        // builder clips the morning. start_time holds the arrival time.
-        const ptoResult = await client.query(
-          `INSERT INTO pto_days (employee_id, pto_date, start_time, end_time, pto_type, notes, team_id)
-           VALUES ($1, $2, '00:00:00', $3, 'arrive_late', $4, $5) RETURNING id`,
-          [employee_id, request_date, start_time, notes || 'Auto-approved request', teamId]
-        )
-        await client.query(
-          'UPDATE schedule_requests SET created_pto_id = $1 WHERE id = $2',
-          [(ptoResult.rows[0] as any).id, request.id]
-        )
-        request.created_pto_id = (ptoResult.rows[0] as any).id
-      }
-      // 'leave_on_time' is informational — no downstream record is created.
-      else if (request_type === 'shift_swap') {
+      } else if (request_type === 'shift_swap') {
+        // Only this team's row may be updated, and only a swap this request actually
+        // CREATED is recorded as its own — otherwise rejecting or deleting the request
+        // later deleted a swap somebody else had entered.
         const swapResult = await client.query(
           `INSERT INTO shift_swaps (employee_id, swap_date, original_shift_id, swapped_shift_id, notes, team_id)
            VALUES ($1, $2, $3, $4, $5, $6)
@@ -149,14 +130,18 @@ export default defineEventHandler(async (event) => {
              swapped_shift_id = EXCLUDED.swapped_shift_id,
              notes = EXCLUDED.notes,
              updated_at = NOW()
-           RETURNING id`,
+           WHERE shift_swaps.team_id = EXCLUDED.team_id
+           RETURNING id, (xmax = 0) AS inserted`,
           [employee_id, request_date, original_shift_id, requested_shift_id, notes || 'Auto-approved request', teamId]
         )
-        await client.query(
-          'UPDATE schedule_requests SET created_swap_id = $1 WHERE id = $2',
-          [(swapResult.rows[0] as any).id, request.id]
-        )
-        request.created_swap_id = (swapResult.rows[0] as any).id
+        const swap = swapResult.rows[0] as { id: string; inserted: boolean } | undefined
+        if (!swap) {
+          throw createError({ statusCode: 409, message: 'A shift swap for that person and day belongs to another team.' })
+        }
+        if (swap.inserted) {
+          await client.query('UPDATE schedule_requests SET created_swap_id = $1 WHERE id = $2', [swap.id, request.id])
+          request.created_swap_id = swap.id
+        }
       }
     }
 

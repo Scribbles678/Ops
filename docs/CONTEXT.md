@@ -43,7 +43,10 @@ scheduling-app-v2/
 │   │                          #   Sized for DISTANCE reading, not a desktop dashboard.
 │   │                          #   Chip text colour comes from measured WCAG contrast
 │   │                          #   (getTextColor) - see the note under Display Board.
-│   ├── settings.vue           # User settings, password change, team settings, request rules
+│   ├── settings.vue           # Settings — only the tab shell (Oct 2026), ?tab=account |
+│   │                          #   rules | users | teams; tabs by role. The tabs are in
+│   │                          #   components/settings/. One user list and team list,
+│   │                          #   loaded once and shared by the Users and Teams tabs
 │   ├── pto-calendar.vue       # PTO calendar (week/month views) + request approval workflow
 │   ├── employee-overview.vue  # Employee Overview page (home card, Sep 2026). Employee and
 │   │                          #   period live in ?employee=&period= so a view is linkable
@@ -59,13 +62,25 @@ scheduling-app-v2/
 │                          #   plus any hour that still carries a target (shaded, so a
 │                          #   stale row stays clearable). Never hardcode the range.
 │                              # NOTE: users.vue and cleanup.vue were DELETED. User
-│                              #   management lives inline in settings.vue; the
-│                              #   Database Cleanup feature was removed (migration 014).
+│                              #   management is Settings → Users (components/settings/
+│                              #   UsersTab.vue); the Database Cleanup feature was
+│                              #   removed (migration 014).
 ├── plugins/
 │   └── session.client.ts      # Any API 401 → "session ended" modal; reloads other tabs
 │                              #   when someone else signs in/out or the team changes
 ├── components/
 │   ├── SessionEndedModal.vue  # "Your session ended — sign in again" over the current page
+│   ├── TeamSwitcher.vue       # "Working in": an account's teams, one click to switch (home page,
+│   │                          #   My account); renders nothing for a one-team account
+│   ├── TeamBar.vue            # "Working in <team>" across the top of every page for a
+│   │                          #   multi-team account (app.vue); tells other tabs after a switch
+│   ├── settings/              # The Settings tabs (pages/settings.vue is the shell):
+│   │   ├── AccountTab.vue     #   My account — details, password, the team switcher
+│   │   ├── ExtraTeamsField.vue #  "More teams" in Create / Edit user (Super Admin only)
+│   │   ├── RequestRulesTab.vue #  Request rules (one Save, all or nothing; leaving with
+│   │   │                      #   unsaved edits asks) + blocked dates (upcoming first)
+│   │   ├── UsersTab.vue       #   accounts: search, team filter, last signed in
+│   │   └── TeamsTab.vue       #   create, rename, time zone, delete (empty teams only)
 │   ├── team/
 │   │   ├── TrainingMatrix.vue        # Training Matrix tab of Team Setup: per job and hour, how
 │   │   │                             #   many trained people are on shift (regular shifts, no
@@ -114,7 +129,9 @@ scheduling-app-v2/
 │   ├── plugins/
 │   │   └── bootstrap.ts          # On-boot self-setup: schema + migrations + first admin
 │   ├── api/
-│   │   ├── auth/              # login, logout, me (get/put), change-password, forgot/reset-password
+│   │   ├── auth/              # login, logout, me (get: user + teams), switch-team, change-password,
+│   │   │                      #   forgot/reset-password,
+│   │   │                      #   reset-options (public: can this site email a reset link?)
 │   │   ├── schedule/          # [date].get/delete, assignments CRUD, batch, copy, replace,
 │   │   │                      #   export (coverage-preview was removed with the dated preview)
 │   │   │                      #   copy = transactional REPLACE of the target day (like
@@ -130,7 +147,9 @@ scheduling-app-v2/
 │   │   ├── target-hours/      # Get/save default target hours
 │   │   ├── business-rules/    # CRUD (legacy)
 │   │   ├── preferred-assignments/ # CRUD
-│   │   ├── pto/               # Get by date, create, delete, availability
+│   │   ├── pto/               # Get by date, create, edit in place, delete, availability.
+│   │   │                      #   Writes refuse time off the person already has
+│   │   │                      #   (utils/timeOff.ts); a call-in replaces it
 │   │   ├── pto-calendar/      # Aggregated calendar view (PTO + approved/pending requests)
 │   │   ├── schedule-requests/ # Unified request CRUD, auto-approval engine, preview (dry run),
 │   │   │                      #   lookup (kiosk "check my requests" by UPI — team-scoped,
@@ -156,11 +175,25 @@ scheduling-app-v2/
 │   └── utils/
 │       ├── db.ts              # PostgreSQL pool (singleton), query(), transaction()
 │       ├── jwt.ts             # signToken (8hr; 30d for display users), verifyToken, sessionMaxAge, COOKIE_NAME
-│       ├── authorize.ts       # requireAuth/Admin/SuperAdmin, getTeamFilter (READS),
-│       │                      #   getWriteTeamId (WRITES) — see Multi-Tenancy
+│       ├── password.ts        # setPassword(): the ONE way a password changes (admin reset, own
+│       │                      #   change, emailed link) — stamps password_changed_at, which signs
+│       │                      #   every older session out, and cancels pending reset links
+│       ├── authorize.ts       # requireAuth/TeamLead/Supervisor/SuperAdmin, getTeamFilter
+│       │                      #   (READS), getWriteTeamId (WRITES) — see Multi-Tenancy
+│       ├── teamMembership.ts  # which teams an account may work in (home + extra teams,
+│       │                      #   migration 027; Super Admin all; kiosk home only)
+│       ├── teamOwnership.ts   # assert*OnTeam: every id a write names is on the writer's
+│       │                      #   team; assertAccountManageable for User Management
+│       ├── teamTime.ts        # teamToday(): "today" at the team's site (teams.timezone).
+│       │                      #   Server code never uses new Date()/CURRENT_DATE for it
+│       ├── teamName.ts        # checkTeamName(): create/rename — no case-insensitive
+│       │                      #   duplicate (409, not the old 500), at most 80 chars
 │       ├── ptoHours.ts        # SINGLE SOURCE for PTO-hour accounting + business days
 │       ├── ptoUsage.ts        # Team hours already committed per date (dedupes requests/pto_days)
 │       ├── requestRules.ts    # evaluateRequest() — the auto-approval rule engine
+│       ├── timeOff.ts         # One absence at a time: is this person already off then?
+│       │                      #   (every time-off write), request → pto_days mapping,
+│       │                      #   the per-team lock, deleting a request with its rows
 │       ├── auditLog.ts        # logChange() + the sentence builders for the change log.
 │       │                      #   Call it INSIDE the transaction that makes the change
 │       └── email.ts           # SMTP email via nodemailer
@@ -174,6 +207,10 @@ scheduling-app-v2/
 │   │                          #   time). Used by the PTO calendar and the request modal.
 │   ├── roles.ts               # SINGLE SOURCE for the four roles: roleOf (highest flag wins),
 │   │                          #   flagsForRole (exactly one true), canLead, canManageTeam
+│   ├── requestRuleSettings.ts # SINGLE SOURCE for the Request Rules a team can set: which
+│   │                          #   keys, what each accepts, the defaults. The Settings form
+│   │                          #   checks boxes with it and POST /api/team-settings refuses
+│   │                          #   with it; requestRules.ts + ptoCapForDate read the defaults
 │   ├── localDate.ts           # SINGLE SOURCE for "today" as YYYY-MM-DD (local / named TZ).
 │   │                          #   Never toISOString().slice(0,10): that is UTC and names
 │   │                          #   tomorrow from 7pm Central — Create Schedule did this
@@ -188,7 +225,7 @@ scheduling-app-v2/
 │   └── database.types.ts      # TypeScript DB types (skeleton)
 ├── sql-schema/                # PostgreSQL table definitions + triggers + migrations
 │   ├── setup.sql              # Full schema bootstrap (applied once on empty DB)
-│   └── migrations/            # 001–023 incremental migrations (idempotent; no 009 — deleted)
+│   └── migrations/            # 001–027 incremental migrations (idempotent; no 009 — deleted)
 ├── scripts/
 │   ├── seed-first-user.js     # Creates initial admin user
 │   ├── seed-test-data.js      # Seeds a 50-person demo team. LOCAL ONLY — refuses a
@@ -199,6 +236,8 @@ scheduling-app-v2/
 │   │                          #   every row tagged [mock], --clear removes exactly those
 │   └── ui-smoke.mjs           # Browser smoke test — drives Edge/Chrome, fails on any
 │                              #   JS error, screenshots every screen to scripts/.smoke/
+├── deploy/k8s/                # Database StatefulSet, nightly backup CronJob, restore Job —
+│                              #   runbook in RANCHER-DEPLOYMENT.md → "For IT" (not applied yet)
 └── docs/                      # Project documentation
 ```
 
@@ -246,8 +285,9 @@ audit_log (→ user_profiles actor, employees; the change log — history outliv
 
 | Table | Purpose |
 |-------|---------|
-| **teams** | Multi-tenant root. name (unique). |
-| **user_profiles** | email, username, password_hash, full_name, team_id, is_super_admin, is_admin (Supervisor), **is_team_lead** (migration 021), is_display_user (Kiosk), is_active, last_login, **employee_id** (optional FK to employees). Exactly one role flag per account — see `utils/roles.ts` |
+| **teams** | Multi-tenant root. name (unique), **timezone** (IANA name, default `America/Chicago`; migration 025) — the site's clock for "today": request notice and past dates, availability, the display board, the swap-date trigger. |
+| **user_profiles** | email, username, password_hash, full_name, team_id (the **home** team — see `user_teams`), is_super_admin, is_admin (Supervisor), **is_team_lead** (migration 021), is_display_user (Kiosk), is_active, last_login, **employee_id** (optional FK to employees), **password_changed_at** (migration 026; a session token issued before it is refused). Exactly one role flag per account — see `utils/roles.ts` |
+| **user_teams** | user_id, team_id — the EXTRA teams a Supervisor or Team Lead may also work in (migration 027); the home team is `user_profiles.team_id`. Read only through `server/utils/teamMembership.ts` |
 | **password_reset_tokens** | user_id, token_hash, expires_at, used_at (self-service reset) |
 | **employees** | first_name, last_name, is_active, shift_id (FK), **upi** (digits, unique per team, optional — migration 020; the kiosk "Check my requests" gate), team_id |
 | **job_functions** | name, color_code (#hex), sort_order, is_active, **max_headcount** (most people on it at once for the builder, NULL=unlimited), **surplus_overflow** (preferred surplus sink), **staffing_priority** (1=fill first … 5=drop first, default 3), **training_target** (Training Matrix goal, NULL=none; migration 023; not read by the builder), team_id. Off the form since Sep 2026 and read by nothing, columns kept: productivity_rate, unit_of_measure, custom_unit, exclude_from_targets, lunch_coverage_required, break_coverage_required |
@@ -278,7 +318,7 @@ audit_log (→ user_profiles actor, employees; the change log — history outliv
 **Triggers** (enforced on write):
 - **validate_assignment_time_conflict** — prevents employee double-booking on the same date (overlapping times)
 - **validate_assignment_training** — ensures the employee is trained for the assigned function; for `Meter N` it accepts training on the specific child *or* the parent `Meter`, matched within the job function's own `team_id`
-- **validate_shift_swap_date** — prevents swaps for past dates
+- **validate_shift_swap_date** — prevents swaps for past dates, "past" at the team's own time zone (migration 025)
 - **update_updated_at_column** (and per-table variants) — auto-update timestamps
 
 **Stored functions** (called explicitly by the app, *not* triggers):
@@ -292,25 +332,25 @@ audit_log (→ user_profiles actor, employees; the change log — history outliv
 
 ### Auth Flow
 1. User logs in via `/login` → POST `/api/auth/login` → bcrypt verify (an unknown email is compared against a real dummy hash, so both take the same time) → `last_login` updated → JWT set as HttpOnly cookie by `setSessionCookie()` (`sameSite=strict`; `secure` exactly when the request arrived over HTTPS, directly or per `X-Forwarded-Proto`). The client then calls `/api/auth/me` to confirm the browser kept the cookie before treating it as a sign-in. Lifetime: **8 h idle** normally, **30 d** for display/kiosk accounts. The `/display` page also POSTs `/api/auth/refresh` on every data refresh; it reloads + re-checks the date on visibility/focus regain (wake from sleep) and rolls over at midnight.
-2. Every `/api` request → `server/middleware/auth.ts` reads the cookie → verifies the JWT → **loads the account from `user_profiles`** (team, role flags, `is_active`) → populates `event.context.user`, or leaves it empty for a deleted/inactive account. A token older than 10 minutes is re-issued on use (sliding session). Until Sep 2026 the claims came from the token: a deactivated or moved account kept its old access for up to 8 hours, and a kiosk forever. The cookie used to be `secure` whenever `NODE_ENV` was production — always, in a build — so a site on plain `http://` "signed in" and then got 401 on everything.
-   - **Any 401 in the browser** → `plugins/session.client.ts` raises `components/SessionEndedModal.vue` ("Your session ended — sign in again") over the current page. The same person signing back in keeps the page (unsaved edits too); a different person or team reloads it. On `/display` only the kiosk account (or whoever was signed in) is accepted. Sign-in, sign-out and Change Team are broadcast to the browser's other tabs, which reload if the person or team changed.
+2. Every `/api` request → `server/middleware/auth.ts` reads the cookie → verifies the JWT → **loads the account from `user_profiles`** (team, role flags, `is_active`) → populates `event.context.user`, or leaves it empty for a deleted/inactive account. A token older than 10 minutes is re-issued on use (sliding session). **A token issued before `password_changed_at` is refused** (migration 026), so a password reset — or the person changing it — signs them out on every other device, the wall kiosk included; their own change re-issues this browser's cookie. Until Oct 2026 a reset left every existing session signed in. Until Sep 2026 the claims came from the token: a deactivated or moved account kept its old access for up to 8 hours, and a kiosk forever. The cookie used to be `secure` whenever `NODE_ENV` was production — always, in a build — so a site on plain `http://` "signed in" and then got 401 on everything.
+   - **Any 401 in the browser** → `plugins/session.client.ts` raises `components/SessionEndedModal.vue` ("Your session ended — sign in again") over the current page. The same person signing back in keeps the page (unsaved edits too); a different person or team reloads it. On `/display` only the kiosk account (or whoever was signed in) is accepted. Sign-in, sign-out and a team switch are broadcast to the browser's other tabs, which reload if the person or team changed. Signing back in over a page carries on in the team that page showed (if the account still works there).
 3. Client middleware (`middleware/auth.global.ts`) redirects unauthenticated users to `/login`. **Display-only (kiosk) users are redirected to `/display` on login and locked there** — the middleware bounces them back to `/display` from any other route.
 4. Public routes: `/login`, `/display`, `/reset-password`
 
 The login endpoint always runs a bcrypt comparison (against a dummy hash when the email is unknown) so response timing doesn't leak whether an account exists.
 
 ### JWT payload
-The signed token carries: `id`, `email`, `username`, `full_name`, `team_id`, `is_admin`, `is_super_admin`, `is_team_lead`, `is_display_user`, `is_active`, `employee_id`. Because `team_id` and roles come from the signed token, they can't be spoofed by the client. (Changing a user's team/role requires re-login to take effect.)
+The signed token carries: `id`, `email`, `username`, `full_name`, `team_id`, `is_admin`, `is_super_admin`, `is_team_lead`, `is_display_user`, `is_active`, `employee_id`. `id`, `iat` and `team_id` are used. `team_id` is the team this session works in (the home team at sign-in, then whatever `POST /api/auth/switch-team` set), honoured only while the account may still work there — otherwise the session is signed out. Role flags and `is_active` are read from `user_profiles` on every call (see Auth Flow), so a change applies on the person's next click. The other claims are informational. Before Sep 2026 they were trusted, and a change waited for the next sign-in.
 
 ### Role Hierarchy
 | Role | Capabilities |
 |------|-------------|
-| **Super Admin** | Everything, plus users and teams |
-| **Supervisor** | Team-scoped data + approvals + review material + Request Rules / blocked dates (was "Admin") |
-| **Team Lead / Coordinator** | Same as Supervisor minus Request Rules / blocked dates; Settings shows only their own account (Sep 2026) |
+| **Super Admin** | Everything on every team: teams (and their time zones), every team's accounts |
+| **Supervisor** | Team-scoped data + approvals + review material + Request Rules / blocked dates + **their team's accounts** (never a Super Admin's; Sep 2026) (was "Admin") |
+| **Team Lead / Coordinator** | Same as Supervisor minus Request Rules / blocked dates / accounts; Settings shows only their own account (Sep 2026) |
 | **Kiosk** | Locked to `/display`; submits requests and looks them up by UPI |
 
-Exactly one role per account; **no role = no access** (kept on `/settings` until a Super Admin assigns one).
+Exactly one role per account; **no role = no access** (kept on `/settings` until their supervisor or a Super Admin assigns one).
 
 See `ROLES.md` for the full permission matrix.
 
@@ -319,20 +359,27 @@ See `ROLES.md` for the full permission matrix.
 - **Reads** use `getTeamFilter(user)` → **`user.team_id` for everyone, super admins included.** API queries append `WHERE team_id = $X`.
 - **Install-wide reads** use `readsAllTeams(user)` — an explicit, named opt-out used only where a screen is genuinely cross-team (user management). Getting an unscoped read any other way is a bug.
 - **Writes** use `getWriteTeamId(user)` → always the user's own `team_id`, **including super admins**. A new record is stamped with the creating user's team so the rest of that team can see it.
-  - Reads and writes now agree: both use the caller's team. **Until Aug 2026 a super admin's reads spanned every team while their saves landed in one**, and the Automated Builder is where that bit — it read every team's employees, training and targets, then wrote the result into the super admin's own team, putting another site's people on this site's board. A super admin switches team in **Settings → Change Team**, which validates the team, updates the profile, re-issues the session cookie and reloads the page and the browser's other tabs (the team is read from the database on every request since Sep 2026; before that it lived in the token, and a Settings page left open kept the old team's Request Rules on screen, which Save then copied into the new team).
-  - `PUT /api/auth/me` is a **tenant boundary**, not a profile preference — it is admin/super-admin only. It had no role check at all, so any account, including a kiosk login, could move itself into another team.
+  - Reads and writes now agree: both use the caller's team. **Until Aug 2026 a super admin's reads spanned every team while their saves landed in one**, and the Automated Builder is where that bit — it read every team's employees, training and targets, then wrote the result into the super admin's own team, putting another site's people on this site's board. A super admin (or any account with more than one team) switches with the **team switcher** — "Working in" on the home page, the bar on every page, or My account — which re-issues THIS browser's session for that team and reloads the page and the browser's other tabs. The account's home team is unchanged, so another device stays where it was. (Until Oct 2026 Change team rewrote `user_profiles.team_id`, which silently moved every device; before Sep 2026 a Settings page left open kept the old team's Request Rules on screen, which Save then copied into the new team.)
+  - **Accounts in more than one team (migration 027).** A Super Admin gives a Supervisor or Team Lead extra teams in Settings → Users (`user_teams`); `server/utils/teamMembership.ts` is the one rule for who may work where (home + extra teams; Super Admin every team; kiosk its home only). They work in ONE at a time: `server/middleware/auth.ts` sets `user.team_id` to the session's team and `user.home_team_id` to the home team, so every `getTeamFilter` / `getWriteTeamId` route and the 024 foreign keys apply exactly as for a one-team account. Each team's user list includes its extra-team members; such an account is changed only by a Super Admin or a supervisor of all its teams. Taking a team away signs out the sessions working in it. Never read `user_profiles.team_id` as "the caller's team". (`PUT /api/auth/me`, the old self team change, was removed: it was the tenant boundary, now the switch is.)
   - **Never stamp writes with `getTeamFilter`** — use `getWriteTeamId`. Both now return the caller's team, and **both throw 403 when the account has no team**: reads fail closed (a null filter would have meant "every team") and writes fail rather than stamping `team_id = NULL` and creating a fresh orphan. A team-less account can still sign in and read `/api/auth/me` and `/api/teams`, so a super admin can assign it a team — it is not locked out of the app, only out of data.
-  - **Every account must have a team.** The create-user form requires one and `POST /api/admin/users/create` rejects a request without one (validating the team exists). Only a **super admin** may change a team — their own via `PUT /api/auth/me`, anyone's via user management.
+  - **Every account must have a team.** The create-user form requires one and `POST /api/admin/users/create` rejects a request without one (validating the team exists). Only a **super admin** may change an account's home team or extra teams, in user management.
   - `team-settings` and `team-blocked-dates` writes require a team and reject the request if the user has none.
 - **Orphaned `team_id = NULL` rows are a real hazard.** Rows created before team stamping (or by a migration that didn't match the install's team name — see migration 009) are invisible to every team-scoped read. Since Aug 2026 they are invisible to super admins too, so an install that still has them will see that data simply **disappear** rather than pollute aggregates. Count them per install BEFORE deploying a team-scoping change. Fixing them is a **per-install data repair**, not a shipped migration — on a single-team install you can adopt NULL rows into that team and dedup; on a multi-team install you must scope NULL rows to the correct team by hand. Do this directly against the target DB (backup first, single transaction), never as an auto-applied migration that blindly stamps NULL → one team.
-- Enforcement is **API-level**, not database RLS (legacy `rls-policies.sql` is from an earlier Supabase prototype and is not used)
+- **Ids a write names must be on the writer's team.** A body's `employee_id`, `job_function_id` or `shift_id` was stored as sent until Sep 2026, so one team could file a request for another site's employee (which then auto-approved into that site), put another team's people on its board, or point its rows at another team's shifts. Every such write now checks with the helpers in `server/utils/teamOwnership.ts` (400 / 404 when an id isn't on the team), and upserts keyed on a unique id carry `ON CONFLICT … DO UPDATE … WHERE t.team_id = EXCLUDED.team_id` so they can't overwrite another team's row. Deletes and updates by id include `AND team_id = $n`.
+- **The database enforces the same (migration 024):** composite foreign keys `(ref_id, team_id) → parent(id, team_id)` on 27 references refuse a row whose person, job or shift is on another team, and `team_id` is NOT NULL on the team tables. Rows that already broke the rule were left in place (the key stays NOT VALID and the boot log warns), never rewritten.
+- **The kiosk only reads the board and files requests.** Every other route is `requireTeamLead` (schedule and time-off writes, swaps, required assignments, targets, request lists, the Employee Overview), and the employee list it reads has no UPIs.
+- **"Today" is per team.** Sites span US time zones and the pod runs on UTC, which names tomorrow from 7 pm Central. Server code takes the site's date from `teamToday(db, teamId)` (`server/utils/teamTime.ts`, `teams.timezone`); the display board uses `team_timezone` from `/api/auth/me`. Never `new Date()`, `toISOString()` or `CURRENT_DATE` for a calendar date.
+- **User Management:** a Super Admin reads and manages every team's accounts (`readsAllTeams`); a supervisor, their own team's, except Super Admins, and can't move an account or grant Super Admin (`assertAccountManageable`). Nobody can deactivate themselves or change their own role. See `ROLES.md` → Who manages accounts.
+- Enforcement is in the API plus the 024 foreign keys, not database RLS (legacy `rls-policies.sql` is from an earlier Supabase prototype and is not used)
 
 ### Rate Limiting (in-memory, per-IP)
+Every limit keeps its own counter (`server/middleware/1.rate-limit.ts`, which runs before auth):
 - Default: 200 req/min
 - Admin routes: 100 req/min
-- User creation: 5 req/hour
-- UPI lookup (`/api/schedule-requests/lookup`): 20 req/min, its own bucket
-- Password reset: 3 req/hour
+- Sign-in: 30 req/min
+- User creation: 60 req/hour; an admin's password reset: 60 req/hour
+- UPI lookup (`/api/schedule-requests/lookup`): 20 req/min
+- Forgot / reset password: 10 req/hour
 
 ---
 
@@ -354,6 +401,28 @@ left out as in the Staffing Targets grid. The hour rule is `utils/shiftHours.ts`
 with that grid's "On shift" row. Informational only: the builder never reads it.
 It replaced a dated coverage preview (spare trained people after time off and breaks for
 one day, on Create Schedule) in Sep 2026.
+
+### How saving works (Team Setup is the standard)
+One pattern, set on Team Setup in Sep 2026; new screens should follow it.
+- **Inline controls save on their own**: a box saves when you leave it or press Enter, a
+  dropdown or checkbox when it changes. `<UiSaveStatus>` beside it shows Saving… → Saved,
+  or the reason it failed, with **Retry** (only for network / 5xx errors) and **Undo**.
+  One value per key → `composables/useBoxSave.ts` (sends only *finished* values, one at a
+  time, newest wins). Training ticks → `composables/useTrainingSaves.ts` (sends each
+  change as `{add}` / `{remove}`, never the whole set). Both keep their state outside the
+  component, so switching tabs mid-save loses nothing; a failure after the tab closed is a toast.
+- **Windows** (add / edit) use `<UiModal>`: the button reads Saving…, success closes it
+  with a toast (`useToast`), and a failure keeps the window open with the reason inline.
+- **Deleting** uses `<UiConfirmDialog>`, showing what it would erase
+  (`GET /api/{employees,job-functions,shifts}/:id/usage`, `server/utils/deleteImpact.ts`)
+  and offering **Deactivate instead**. Inactive items stay listed, greyed, with Reactivate.
+- **Leaving** the page mid-save waits for it; leaving with a failed save asks first
+  (`useLeaveGuard` in `composables/useSaveRegistry.ts`).
+- **The one form with a Save button: Settings → Request rules.** The rules are read
+  together, so they save together — one request, all or nothing, with Undo — and
+  each box is checked as it's typed (`utils/requestRuleSettings.ts`, the same rules
+  the server applies). Unsaved edits register as unsaved work, so leaving asks.
+- The list never swaps for a spinner after its first load.
 
 ### Breaks and lunch
 **The builder does not treat a hole during a break or lunch window as a gap** — the floor does not expect every function staffed through a 15-minute break. The per-job "Keep covered" flags (`lunch_coverage_required` / `break_coverage_required`) and `exclude_from_targets` were taken off the Edit Job Function form in Sep 2026, because none of them changed what the builder did, and nothing reads those columns now. Detail in [SCHEDULE-BUILDER.md](./SCHEDULE-BUILDER.md).
@@ -460,6 +529,10 @@ The kiosk (`display.vue`) now shows a banner when a refresh fails, instead of go
 | 022-add-audit-log | `audit_log` table — the change log: who approved / rejected / deleted a request, added or removed a PTO day, attendance point, note or error, with a plain-language summary and before/after snapshots. Written in the same transaction as the change; no update/delete route. Additive; multi-team safe. |
 | 021-add-team-lead-role | `user_profiles.is_team_lead` — the Team Lead / Coordinator role flag. No data change and no exclusivity CHECK on purpose: existing accounts keep their flags, so nobody is locked out on deploy; the user endpoints enforce one-role-per-account from here on. |
 | 023-add-job-function-training-target | `job_functions.training_target` (integer, nullable, CHECK ≥ 0) — the Training Matrix goal: the fewest trained people wanted on shift in any hour the job is worked. Informational; the builder never reads it. NULL for every existing row, so it changes nothing on deploy. Additive; multi-team safe. |
+| 024-same-team-references | Walls the teams off in the database: `UNIQUE (id, team_id)` on employees, job_functions, shifts and preferred_assignments; 27 composite foreign keys `<table>_<column>_same_team` (ON DELETE mirrors the existing single-column keys) added NOT VALID, then validated one by one — a key the data already breaks stays NOT VALID and the boot log prints a `WARNING` naming it, nothing is rewritten; `team_id` NOT NULL where the table is clean; 10 indexes for 5–10 sites (e.g. `idx_sa_team_date`). Pre-flight query: `RANCHER-DEPLOYMENT.md` → multi-site readiness. Also: 011 and 017 now leave their CHECK alone when it's already right, instead of dropping and re-adding it on every boot. |
+| 025-team-timezone | `teams.timezone` (text, NOT NULL, default `America/Chicago`) and `validate_shift_swap_date()` judging "past" at the team's zone (falls back to the server date if the zone is unknown). Every existing team starts on Central; a Super Admin sets each in Settings → Teams. Additive; multi-team safe. |
+| 026-password-changed-at | `user_profiles.password_changed_at` (NULL for everyone, so nobody is signed out on deploy) — `server/middleware/auth.ts` refuses a session issued before it; and `audit_log` accepts `entity_type = 'account'` (password resets and changes, never the password). The CHECK is replaced only when it doesn't already allow `account`, like 011. Additive; multi-team safe. |
+| 027-user-teams | `user_teams (user_id, team_id)` — an account's EXTRA teams (Supervisors and Team Leads; `user_profiles.team_id` stays the home team). Starts empty, so nobody reaches another team until a Super Admin assigns one; deleting a team or an account removes its rows. Additive; multi-team safe. |
 
 ---
 
@@ -471,10 +544,10 @@ The kiosk (`display.vue`) now shows a banner when a refresh fails, instead of go
 | `DATABASE_SSL` | no | `false` for in-cluster DB; otherwise TLS is used |
 | `DATABASE_SSL_REJECT_UNAUTHORIZED` | no | `false` to allow self-signed DB certs |
 | `JWT_SECRET` | yes | JWT signing secret (must be ≥ 32 chars) |
-| `NODE_ENV` | recommended | `production` enables `secure` cookies |
+| `NODE_ENV` | recommended | `production`. It no longer decides the cookie's `Secure` flag: that follows the request's protocol (HTTPS, or `X-Forwarded-Proto: https`) |
 | `APP_URL` | no | Base URL for password reset links, read at run time (e.g. `https://scheduling.yourcompany.com`). Before Sep 2026 only the build-time value counted, so reset emails linked to `http://localhost:3000` |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` | no | First-boot admin seed (only when `user_profiles` is empty) |
-| `SMTP_HOST/PORT/USER/PASS/FROM` | no | Email sending configuration (password resets) |
+| `SMTP_HOST/PORT/USER/PASS/FROM` | no | Email for "Forgot your password?" links. Without HOST, USER and PASS the page says to ask a supervisor (Settings → Users) instead of promising a link |
 
 ---
 
@@ -495,4 +568,4 @@ docker compose up        # Starts app + PostgreSQL (app self-bootstraps schema +
 
 ---
 
-**Last Updated**: September 2026
+**Last Updated**: October 2026

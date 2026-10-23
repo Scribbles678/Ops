@@ -10,15 +10,15 @@ gates and the Settings page alike — if you change a role's meaning, change it 
 
 | Role | Stored as | Who | Can |
 |---|---|---|---|
-| **Super Admin** | `is_super_admin` | system owner / IT | everything, plus users and teams (create, edit, reset passwords, change any team assignment, switch their own team) |
-| **Supervisor** | `is_admin` | runs the team | everything on the floor **plus** Request Rules, blocked dates, and the **change log** (who approved / rejected / deleted what — see PTO-AND-REQUESTS.md). *(Labelled "Admin" until Sep 2026 — same flag, same rights.)* |
+| **Super Admin** | `is_super_admin` | system owner / IT | everything, on every team: creating and deleting teams and setting their time zones, every team's accounts (including making Super Admins, moving accounts between teams and deleting accounts), switching their own team |
+| **Supervisor** | `is_admin` | runs the team | everything on the floor **plus** Request Rules, blocked dates, the **change log** (who approved / rejected / deleted what — see PTO-AND-REQUESTS.md) and **their own team's accounts** (see "Who manages accounts" below). *(Labelled "Admin" until Sep 2026 — same flag, same rights.)* |
 | **Team Lead / Coordinator** | `is_team_lead` | day-to-day leads | schedules, employees, training, shifts, targets, PTO entries; approve / reject / delete requests; errors, performance notes and attendance points; the full Employee Overview. On Settings they see only **Change Password** and **Account Information**. |
-| **Kiosk** | `is_display_user` | the shared wall iPad | locked to `/display`; can submit requests and look one employee's requests up by UPI |
+| **Kiosk** | `is_display_user` | the shared wall iPad | locked to `/display`; can submit requests and look one employee's requests up by UPI. The API refuses it everything else, and the employee list it reads carries no UPIs |
 
 **No role** (all four flags false): can sign in, change their password and see their
 Account Information — nothing else. Every team-scoped read and write is refused
 (403) and the route middleware keeps them on `/settings`, which explains why. A
-Super Admin assigns a role from User Management.
+supervisor of their team, or a Super Admin, assigns a role in Settings → Users.
 
 There is no "regular user" any more. The old no-flag account could build schedules
 and edit the team setup; that role was folded into Team Lead / Coordinator when the
@@ -32,10 +32,10 @@ roles were tightened in Sep 2026.
 
 | gate | who passes | used by |
 |---|---|---|
-| `requireAuth` | any active account | most reads and writes (then team-scoped) |
-| `requireTeamLead` | Team Lead, Supervisor, Super Admin | request approve/reject/delete, performance errors and notes, attendance points |
-| `requireSupervisor` | Supervisor, Super Admin | team settings (request rules), blocked dates, the user list, the change log |
-| `requireSuperAdmin` | Super Admin | create/edit/delete users, reset passwords, teams |
+| `requireAuth` | any active account | what the kiosk needs: the display board's reads, submitting a request and the UPI lookup (all team-scoped) |
+| `requireTeamLead` | Team Lead, Supervisor, Super Admin | everything else a kiosk must not do: schedule and time-off writes, shift swaps, required assignments, targets, the request lists and details, request approve/reject/delete, the Employee Overview, performance errors and notes, attendance points |
+| `requireSupervisor` | Supervisor, Super Admin | team settings (request rules), blocked dates, the change log, the team's accounts (narrowed further by `assertAccountManageable`) |
+| `requireSuperAdmin` | Super Admin | teams, deleting accounts |
 
 `getTeamFilter` / `getWriteTeamId` additionally refuse a **no-role** account and a
 **team-less** account, so those never reach a query. The Employee Overview API
@@ -43,9 +43,10 @@ returns its review sections (`performance`, `attendancePoints`) only to Team Lea
 and above.
 
 **Client** — `middleware/auth.global.ts` sends Kiosk accounts to `/display` and
-no-role accounts to `/settings`; the Settings page shows the Request Rules card
-only to Supervisors and Super Admins, and User / Team Management only to Super
-Admins. Client checks are convenience; the server gates are the authority.
+no-role accounts to `/settings`; the Settings page shows its **Request rules** and
+**Users** tabs only to Supervisors and Super Admins, and **Teams** only to Super
+Admins (everyone gets **My account**). Client checks are convenience; the server
+gates are the authority.
 
 **Exactly one role.** `POST /api/admin/users/create` requires a `role` and
 `PUT /api/admin/users/[id]` takes one; both write all four flags together from
@@ -66,8 +67,39 @@ kiosk, whose session renewed itself.
 
 Unchanged by roles: every account belongs to one team, `getTeamFilter()` returns the
 caller's own team for everyone (Super Admins included — they switch team in
-Settings → Change Team), and only User Management reads across teams via the
-explicit `readsAllTeams()`. See `CONTEXT.md` → Multi-Tenancy.
+the team switcher, per browser), and only a Super Admin's user list (Settings → Users) reads across teams
+via the explicit `readsAllTeams()`. A write that names a person, job or shift checks it
+is on the caller's team (`server/utils/teamOwnership.ts`), and since migration 024 the
+database refuses a cross-team reference too. See `CONTEXT.md` → Multi-Tenancy.
+
+---
+
+## Who manages accounts
+
+Settings → Users (`server/api/admin/users/*`, rules in
+`assertAccountManageable`, `server/utils/teamOwnership.ts`):
+
+| | Super Admin | Supervisor |
+|---|---|---|
+| Sees | every team's accounts | their own team's |
+| Creates | any role, on any team | Supervisor, Team Lead / Coordinator or Kiosk, on their own team |
+| Edits (name, role, active), resets passwords | any account | their team's accounts, except Super Admins' (listed, marked "Managed by a Super Admin") |
+| Moves an account to another team | yes | no |
+| Gives an account more teams (Supervisors and Team Leads; never a kiosk) | yes | no |
+| Changes an account that also works in other teams | yes | only if they work in every one of its teams |
+| Deletes an account | yes (API only; the page deactivates) | no — deactivate instead |
+
+Nobody can deactivate their own account or change their own role, so the last Super
+Admin can't lock the install out of team management. Nobody resets their **own**
+password from Settings → Users either: that goes through My account → Change password,
+which asks for the current one, so an unlocked supervisor screen can't be used to
+take the account over.
+
+**A password reset signs the person out on every device** — the wall kiosk too — and
+cancels any reset link already emailed to them (`server/utils/password.ts`,
+migration 026). It is recorded in the change log (Settings → Users → Change log);
+nothing is emailed to the person, so the supervisor passes the new password on. Until Sep 2026 all of this was
+Super Admin only, and each new site waited on one person for every account.
 
 ---
 
@@ -79,9 +111,9 @@ The migration (021) only adds the `is_team_lead` column. On deploy:
    the kiosk stays the kiosk, and **every Admin is now a Supervisor** with the rights
    they already had.
 2. The people who should be **Team Lead / Coordinator** (today's Admins who are
-   really leads) need reassigning by hand in Settings → User Management: open the
+   really leads) need reassigning by hand in Settings → Users: open the
    person, pick the role, save. Their password and team are untouched; it takes
-   effect immediately. What they lose is the Request Rules card.
+   effect immediately. What they lose is the Request rules tab.
 3. **Check for accounts with no flags before deploying** — after this change they
    cannot do anything until given a role:
 
@@ -91,7 +123,7 @@ The migration (021) only adds the `is_team_lead` column. On deploy:
      AND is_active;
    ```
 
-   Assign each a role (probably Team Lead / Coordinator) in User Management right
+   Assign each a role (probably Team Lead / Coordinator) in Settings → Users right
    after deploying, or beforehand via SQL:
    `UPDATE user_profiles SET is_team_lead = true WHERE email = '…';`
 
@@ -99,9 +131,9 @@ The migration (021) only adds the `is_team_lead` column. On deploy:
 
 ## Assigning a role
 
-Settings → User Management (Super Admin only) → Create User, or Edit on an existing
-row → **Role** dropdown → Save. Every account needs a team as well; the form
-requires both.
+Settings → Users → + Create user, or Edit on an existing row → **Role**
+dropdown → Save. Every account needs a team as well; the form requires both (a
+supervisor's accounts always go on their own team).
 
 Via SQL, set exactly one flag true and the other three false.
 

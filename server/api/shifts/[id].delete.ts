@@ -6,8 +6,9 @@ import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
  * on it (ON DELETE CASCADE) — Team Setup shows those counts first
  * (GET /api/shifts/:id/usage) and offers Deactivate instead.
  *
- * Time-off requests reference shifts without a cascade, so a shift that any request
- * names can't be deleted: that used to fail silently. It now says why.
+ * Shift-swap requests reference shifts without a cascade (they're kept as history), so
+ * a shift that any request names can't be deleted: that used to fail silently. It
+ * now says why.
  */
 export default defineEventHandler(async (event) => {
   const user = requireTeamLead(event)
@@ -36,7 +37,7 @@ export default defineEventHandler(async (event) => {
     const n = refs.rows[0]?.n ?? 0
     throw createError({
       statusCode: 409,
-      message: `${n} time-off request${n === 1 ? '' : 's'} use${n === 1 ? 's' : ''} this shift, so it can't be deleted. Deactivate it instead.`,
+      message: `${n} shift-swap request${n === 1 ? '' : 's'} (including past ones) name${n === 1 ? 's' : ''} this shift, so it can't be deleted — they're kept as history. Deactivate it instead.`,
     })
   }
   return { success: true }

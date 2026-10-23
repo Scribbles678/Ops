@@ -6,6 +6,9 @@ import {
   ptoCapForDate,
 } from './ptoHours'
 import { getEffectiveShift, getUsedHoursForDate } from './ptoUsage'
+import { teamToday, dateOnly } from './teamTime'
+import { findRequestConflict } from './timeOff'
+import { RULE_DEFAULTS } from '../../utils/requestRuleSettings'
 
 /**
  * The auto-approval rule engine, in one reusable place.
@@ -19,6 +22,26 @@ import { getEffectiveShift, getUsedHoursForDate } from './ptoUsage'
  * budget between the preview and the submit. The submit re-runs these rules and
  * remains the authority.
  */
+
+/** How far from today a request (or a date range) may reach, either way. */
+export const MAX_REQUEST_DAYS_FROM_TODAY = 730
+
+/**
+ * A request date must be a real YYYY-MM-DD within two years of today. The notice
+ * rule counts business days one at a time, so a date like 9999-12-31 used to block
+ * the whole server — every site's pages and kiosks — for seconds per request
+ * (Sep 2026 audit).
+ */
+export function assertRequestDate(value: unknown): string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+    throw createError({ statusCode: 400, message: `Invalid date: ${String(value)} (use YYYY-MM-DD)` })
+  }
+  const daysAway = Math.abs(Date.parse(`${value}T00:00:00Z`) - Date.now()) / 86_400_000
+  if (daysAway > MAX_REQUEST_DAYS_FROM_TODAY) {
+    throw createError({ statusCode: 400, message: `${value} is more than two years from today` })
+  }
+  return value
+}
 
 export interface RuleResults {
   [key: string]: boolean
@@ -34,6 +57,12 @@ export interface RuleVerdict {
   cap: number
   /** Hours already committed on this date before this request. */
   usedHours: number
+  /**
+   * Set when the person already has this time off (server/utils/timeOff.ts). Not a
+   * rule outcome: the submit refuses it with a 409 and saves nothing; the dry run
+   * reports it as the day's reason.
+   */
+  conflict: string | null
 }
 
 export interface RuleInput {
@@ -71,11 +100,14 @@ export async function loadTeamSettings(
  */
 export async function evaluateRequest(
   db: Queryable,
-  teamId: string | null,
+  teamId: string,
   settings: Record<string, string>,
   input: RuleInput,
-  now: Date = new Date()
+  // Defaults to today AT THE TEAM'S SITE (teams.timezone). The server runs on UTC,
+  // and using its clock refused evening requests for "too little notice".
+  now?: Date
 ): Promise<RuleVerdict> {
+  now = now ?? dateOnly(await teamToday(db, teamId))
   const { employee_id, request_type, request_date, start_time, end_time } = input
 
   const getSetting = (key: string, defaultValue: number): number => {
@@ -104,7 +136,7 @@ export async function evaluateRequest(
   // Rule 1: advance notice in BUSINESS days (Mon–Fri). Counts full working days
   // strictly between today and the requested date — weekends don't count, so a
   // Friday request for Monday gives 0 business days' notice.
-  const minBusinessDaysNotice = getSetting('min_business_days_notice', 1)
+  const minBusinessDaysNotice = getSetting('min_business_days_notice', RULE_DEFAULTS.min_business_days_notice)
   ruleResults['advance_notice'] = countBusinessDaysBetween(now, reqDate) >= minBusinessDaysNotice
 
   // Mon–Sun week bounds containing the requested date (shared by per-week rules).
@@ -127,13 +159,13 @@ export async function evaluateRequest(
 
   // Rule 2: Shift change — max per employee per WEEK.
   if (request_type === 'shift_swap') {
-    const maxShiftChange = getSetting('max_shift_change_per_employee_per_week', 1)
+    const maxShiftChange = getSetting('max_shift_change_per_employee_per_week', RULE_DEFAULTS.max_shift_change_per_employee_per_week)
     ruleResults['max_shift_change_per_week'] = (await countEmployeeWeek('shift_swap')) < maxShiftChange
   }
 
   // Rule 2b: Leave on time — max per employee per WEEK.
   if (request_type === 'leave_on_time') {
-    const maxLeaveOnTime = getSetting('max_leave_on_time_per_employee_per_week', 5)
+    const maxLeaveOnTime = getSetting('max_leave_on_time_per_employee_per_week', RULE_DEFAULTS.max_leave_on_time_per_employee_per_week)
     ruleResults['max_leave_on_time_per_week'] = (await countEmployeeWeek('leave_on_time')) < maxLeaveOnTime
   }
 
@@ -187,7 +219,7 @@ export async function evaluateRequest(
 
   // Rule 5: Max shift swaps per day (team-wide)
   if (request_type === 'shift_swap') {
-    const maxSwapsPerDay = getSetting('max_shift_swaps_per_day', 3)
+    const maxSwapsPerDay = getSetting('max_shift_swaps_per_day', RULE_DEFAULTS.max_shift_swaps_per_day)
     const countResult = await db.query(
       `SELECT COUNT(*)::int as cnt FROM schedule_requests
        WHERE team_id = $1 AND request_type = 'shift_swap' AND status = 'approved'
@@ -215,11 +247,13 @@ export async function evaluateRequest(
     if (isBlocked) blockedReason = (blockedResult.rows[0] as any).reason || null
   }
 
-  const allPassed = Object.values(ruleResults).every((v) => v === true)
-  const status: 'approved' | 'rejected' = allPassed ? 'approved' : 'rejected'
+  const conflict = await findRequestConflict(db, teamId, input)
 
-  let rejectionReason: string | null = null
-  if (!allPassed) {
+  const allPassed = Object.values(ruleResults).every((v) => v === true)
+  const status: 'approved' | 'rejected' = allPassed && !conflict ? 'approved' : 'rejected'
+
+  let rejectionReason: string | null = conflict
+  if (!conflict && !allPassed) {
     const failed = Object.entries(ruleResults).filter(([, v]) => !v).map(([k]) => k)
     const labels: Record<string, string> = {
       advance_notice: `Requests must be made at least ${minBusinessDaysNotice} business day(s) in advance`,
@@ -236,5 +270,5 @@ export async function evaluateRequest(
     rejectionReason = failed.map((k) => labels[k] || k).join('; ')
   }
 
-  return { status, ruleResults, rejectionReason, requestedHours, cap, usedHours }
+  return { status, ruleResults, rejectionReason, requestedHours, cap, usedHours, conflict }
 }

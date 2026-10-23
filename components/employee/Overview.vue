@@ -20,9 +20,15 @@
               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-gray-900 text-sm"
             >
               <option value="">Select employee...</option>
-              <option v-for="emp in employees" :key="emp.id" :value="emp.id">
+              <option v-for="emp in activeEmployees" :key="emp.id" :value="emp.id">
                 {{ emp.last_name }}, {{ emp.first_name }}
               </option>
+              <!-- Each option says "(inactive)" too: a closed picker shows only the option. -->
+              <optgroup v-if="inactiveEmployees.length" label="Inactive">
+                <option v-for="emp in inactiveEmployees" :key="emp.id" :value="emp.id">
+                  {{ emp.last_name }}, {{ emp.first_name }} (inactive)
+                </option>
+              </optgroup>
             </select>
           </div>
           <div>
@@ -736,6 +742,10 @@ const employeeId = defineModel<string>('employeeId', { default: '' })
 const period = defineModel<OverviewPeriod>('period', { default: 'all' })
 
 const { employees, fetchEmployees } = useEmployees()
+// The picker lists inactive people too, after the active ones: it used to list
+// active only, so a deactivated person's history couldn't be reached.
+const activeEmployees = computed(() => employees.value.filter((e: any) => e.is_active !== false))
+const inactiveEmployees = computed(() => employees.value.filter((e: any) => e.is_active === false))
 const { jobFunctions, fetchJobFunctions } = useJobFunctions()
 const { user } = useAuth()
 const showChangeLog = ref(false)
@@ -1298,7 +1308,7 @@ const exportCsv = () => {
 
 onMounted(async () => {
   await Promise.all([
-    employees.value?.length ? Promise.resolve() : fetchEmployees(),
+    employees.value?.length ? Promise.resolve() : fetchEmployees(false),
     jobFunctions.value?.length ? Promise.resolve() : fetchJobFunctions(),
   ])
   if (employeeId.value) await load()

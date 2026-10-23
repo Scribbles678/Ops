@@ -369,6 +369,7 @@ const {
   updatePreferredAssignment,
   deletePreferredAssignment
 } = usePreferredAssignments()
+const toast = useToast()
 
 const loading = ref(true)
 const saving = ref(false)
@@ -574,7 +575,13 @@ const saveAllTargets = async () => {
       }
     }
     if (items.length > 0) {
-      await saveTargets(items)
+      // saveTargets returns null on failure instead of throwing. This used to ignore
+      // that, reload the grid (throwing the edits away) and say "saved" (Sep 2026).
+      const saved = await saveTargets(items)
+      if (!saved) {
+        toast.error(`Staffing targets weren't saved: ${targetsError.value || 'unknown error'}. Your changes are still in the grid.`)
+        return
+      }
     }
     loadGridFromTargets()
     showSuccessIndicator('Staffing targets saved')
@@ -687,10 +694,14 @@ const handlePreferredAssignmentSubmit = async () => {
       notes: '',
       blocks: valid,
     }
-    if (editingPreferredAssignment.value) {
-      await updatePreferredAssignment(editingPreferredAssignment.value.id, payload)
-    } else {
-      await createPreferredAssignment(payload)
+    // Both return null on failure rather than throwing; this used to show the "saved"
+    // tick anyway, for a required assignment that didn't exist (Sep 2026).
+    const saved = editingPreferredAssignment.value
+      ? await updatePreferredAssignment(editingPreferredAssignment.value.id, payload)
+      : await createPreferredAssignment(payload)
+    if (!saved) {
+      toast.error(`The required assignment wasn't saved: ${preferredAssignmentsError.value || 'unknown error'}`)
+      return
     }
     await fetchPreferredAssignments()
     showSavedIcon.value = true
@@ -705,7 +716,10 @@ const handlePreferredAssignmentSubmit = async () => {
 
 const deletePreferredAssignmentHandler = async (id: string) => {
   try {
-    await deletePreferredAssignment(id)
+    if (!(await deletePreferredAssignment(id))) {
+      toast.error(`The required assignment wasn't deleted: ${preferredAssignmentsError.value || 'unknown error'}`)
+      return
+    }
     await fetchPreferredAssignments()
   } catch (e: any) {
     alert(`Error deleting preferred assignment: ${e.message || 'Unknown error'}`)

@@ -38,12 +38,12 @@ export const useTeam = () => {
     return $fetch<any[]>('/api/teams')
   }
 
-  const createTeam = async (name: string) => {
+  const createTeam = async (name: string, timezone?: string) => {
     if (!isSuperAdmin.value) throw new Error('Only super admins can create teams')
-    return $fetch('/api/teams', { method: 'POST', body: { name } })
+    return $fetch('/api/teams', { method: 'POST', body: { name, timezone } })
   }
 
-  const updateTeam = async (teamId: string, updates: { name?: string }) => {
+  const updateTeam = async (teamId: string, updates: { name?: string; timezone?: string }) => {
     if (!isSuperAdmin.value) throw new Error('Only super admins can update teams')
     return $fetch(`/api/teams/${teamId}`, { method: 'PUT', body: updates })
   }

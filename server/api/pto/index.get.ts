@@ -1,5 +1,5 @@
 import { query } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
 
 /**
  * List pto_days for one employee (all dates), optionally filtered by pto_type.
@@ -7,7 +7,7 @@ import { requireAuth, getTeamFilter } from '../../utils/authorize'
  * which aren't schedule_requests. Team-scoped; super admins see all teams.
  */
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getTeamFilter(user)
   const q = getQuery(event)
 

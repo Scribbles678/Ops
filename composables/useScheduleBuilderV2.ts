@@ -10,7 +10,7 @@
  */
 import { prepare } from '~/utils/scheduleEngineV2/prepare'
 import { runEngine } from '~/utils/scheduleEngineV2/engine'
-import { slotToTime } from '~/utils/scheduleEngineV2/slots'
+import { slotToTime, slotToEndTime } from '~/utils/scheduleEngineV2/slots'
 import type { EngineAction, EngineGap, EngineResult, GapCause } from '~/utils/scheduleEngineV2/types'
 
 export interface V2ScheduleAssignment {
@@ -197,7 +197,7 @@ export const useScheduleBuilderV2 = () => {
         employee_name: nameById.get(a.employeeId) || '',
         job_function: fnNameById.get(a.functionId) || '',
         start_time: slotToTime(a.startSlot),
-        end_time: slotToTime(a.endSlot),
+        end_time: slotToEndTime(a.endSlot),
         // The shift the engine actually built against, swap included.
         shift_id: shiftById.get(a.employeeId) || null,
       }))

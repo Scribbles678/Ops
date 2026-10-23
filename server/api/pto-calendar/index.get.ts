@@ -1,5 +1,5 @@
 import { query } from '../../utils/db'
-import { requireAuth, getTeamFilter } from '../../utils/authorize'
+import { requireTeamLead, getTeamFilter } from '../../utils/authorize'
 import { getUsedHoursBreakdownByDate } from '../../utils/ptoUsage'
 
 /**
@@ -15,7 +15,7 @@ import { getUsedHoursBreakdownByDate } from '../../utils/ptoUsage'
  * Query params: date_from, date_to (required, YYYY-MM-DD)
  */
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getTeamFilter(user)
   const params = getQuery(event)
 

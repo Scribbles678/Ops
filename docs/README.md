@@ -15,9 +15,9 @@ all three drifted apart.
 | **[PTO-AND-REQUESTS.md](./PTO-AND-REQUESTS.md)** | PTO hours model, the shared modules, auto-approval rules and settings keys, `pto_days` storage conventions, PTO calendar, the kiosk UPI lookup, the change log, Employee Overview, attendance points, performance tracking | often |
 | **[TESTING.md](./TESTING.md)** | How to verify a change: the four tiers, the engine harness (`sim-builder.mjs`), the browser smoke test (`ui-smoke.mjs`), multi-tenancy checks and fixtures | often |
 | **[ROLES.md](./ROLES.md)** | The four roles and what each can do, the server gates, team isolation, how to roll the roles out to an existing install | rarely |
-| **[RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md)** | Production deployment on Rancher / Kubernetes, the release checklist (what to check before and after an update), plus an architecture reference for IT Q&A | rarely |
+| **[RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md)** | Production deployment on Rancher / Kubernetes, the release checklist (what to check before and after an update), "For IT" (HTTPS, `APP_URL`, backups, the move to a durable database, restoring), plus an architecture reference for IT Q&A | rarely |
 | **[DB-DATA-LOSS-INCIDENT.md](./DB-DATA-LOSS-INCIDENT.md)** | The Sep 2026 database loss: summary, what IT needs to check, how the Postgres image and the app bootstrap combine to turn an empty volume into a "fresh install", candidate causes, recovery options, timeline | during the incident |
-| **[HARDENING-ROADMAP.md](./HARDENING-ROADMAP.md)** | Proposal (not yet implemented) for a durable deployment: StatefulSet + Retain storage, a bootstrap guard against silent re-init in production, backups, detection, versioned manifests, the persistence test | rarely |
+| **[HARDENING-ROADMAP.md](./HARDENING-ROADMAP.md)** | The plan for a durable deployment: StatefulSet + Retain storage, a bootstrap guard against silent re-init in production, backups, detection, versioned manifests, the persistence test. Storage and backups are written (`deploy/k8s/`), not yet applied | rarely |
 
 ## Where to start
 
@@ -35,6 +35,7 @@ all three drifted apart.
 - `../CLAUDE.md` — working agreement for AI assistance in this repo
 - `../sql-schema/setup.sql` — full schema bootstrap
 - `../sql-schema/migrations/` — incremental migrations, auto-applied on boot
+- `../deploy/k8s/` — the database StatefulSet, nightly backups and a restore job; the steps are in [RANCHER-DEPLOYMENT.md](./RANCHER-DEPLOYMENT.md) → "For IT"
 
 ## Where the editors actually live
 
@@ -48,7 +49,7 @@ mounted.** Today the live homes are:
 |---|---|
 | Job Functions / Shifts / Target Hours editors | inline in `pages/details.vue` (Team Setup) |
 | Employees & Training tab | `components/team/EmployeesTraining.vue` |
-| User and team management | inline in `pages/settings.vue` |
+| Settings (tabs, Oct 2026) | `pages/settings.vue` is only the tab shell. My account → `components/settings/AccountTab.vue`; Request rules + blocked dates → `RequestRulesTab.vue`; users → `UsersTab.vue`; teams → `TeamsTab.vue` (all in `components/settings/`) |
 | Employee Overview | `components/employee/Overview.vue`, rendered by `pages/employee-overview.vue` |
 | Change log | `components/audit/ChangeLogModal.vue` |
 | The schedule assignment modal | `components/schedule/ShiftGroupedSchedule.vue` (not `AssignmentModal.vue`) |

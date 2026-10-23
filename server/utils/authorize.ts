@@ -6,13 +6,22 @@ export interface AuthUser {
   email: string
   username: string
   full_name: string | null
+  /**
+   * The team this session works in. For most accounts it is their own team; one with
+   * extra teams (migration 027) works in one of them at a time — the session says
+   * which (server/middleware/auth.ts). Every read and write scopes to this.
+   */
   team_id: string | null
+  /** The account's own team (user_profiles.team_id): where it signs in, whose user list it's on. */
+  home_team_id?: string | null
   is_admin: boolean
   is_super_admin: boolean
   is_team_lead: boolean
   is_display_user: boolean
   is_active: boolean
   employee_id: string | null
+  /** The team's IANA time zone (teams.timezone), for "today" at the site. */
+  team_timezone?: string | null
 }
 
 /**
@@ -43,7 +52,9 @@ export function requireAuth(event: H3Event): AuthUser {
  * signed-in account":
  *
  *   requireSupervisor  Supervisor or Super Admin — request rules, blocked dates,
- *                      the user list. (Was requireAdmin until Sep 2026.)
+ *                      the team's user accounts (a supervisor's reach over
+ *                      accounts is narrowed further by assertAccountManageable).
+ *                      (Was requireAdmin until Sep 2026.)
  *   requireTeamLead    Team Lead or above — approvals, review notes, errors,
  *                      attendance points: the day-to-day running of the floor.
  */
@@ -72,7 +83,7 @@ function requireRole(user: AuthUser): void {
   if (roleOf(user) === null) {
     throw createError({
       statusCode: 403,
-      message: 'Your account has no role assigned, so it cannot view or change anything. Ask a Super Admin to assign one.',
+      message: 'Your account has no role assigned, so it cannot view or change anything. Ask your supervisor or a Super Admin to assign one.',
     })
   }
 }

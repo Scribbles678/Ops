@@ -1,5 +1,7 @@
 <template>
   <div>
+    <!-- "Working in <team>" for accounts with more than one team (migration 027). -->
+    <TeamBar />
     <NuxtPage />
     <!-- Non-blocking "Saved" / "Couldn't save" notices for every page (useToast). -->
     <AppToasts />

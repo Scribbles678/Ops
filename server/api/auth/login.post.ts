@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { query } from '../../utils/db'
 import { setSessionCookie } from '../../utils/jwt'
+import { teamsFor } from '../../utils/teamMembership'
 
 // A real cost-12 bcrypt hash of a throwaway string, compared against when the
 // email is unknown so that answer takes as long as a wrong password. The old
@@ -31,11 +32,15 @@ export default defineEventHandler(async (event) => {
     is_active: boolean
     employee_id: string | null
     password_hash: string
+    team_timezone: string | null
   }>(
-    `SELECT id, email, username, full_name, team_id, is_admin, is_super_admin,
-            is_team_lead, is_display_user, is_active, employee_id, password_hash
-     FROM user_profiles
-     WHERE email = $1
+    // The team's time zone too, as /api/auth/me returns it: the display board reads
+    // it straight after signing in, and without it fell back to the device's clock.
+    `SELECT up.id, up.email, up.username, up.full_name, up.team_id, up.is_admin, up.is_super_admin,
+            up.is_team_lead, up.is_display_user, up.is_active, up.employee_id, up.password_hash,
+            t.timezone AS team_timezone
+     FROM user_profiles up LEFT JOIN teams t ON t.id = up.team_id
+     WHERE up.email = $1
      LIMIT 1`,
     [email.trim().toLowerCase()]
   )
@@ -58,9 +63,19 @@ export default defineEventHandler(async (event) => {
   // Update last_login timestamp
   await query('UPDATE user_profiles SET last_login = NOW() WHERE id = $1', [user.id])
 
-  // Sign JWT and set as HttpOnly cookie (8h idle normally; 30d for kiosk accounts)
-  const { password_hash: _, ...userWithoutHash } = user
-  setSessionCookie(event, userWithoutHash)
+  // Which team the session starts in (migration 027): the home team — unless the
+  // caller asks to carry on in another team this account works in. The "session
+  // ended" prompt does, so signing back in over a page keeps the team it showed.
+  const { password_hash: _, ...profile } = user
+  const homeTeamId = profile.team_id
+  let session = { ...profile, home_team_id: homeTeamId }
+  if (typeof body?.team_id === 'string' && body.team_id !== homeTeamId) {
+    const team = (await teamsFor({ query }, profile, homeTeamId)).find((t) => t.id === body.team_id)
+    if (team) session = { ...session, team_id: team.id, team_timezone: team.timezone }
+  }
 
-  return { success: true, user: userWithoutHash }
+  // Sign JWT and set as HttpOnly cookie (8h idle normally; 30d for kiosk accounts)
+  setSessionCookie(event, session)
+
+  return { success: true, user: session }
 })

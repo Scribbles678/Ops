@@ -2,6 +2,12 @@ import { query } from '../../utils/db'
 import { requireAuth, getTeamFilter } from '../../utils/authorize'
 import { countBusinessDaysBetween, fmtDate, ptoCapForDate } from '../../utils/ptoHours'
 import { getUsedHoursByDate } from '../../utils/ptoUsage'
+import { assertRequestDate } from '../../utils/requestRules'
+import { assertEmployeeOnTeam } from '../../utils/teamOwnership'
+import { teamToday, dateOnly } from '../../utils/teamTime'
+
+/** Longest range one call may ask for. The strip asks for a week, the schedule page a month. */
+const MAX_RANGE_DAYS = 93
 
 /**
  * Per-day PTO availability for a date range — the numbers behind the request modal's
@@ -28,34 +34,29 @@ export default defineEventHandler(async (event) => {
   if (dateTo < dateFrom) {
     throw createError({ statusCode: 400, message: 'date_to must be on or after date_from' })
   }
-
-  // Which team's budget applies. The rule always scopes to the requesting employee's
-  // team, so prefer that; otherwise the viewer's own team. A super admin with no team
-  // assignment falls through to null (all teams), matching the other read endpoints.
-  let teamId: string | null = getTeamFilter(user) ?? user.team_id ?? null
-  if (params.employee_id) {
-    const emp = await query<{ team_id: string | null }>(
-      'SELECT team_id FROM employees WHERE id = $1',
-      [params.employee_id]
-    )
-    if (!emp.rows[0]) {
-      throw createError({ statusCode: 404, message: 'Employee not found' })
-    }
-    teamId = emp.rows[0].team_id
+  // Each day in the range walks the business days from today, so an unbounded range
+  // (…&date_to=9999-12-31) used to freeze the whole server for every site.
+  assertRequestDate(dateFrom)
+  assertRequestDate(dateTo)
+  if ((Date.parse(`${dateTo}T00:00:00Z`) - Date.parse(`${dateFrom}T00:00:00Z`)) / 86_400_000 >= MAX_RANGE_DAYS) {
+    throw createError({ statusCode: 400, message: `Ask for at most ${MAX_RANGE_DAYS} days at a time` })
   }
+
+  // Always the caller's own team's budget. A named employee must be on that team:
+  // this used to switch to the employee's team — any team, given an id — and, for an
+  // employee with no team, fall back to every team's settings and usage combined.
+  const teamId = getTeamFilter(user)
+  if (params.employee_id) await assertEmployeeOnTeam(params.employee_id, teamId)
 
   const [settingsResult, blockedResult] = await Promise.all([
     query<{ setting_key: string; setting_value: string }>(
-      teamId
-        ? 'SELECT setting_key, setting_value FROM team_settings WHERE team_id = $1'
-        : 'SELECT setting_key, setting_value FROM team_settings',
-      teamId ? [teamId] : []
+      'SELECT setting_key, setting_value FROM team_settings WHERE team_id = $1',
+      [teamId]
     ),
     query<{ blocked_date: string; reason: string | null }>(
       `SELECT blocked_date::text AS blocked_date, reason
        FROM team_blocked_dates
-       WHERE blocked_date BETWEEN $1 AND $2
-         AND ($3::uuid IS NULL OR team_id = $3::uuid)`,
+       WHERE blocked_date BETWEEN $1 AND $2 AND team_id = $3`,
       [dateFrom, dateTo, teamId]
     ),
   ])
@@ -73,8 +74,10 @@ export default defineEventHandler(async (event) => {
     return isNaN(v) ? 1 : v
   })()
 
-  const now = new Date()
-  const today = fmtDate(now)
+  // Today at the team's site: the server's own clock is UTC and marked today as
+  // "past" every evening in the US.
+  const today = await teamToday({ query }, teamId)
+  const now = dateOnly(today)
 
   const days: any[] = []
   const [fy, fm, fd] = dateFrom.split('-').map(Number)

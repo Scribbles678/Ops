@@ -685,13 +685,20 @@ const loadCalendar = async () => {
   }
 }
 
-// Admin actions
+// Admin actions. A failure used to do nothing visible: the comment said "error shown
+// by composable", but this page never showed that error (Sep 2026 audit).
+const toast = useToast()
+const failed = (what: string, e: any) => {
+  if (e?.statusCode === 401 || e?.status === 401) return // the sign-in prompt handles it
+  toast.error(`Couldn't ${what}: ${e?.data?.message || e?.message || 'unknown error'}`)
+}
+
 const handleOverride = async (id: string, status: string) => {
   try {
     await overrideRequest(id, { status })
     await loadCalendar()
-  } catch {
-    // error shown by composable
+  } catch (e: any) {
+    failed(status === 'approved' ? 'approve the request' : 'reject the request', e)
   }
 }
 
@@ -700,8 +707,8 @@ const handleCancel = async (id: string) => {
   try {
     await cancelRequest(id)
     await loadCalendar()
-  } catch {
-    // error shown by composable
+  } catch (e: any) {
+    failed('delete the request', e)
   }
 }
 

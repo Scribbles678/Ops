@@ -95,7 +95,10 @@ try {
 
   // ---- the main screens render ----
   for (const [name, path] of [
-    ['settings', '/settings'],
+    ['settings - my account', '/settings?tab=account'],
+    ['settings - request rules', '/settings?tab=rules'],
+    ['settings - users', '/settings?tab=users'],
+    ['settings - teams', '/settings?tab=teams'],
     ['team setup - employees & training', '/details?tab=employees'],
     ['team setup - training matrix', '/details?tab=training-matrix'],
     ['team setup - job functions', '/details?tab=job-functions'],

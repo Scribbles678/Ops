@@ -28,17 +28,17 @@ export const ROLES: { key: Role; label: string; description: string }[] = [
   {
     key: 'super_admin',
     label: 'Super Admin',
-    description: 'Everything, including users and teams. System administrators only.',
+    description: 'Everything, on every team, including creating teams. System administrators only.',
   },
   {
     key: 'supervisor',
     label: 'Supervisor',
-    description: 'Runs the team: schedules, approvals, review notes, request rules and blocked dates.',
+    description: "Runs the team: schedules, approvals, review notes, request rules, blocked dates and the team's user accounts.",
   },
   {
     key: 'team_lead',
     label: 'Team Lead / Coordinator',
-    description: 'Same as Supervisor, except request rules and blocked dates. Settings shows only their own account.',
+    description: 'Same as Supervisor, except request rules, blocked dates and user accounts. Settings shows only their own account.',
   },
   {
     key: 'kiosk',
@@ -72,7 +72,16 @@ export function flagsForRole(role: Role): Required<{ [K in keyof RoleFlags]: boo
 export const roleLabel = (role: Role | null): string =>
   ROLES.find((r) => r.key === role)?.label ?? 'No role'
 
-/** Supervisor or above: request rules, blocked dates, the user list. */
+/** Badge colours for a role, shared by Settings' account card and user list. */
+export const roleBadgeClass = (role: Role | null): string =>
+  ({
+    super_admin: 'bg-purple-100 text-purple-800',
+    supervisor: 'bg-blue-100 text-blue-800',
+    team_lead: 'bg-teal-100 text-teal-800',
+    kiosk: 'bg-amber-100 text-amber-800',
+  } as Record<Role, string>)[role as Role] ?? 'bg-gray-100 text-gray-800'
+
+/** Supervisor or above: request rules, blocked dates, the team's user accounts. */
 export const canManageTeam = (u: RoleFlags | null | undefined): boolean => {
   const r = roleOf(u)
   return r === 'super_admin' || r === 'supervisor'

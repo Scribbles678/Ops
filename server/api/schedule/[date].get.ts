@@ -6,10 +6,12 @@ export default defineEventHandler(async (event) => {
   const teamId = getTeamFilter(user)
   const date = getRouterParam(event, 'date')
 
+  // The employee's UPI is left out: this is the wall display's feed, and the UPI is
+  // what the kiosk's "check my requests" asks people to type.
   let sql = `
     SELECT
       sa.*,
-      row_to_json(e.*) AS employee,
+      to_jsonb(e.*) - 'upi' AS employee,
       row_to_json(jf.*) AS job_function,
       row_to_json(s.*) AS shift
     FROM schedule_assignments sa

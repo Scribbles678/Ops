@@ -185,6 +185,9 @@
         <!-- Job Function Selection -->
         <div class="space-y-2 mb-4">
           <label class="block text-xs font-medium text-gray-700">Select Job Function:</label>
+          <p v-if="inactiveJobInSlot" class="text-xs text-amber-700">
+            {{ inactiveJobInSlot }} is inactive, so it can't be assigned again. Pick an active job to replace it here, or remove it.
+          </p>
           <p v-if="availableJobFunctions.length === 0 && trainingByEmployee && Object.keys(trainingByEmployee).length > 0" class="text-sm text-amber-600 py-2">
             No trained job functions. Assign training in Team Setup → Employees & Training first.
           </p>
@@ -246,21 +249,15 @@
               <span class="text-xs font-medium">{{ meter.name }}</span>
             </button>
           </div>
-          <div v-else class="text-center py-3 text-gray-500">
-            <p class="text-xs">No individual meter entries found in database.</p>
-            <p class="text-[10px] mt-1">Please run the database migration to create Meter 1-20 entries.</p>
-            <div class="mt-2 grid grid-cols-4 gap-1.5">
-              <button
-                v-for="meter in placeholderMeters"
-                :key="meter.id"
-                @click="selectMeterNumber(meter)"
-                class="p-1.5 border border-gray-300 rounded-lg hover:bg-gray-50 transition text-center"
-                :class="{ 'bg-blue-600 border-blue-700 text-white': selectedMeterNumber === meter.id }"
-              >
-                <span class="text-xs font-medium">{{ meter.name }}</span>
-              </button>
-            </div>
-          </div>
+          <p v-else-if="allMetersInactive" class="text-xs text-amber-700 py-2">
+            Every meter number is inactive. Reactivate one in Team Setup → Job Functions to assign Meter.
+          </p>
+          <!-- It used to offer 20 made-up "Meter 1–20" buttons here; Save matches by
+               name, so picking one saved nothing. -->
+          <p v-else class="text-xs text-amber-700 py-2">
+            No meter numbers are set up. Add them in Team Setup → Job Functions, named
+            "Meter 1", "Meter 2" and so on, to assign Meter.
+          </p>
         </div>
         
 
@@ -333,18 +330,30 @@ import { describePto, formatTimeOfDay, ptoTimeLabel } from '~/utils/ptoDisplay'
 
 const BLOCK_WIDTH = 24
 
-// Optimize meter job functions with computed property to avoid repeated filtering
-const allIndividualMeters = computed(() => {
-  return props.jobFunctions.filter(jf => jf.name && jf.name.startsWith('Meter '))
-})
+// The page passes inactive job functions too, so a day's rows on a deactivated job
+// still draw and save back untouched. Everything the assign popup offers comes from
+// the active ones: a new assignment never uses an inactive job.
+const activeJobFunctions = computed(() => props.jobFunctions.filter((jf: any) => jf.is_active !== false))
 
-// Create placeholder meters for when database doesn't have individual meters
-const placeholderMeters = computed(() => {
-  return Array.from({ length: 20 }, (_, i) => ({
-    id: `meter-${i + 1}`,
-    name: `Meter ${i + 1}`,
-    color_code: '#87CEEB'
-  }))
+/** A meter number ("Meter 3"), as the builder and the training trigger read it. A job
+ *  that merely starts with "Meter " ("Meter Room") is an ordinary job. */
+const METER_N = /^Meter [0-9]+$/
+const isMeterNumber = (jf: any) => !!jf?.name && METER_N.test(jf.name)
+
+// Optimize meter job functions with computed property to avoid repeated filtering
+const allIndividualMeters = computed(() => activeJobFunctions.value.filter(isMeterNumber))
+
+// Meter numbers exist but none is active: say so, rather than "none are set up".
+const allMetersInactive = computed(() =>
+  allIndividualMeters.value.length === 0 && props.jobFunctions.some(isMeterNumber)
+)
+
+/** The inactive job in the clicked slot, if any: it can't be picked, so the popup says why. */
+const inactiveJobInSlot = computed((): string => {
+  if (!selectedEmployee.value || !selectedTimeBlock.value) return ''
+  const name = getAssignment(selectedEmployee.value.id, selectedTimeBlock.value.time)
+  const jf = name ? props.jobFunctions.find((j: any) => j.name === name) : null
+  return jf?.is_active === false ? jf.name : ''
 })
 
 // Props
@@ -426,12 +435,11 @@ const availableJobFunctions = computed(() => {
   const hasTraining = trainedIds.length > 0
   const hasTrainingDataLoaded = Object.keys(props.trainingByEmployee || {}).length > 0
   
-  // When we have training data, filter to only show job functions the employee is trained for
-  const meterParent = props.jobFunctions.find((jf: any) => jf.name === 'Meter')
+  // When we have training data, filter to only show job functions the employee is trained for.
+  // Active Meter jobs only, or training on an inactive one would offer Meter with nothing to pick.
+  const meterParent = activeJobFunctions.value.find((jf: any) => jf.name === 'Meter')
   const meterParentId = meterParent?.id
-  const meterNIds = props.jobFunctions
-    .filter((jf: any) => jf.name && /^Meter \d+$/.test(jf.name))
-    .map((jf: any) => jf.id)
+  const meterNIds = activeJobFunctions.value.filter(isMeterNumber).map((jf: any) => jf.id)
   
   const isTrainedForMeter = hasTraining && (
     (meterParentId && trainedIds.includes(meterParentId)) ||
@@ -439,7 +447,7 @@ const availableJobFunctions = computed(() => {
   )
   
   let nonMeterFunctions = props.jobFunctions.filter((jf: any) =>
-    jf.is_active && !jf.name.startsWith('Meter ') && jf.name !== 'Meter'
+    jf.is_active && !isMeterNumber(jf) && jf.name !== 'Meter'
   )
   
   if (hasTrainingDataLoaded) {
@@ -839,9 +847,10 @@ const openAssignmentModal = (employee: any, timeBlock: any, shift: any) => {
   // If there's an existing assignment, populate the form
   const existingAssignment = getAssignment(employee.id, timeBlock.time)
   if (existingAssignment) {
-    // Find the job function by name
+    // Find the job function by name. Only an active one is preselected: "Update
+    // Assignment" with an inactive one would stretch it over new time.
     const jobFunction = props.jobFunctions.find(jf => jf.name === existingAssignment)
-    if (jobFunction) {
+    if (jobFunction && jobFunction.is_active !== false) {
       selectedJobFunction.value = jobFunction
     }
     
@@ -930,15 +939,7 @@ const saveAssignment = () => {
   if (selectedJobFunction.value.id === 'meter-group' || selectedJobFunction.value.name === 'Meter') {
     // Find the specific meter job function
     const meterJobFunction = props.jobFunctions.find(m => m.id === selectedMeterNumber.value)
-    if (meterJobFunction) {
-      jobFunctionName = meterJobFunction.name
-    } else if (selectedMeterNumber.value && selectedMeterNumber.value.startsWith('meter-')) {
-      // Handle placeholder meter IDs (meter-1, meter-2, etc.)
-      const meterNumber = selectedMeterNumber.value.replace('meter-', '')
-      jobFunctionName = `Meter ${meterNumber}`
-    } else {
-      jobFunctionName = 'Meter'
-    }
+    jobFunctionName = meterJobFunction ? meterJobFunction.name : 'Meter'
   }
   
   // Create assignments for each 15-minute block in the time range

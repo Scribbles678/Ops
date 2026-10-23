@@ -1,0 +1,15 @@
+# Where the nightly backups go: an Azure Files share, separate from the database's
+# own disk, so losing that disk doesn't take the backups with it. ReadWriteMany, so a
+# restore pod can read it while the database runs.
+#
+# This is still inside the cluster. For a copy that survives losing the cluster, see
+# "Off-cluster copy" in docs/RANCHER-DEPLOYMENT.md.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: scheduling-db-backups
+  namespace: ns-operations-scheduler
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: azurefile-csi-retain
+  resources: { requests: { storage: 20Gi } }

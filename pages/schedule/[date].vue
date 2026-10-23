@@ -340,8 +340,8 @@
               Update the details below or use Cancel PTO if they are working.
             </div>
             <div v-if="ptoModalCallIn" class="p-3 bg-orange-50 border border-orange-200 rounded-md text-sm text-orange-800">
-              Also marked as called in that day. The call-in stays as it is — use CI on their row
-              to change or remove it.
+              Marked as called in that day. A call-in already covers the whole day, so other
+              time off can't be added — use CI on their row to change or remove the call-in.
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
@@ -389,6 +389,10 @@
             <div v-if="resolvedCallInRecord" class="p-3 bg-orange-50 border border-orange-200 rounded-md text-sm text-orange-800">
               This employee is already marked as called in on {{ formatDate(scheduleDate) }}.
               Update the note below or use Remove Call-In to clear.
+            </div>
+            <div v-if="callInReplaces.length" class="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900">
+              A call-in covers the whole day, so it replaces the time off they already have:
+              <strong>{{ callInReplaces.join('; ') }}</strong>.
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
@@ -580,7 +584,7 @@
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import ShiftGroupedSchedule from '~/components/schedule/ShiftGroupedSchedule.vue'
 import { toLocalISO, addDays } from '~/utils/localDate'
-import { describePto, formatTimeOfDay, MINUTES_IN_DAY } from '~/utils/ptoDisplay'
+import { describePto, formatTimeOfDay, MINUTES_IN_DAY, ptoTypeLabel, ptoTimeLabel } from '~/utils/ptoDisplay'
 import { workableSlots, type WorkableSlots } from '~/utils/workableSlots'
 
 // Use real composables instead of mock data
@@ -699,7 +703,9 @@ const {
   ptoByEmployeeId,
   fetchPTOForDate,
   createPTO,
-  deletePTO
+  updatePTO,
+  deletePTO,
+  error: ptoWriteError
 } = usePTO()
 
 const {
@@ -819,18 +825,21 @@ const targetHours = ref({})
 // otherwise the key is the actual job function name (the detail grid matches by name).
 const activeDashboard = ref<string>('jobFunctions')
 
+/** A meter number ("Meter 3"), as the builder and the training trigger read it. A job
+ *  that merely starts with "Meter " ("Meter Room") is an ordinary job with its own card. */
+const isMeterNumber = (name: unknown): boolean => typeof name === 'string' && /^Meter [0-9]+$/.test(name)
+
 // Dynamic dashboard selector pills, built from the real active job functions so new/renamed
 // functions appear automatically and stale ones don't. Individual "Meter N" children are
 // folded into a single "Meter" pill; the "Meter" parent isn't shown as its own pill.
 const dashboardPills = computed<{ key: string; label: string }[]>(() => {
   const pills: { key: string; label: string }[] = [{ key: 'jobFunctions', label: 'Job Functions' }]
   const jfs = (jobFunctions.value || []).filter((jf: any) => jf?.is_active !== false && jf?.name)
-  const isMeterChild = (n: string) => /^Meter \d+$/.test(n)
-  if (jfs.some((jf: any) => jf.name === 'Meter' || isMeterChild(jf.name))) {
+  if (jfs.some((jf: any) => jf.name === 'Meter' || isMeterNumber(jf.name))) {
     pills.push({ key: 'meter', label: 'Meter' })
   }
   jfs
-    .filter((jf: any) => jf.name !== 'Meter' && !isMeterChild(jf.name))
+    .filter((jf: any) => jf.name !== 'Meter' && !isMeterNumber(jf.name))
     .sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
     .forEach((jf: any) => pills.push({ key: jf.name, label: jf.name }))
   return pills
@@ -914,20 +923,28 @@ const loadTargetHours = async () => {
   }
 }
 
-const getTargetHours = (jobFunctionId: string) => {
-  if (!targetHours.value || Object.keys(targetHours.value).length === 0) return 0
+/**
+ * A job's saved target hours, or '—' when none is saved. It used to show 0, which
+ * reads as "a target of zero hours"; Team Setup → Target Hours says "not set".
+ */
+const getTargetHours = (jobFunctionId: string): number | string => {
   if (jobFunctionId === 'meter-group') {
     let total = 0
+    let anySet = false
     jobFunctions.value.forEach((job: any) => {
-      if (job.name.startsWith('Meter ')) {
+      // Active meters only — all this sum ever saw before the page loaded inactive jobs too.
+      if (job.is_active !== false && isMeterNumber(job.name)) {
         const h = targetHours.value[job.id]
-        if (h !== undefined && h !== null) total += h
+        if (h !== undefined && h !== null) {
+          total += h
+          anySet = true
+        }
       }
     })
-    return total
+    return anySet ? total : '—'
   }
   const hours = targetHours.value[jobFunctionId]
-  return hours !== undefined && hours !== null ? hours : 0
+  return hours !== undefined && hours !== null ? hours : '—'
 }
 
 // Helper function to generate all 15-minute time slots between start and end
@@ -967,20 +984,14 @@ const initializeScheduleData = () => {
       const endTime = assignment.end_time.substring(0, 5)
       const timeSlots = generateTimeSlots(startTime, endTime)
       
-      // Normalize job function name for consistent merging (especially Lunch/Break)
-      const normalizedName = jobFunction.name === 'Lunch' ? 'LUNCH' : 
-                             jobFunction.name === 'Break' ? 'BREAK' :
-                             jobFunction.name === 'Break 1' ? 'BREAK 1' :
-                             jobFunction.name === 'Break 2' ? 'BREAK 2' :
-                             jobFunction.name
-      
-      // Fill in each 15-minute slot with the assignment
+      // Fill in each 15-minute slot with the assignment. The job's own name, exactly:
+      // Save looks it up by name, and jobs named "Lunch" / "Break" used to be renamed
+      // 'LUNCH' / 'BREAK' here, so their rows were silently dropped on save.
       timeSlots.forEach((timeSlot: string) => {
         if (!initialData[assignment.employee_id][timeSlot]) {
           initialData[assignment.employee_id][timeSlot] = {}
         }
-        // Set assignment and until time for this slot (use normalized name)
-        initialData[assignment.employee_id][timeSlot].assignment = normalizedName
+        initialData[assignment.employee_id][timeSlot].assignment = jobFunction.name
         initialData[assignment.employee_id][timeSlot].until = endTime
       })
     }
@@ -999,7 +1010,11 @@ onMounted(async () => {
   try {
     await Promise.all([
       fetchEmployees(),
-      fetchJobFunctions(),
+      // Inactive jobs too: the grid is built from this list and Save writes back only
+      // what the grid holds, so a day's rows on a deactivated job never reached the
+      // grid and the next Save erased them. New assignments still offer active jobs
+      // only (ShiftGroupedSchedule, dashboardPills, ACTIVE_METER_NUMBERS).
+      fetchJobFunctions({ includeInactive: true }),
       fetchShifts(),
       fetchScheduleForDate(scheduleDate.value),
       fetchPTOForDate(scheduleDate.value),
@@ -1137,7 +1152,7 @@ const jobFunctionHours = computed(() => {
         const jobName = data.assignment
         
         // If it's a meter assignment, count it under 'Meter'
-        if (jobName.startsWith('Meter ')) {
+        if (isMeterNumber(jobName)) {
           jobFunctionTotals['Meter'] = (jobFunctionTotals['Meter'] || 0) + 0.25
         } else if (jobFunctionTotals.hasOwnProperty(jobName)) {
           jobFunctionTotals[jobName] += 0.25
@@ -1151,28 +1166,35 @@ const jobFunctionHours = computed(() => {
   let meterColor = '#87CEEB' // Default meter color
   
   // Find the actual meter color from any existing meter job function
-  const firstMeterJobFunction = jobFunctions.value.find((job: any) => job.name && job.name.startsWith('Meter '))
+  const firstMeterJobFunction = jobFunctions.value.find((job: any) => isMeterNumber(job.name))
   if (firstMeterJobFunction) {
     meterColor = firstMeterJobFunction.color_code
   }
   
   jobFunctions.value.forEach((job: any) => {
-    if (!job.name.startsWith('Meter ')) { // Exclude individual meters from direct display
+    if (!isMeterNumber(job.name)) { // Exclude individual meters from direct display
+      // Inactive jobs are loaded only so a day's rows on them survive a save: one
+      // gets a card only when this day has hours on it, marked as inactive.
+      const inactive = job.is_active === false
+      if (inactive && !(jobFunctionTotals[job.name] > 0)) return
       groupedJobFunctions[job.name] = {
         id: job.id,
-        name: job.name,
+        name: inactive ? `${job.name} (inactive)` : job.name,
         color: job.color_code,
         hours: Math.round((jobFunctionTotals[job.name] || 0) * 10) / 10,
         employees: 0
       }
     }
   })
-  
+
   // Add grouped meter entry if there are any meter assignments
   if (jobFunctionTotals['Meter'] > 0) {
+    const anyMeterActive = jobFunctions.value.some(
+      (job: any) => job.is_active !== false && (job.name === 'Meter' || isMeterNumber(job.name))
+    )
     groupedJobFunctions['Meter'] = {
       id: 'meter-group',
-      name: 'Meter',
+      name: anyMeterActive ? 'Meter' : 'Meter (inactive)',
       color: meterColor, // This will now use the reliably found meter color
       hours: Math.round(jobFunctionTotals['Meter'] * 10) / 10,
       employees: 0
@@ -1511,26 +1533,23 @@ const savePTO = async () => {
     showNotification('The end time must be after the start time.', 'error')
     return
   }
+  // An existing absence is changed IN PLACE. Delete-then-add cut a request's day off
+  // loose from its approved request, and both were then charged (8h became 16h).
+  // The server refuses time off that overlaps what the person already has.
   const prior = resolvedPtoRecord.value
-  if (prior?.id) {
-    const removed = await deletePTO(prior.id)
-    if (!removed) {
-      showNotification('Failed to update PTO. Please try again.', 'error')
-      return
-    }
-  }
-  const record: any = {
-    employee_id: ptoForm.value.employee_id,
-    pto_date: ptoForm.value.pto_date,
-    ...ptoFieldsFromForm(prior),
-  }
-  const ok = await createPTO(record)
+  const ok = prior?.id
+    ? await updatePTO(prior.id, ptoFieldsFromForm(prior))
+    : await createPTO({
+        employee_id: ptoForm.value.employee_id,
+        pto_date: ptoForm.value.pto_date,
+        ...ptoFieldsFromForm(prior),
+      })
   if (ok) {
     await refreshAbsences()
     showPTOModal.value = false
     showNotification('PTO saved successfully.', 'success')
   } else {
-    showNotification('Failed to create PTO. Please try again.', 'error')
+    showNotification(ptoWriteError.value || 'Failed to save PTO. Please try again.', 'error')
   }
 }
 
@@ -1547,7 +1566,7 @@ const deleteCurrentPTO = async () => {
     showPTOModal.value = false
     showNotification('PTO removed.', 'success')
   } else {
-    showNotification('Failed to remove PTO. Please try again.', 'error')
+    showNotification(ptoWriteError.value || 'Failed to remove PTO. Please try again.', 'error')
   }
 }
 
@@ -1564,6 +1583,19 @@ const resolvedCallInRecord = computed(() => {
   const recs = ptoByEmployeeId.value?.[callInForm.value.employee_id] || []
   const target = toYMD(callInForm.value.pto_date || scheduleDate.value)
   return recs.find((r: any) => toYMD(r.pto_date) === target && r.pto_type === 'call_in') || null
+})
+
+/** Other time off the call-in will replace, as "Leave Early, leaves 2:00 PM". */
+const callInReplaces = computed((): string[] => {
+  if (!showCallInModal.value || !callInForm.value.employee_id) return []
+  const recs = ptoByEmployeeId.value?.[callInForm.value.employee_id] || []
+  const target = toYMD(callInForm.value.pto_date || scheduleDate.value)
+  return recs
+    .filter((r: any) => toYMD(r.pto_date) === target && r.pto_type !== 'call_in')
+    .map((r: any) => {
+      const time = ptoTimeLabel(r)
+      return `${ptoTypeLabel(r.pto_type)}${time ? `, ${time}` : ''}`
+    })
 })
 
 const openCallInModal = (employee: any) => {
@@ -1622,14 +1654,9 @@ const saveCallIn = async () => {
     return
   }
 
-  const prior = resolvedCallInRecord.value
-  if (prior?.id) {
-    const removed = await deletePTO(prior.id)
-    if (!removed) {
-      showNotification('Failed to update call-in. Please try again.', 'error')
-      return
-    }
-  }
+  // A call-in covers the whole day, so the server REPLACES whatever time off the
+  // person already had that day (an earlier call-in included) in the same
+  // transaction, and returns what it replaced.
   const ok = await createPTO({
     employee_id: callInForm.value.employee_id,
     pto_date: callInForm.value.pto_date,
@@ -1643,15 +1670,17 @@ const saveCallIn = async () => {
     const cleared = await wipeEmployeeDay(callInForm.value.employee_id, callInForm.value.pto_date)
     await refreshAbsences()
     showCallInModal.value = false
+    const replaced = (ok.replaced ?? []).filter((label: string) => label !== 'Call-In')
     showNotification(
       [
         hadPendingEdits ? 'Your changes were saved.' : null,
         cleared > 0 ? `Call-in saved and ${cleared} assignment(s) cleared.` : 'Call-in saved.',
+        replaced.length ? `It replaces: ${replaced.join('; ')}.` : null,
       ].filter(Boolean).join(' '),
       'success'
     )
   } else {
-    showNotification('Failed to save call-in. Please try again.', 'error')
+    showNotification(ptoWriteError.value || 'Failed to save call-in. Please try again.', 'error')
   }
 }
 
@@ -1691,7 +1720,7 @@ const deleteCurrentCallIn = async () => {
     showCallInModal.value = false
     showNotification('Call-in removed.', 'success')
   } else {
-    showNotification('Failed to remove call-in. Please try again.', 'error')
+    showNotification(ptoWriteError.value || 'Failed to remove call-in. Please try again.', 'error')
   }
 }
 
@@ -2053,7 +2082,7 @@ const syncMeterBookings = () => {
       
       // Find the start of each contiguous assignment range
       Object.entries(employeeSchedule).forEach(([timeSlot, data]: [string, any]) => {
-        if (data && data.assignment && data.assignment.startsWith('Meter ')) {
+        if (data && isMeterNumber(data.assignment)) {
           const meterNumber = parseInt(data.assignment.split(' ')[1])
           
           if (ACTIVE_METER_NUMBERS.value.includes(meterNumber)) {
@@ -2073,7 +2102,7 @@ const syncMeterBookings = () => {
             // 4. Previous slot has a different end time (assignment ended)
             const isStartOfAssignment = !prevData || 
                                         !prevData.assignment || 
-                                        !prevData.assignment.startsWith('Meter ') ||
+                                        !isMeterNumber(prevData.assignment) ||
                                         parseInt(prevData.assignment.split(' ')[1]) !== meterNumber ||
                                         prevData.until !== endTime
             

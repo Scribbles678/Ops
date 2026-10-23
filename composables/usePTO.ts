@@ -29,13 +29,29 @@ export const usePTO = () => {
     }
   }
 
+  // Writes keep the server's own sentence ("Max Kangas already has time off on …")
+  // in `error` so the page can show it; e.message is only "[POST] /api/pto: 409".
   const createPTO = async (ptoData: any) => {
     loading.value = true
     error.value = null
     try {
-      return await $fetch('/api/pto', { method: 'POST', body: ptoData })
+      return await $fetch<any>('/api/pto', { method: 'POST', body: ptoData })
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message || e.message
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /** Change a row in place, keeping its link to the request that created it. */
+  const updatePTO = async (id: string, fields: { pto_type: string; start_time: string | null; end_time: string | null }) => {
+    loading.value = true
+    error.value = null
+    try {
+      return await $fetch<any>(`/api/pto/${id}`, { method: 'PUT', body: fields })
+    } catch (e: any) {
+      error.value = e.data?.message || e.message
       return null
     } finally {
       loading.value = false
@@ -51,7 +67,7 @@ export const usePTO = () => {
       ptoRecords.value = ptoRecords.value.filter(r => r.id !== id)
       return true
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message || e.message
       return false
     } finally {
       loading.value = false
@@ -65,6 +81,7 @@ export const usePTO = () => {
     error,
     fetchPTOForDate,
     createPTO,
+    updatePTO,
     deletePTO,
   }
 }

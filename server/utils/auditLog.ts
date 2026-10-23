@@ -12,7 +12,7 @@ import { ptoTypeLabel, ptoTimeLabel } from '../../utils/ptoDisplay'
  * correctly after the record it describes is gone.
  */
 export type AuditAction = 'approve' | 'reject' | 'delete' | 'add' | 'edit'
-export type AuditEntity = 'request' | 'pto_day' | 'attendance_point' | 'performance_note' | 'performance_error'
+export type AuditEntity = 'request' | 'pto_day' | 'attendance_point' | 'performance_note' | 'performance_error' | 'account'
 
 /** A transaction client or the pool's query() — both expose the same call. */
 type Runner = { query: (sql: string, params?: unknown[]) => Promise<any> } | ((sql: string, params?: unknown[]) => Promise<any>)
@@ -21,7 +21,7 @@ const run = (q: Runner, sql: string, params: unknown[] = []) =>
 
 export interface AuditEntry {
   teamId: string | null
-  actor: AuthUser
+  actor: Pick<AuthUser, 'id' | 'full_name' | 'username' | 'email'>
   action: AuditAction
   entity: AuditEntity
   entityId: string | null
@@ -85,6 +85,65 @@ export const describeRequest = (r: any): string => {
 export const describePtoDay = (p: any): string => {
   const time = ptoTimeLabel(p)
   return `${ptoTypeLabel(p.pto_type)} on ${shortDate(p.pto_date)}${time ? ` (${time})` : ''}`
+}
+
+/** "Jane Lead (lead@example.com)", or just the email. */
+export const describeAccount = (a: { email: string; full_name: string | null }): string =>
+  a.full_name ? `${a.full_name} (${a.email})` : a.email
+
+/**
+ * A change to a sign-in account (migration 026): a password reset or change. Logged
+ * under the account's own team, with no employee, and never the password or its hash.
+ */
+export async function logAccountChange(
+  q: Runner,
+  e: {
+    actor: AuditEntry['actor']
+    account: { id: string; email: string; full_name: string | null; team_id: string | null }
+    summary: string
+  }
+): Promise<void> {
+  await logChange(q, {
+    teamId: e.account.team_id,
+    actor: e.actor,
+    action: 'edit',
+    entity: 'account',
+    entityId: e.account.id,
+    employeeId: null,
+    employeeName: describeAccount(e.account),
+    summary: e.summary,
+  })
+}
+
+/**
+ * Extra teams given or taken away (migration 027). Each is logged under the team it
+ * concerns, so that team's supervisors can see who was given access to it.
+ */
+export async function logTeamAccessChanges(
+  q: Runner,
+  actor: AuditEntry['actor'],
+  account: { id: string; email: string; full_name: string | null; team_id: string | null },
+  change: { added: string[]; removed: string[] }
+): Promise<void> {
+  const ids = [...change.added, ...change.removed]
+  if (!ids.length) return
+  const r = await run(q, 'SELECT id, name FROM teams WHERE id = ANY($1::uuid[]) OR id = $2', [ids, account.team_id])
+  const name = (id: string | null) => r.rows.find((t: any) => t.id === id)?.name ?? 'a team'
+  const who = describeAccount(account)
+  for (const teamId of change.added) {
+    await logAccountChange(q, {
+      actor,
+      account: { ...account, team_id: teamId },
+      summary: `Gave ${who} access to ${name(teamId)} (their home team is ${name(account.team_id)}).`,
+    })
+  }
+  for (const teamId of change.removed) {
+    await logAccountChange(q, {
+      actor,
+      account: { ...account, team_id: teamId },
+      summary: `Removed ${who}'s access to ${name(teamId)}.`,
+    })
+  }
 }
 
 export const pointsWord = (n: number): string => (n >= 1 ? `${n === 1 ? 'a full' : n} point` : 'a half point')

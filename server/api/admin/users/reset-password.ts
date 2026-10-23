@@ -1,36 +1,55 @@
-import bcrypt from 'bcryptjs'
-import { query } from '../../../utils/db'
-import { requireSuperAdmin } from '../../../utils/authorize'
+import { query, transaction } from '../../../utils/db'
+import { requireSupervisor } from '../../../utils/authorize'
+import { assertAccountManageable } from '../../../utils/teamOwnership'
+import { assertNewPassword, setPassword } from '../../../utils/password'
+import { logAccountChange, describeAccount } from '../../../utils/auditLog'
 
+/**
+ * Settings → Users → Reset password: set a new password for someone else.
+ *
+ * Signs them out on every device (setPassword → password_changed_at), cancels any
+ * emailed reset link, and is written to the change log (no password in it).
+ * Your OWN password is refused here: My account → Change password asks for the
+ * current one, and this didn't — anyone at an unlocked supervisor screen could set
+ * a new password and lock the real owner out (Oct 2026).
+ */
 export default defineEventHandler(async (event) => {
   if (event.method !== 'POST') {
     throw createError({ statusCode: 405, message: 'Method not allowed' })
   }
 
-  requireSuperAdmin(event)
+  // A supervisor resets passwords on their own team's accounts, other than Super
+  // Admins; a super admin, on any account.
+  const actor = requireSupervisor(event)
 
   const body = await readBody(event)
-  const { user_id, new_password } = body ?? {}
-
-  if (!user_id || !new_password) {
+  const { user_id } = body ?? {}
+  if (!user_id) {
     throw createError({ statusCode: 400, message: 'User ID and new password are required' })
   }
+  const newPassword = assertNewPassword(body?.new_password)
 
-  if (new_password.length < 8) {
-    throw createError({ statusCode: 400, message: 'Password must be at least 8 characters' })
+  if (user_id === actor.id) {
+    throw createError({
+      statusCode: 400,
+      message: 'Change your own password in Settings → My account — it asks for your current one.',
+    })
   }
+  await assertAccountManageable(actor, user_id)
 
-  // Verify the target user exists
-  const userCheck = await query('SELECT id FROM user_profiles WHERE id = $1', [user_id])
-  if (userCheck.rows.length === 0) {
-    throw createError({ statusCode: 404, message: 'User not found' })
-  }
+  const target = (await query<{ id: string; email: string; full_name: string | null; team_id: string | null }>(
+    'SELECT id, email, full_name, team_id FROM user_profiles WHERE id = $1',
+    [user_id]
+  )).rows[0]!
 
-  const password_hash = await bcrypt.hash(new_password, 12)
-  await query(
-    'UPDATE user_profiles SET password_hash = $1, updated_at = NOW() WHERE id = $2',
-    [password_hash, user_id]
-  )
+  await transaction(async (client) => {
+    await setPassword(client, user_id, newPassword)
+    await logAccountChange(client, {
+      actor,
+      account: target,
+      summary: `Reset the password for ${describeAccount(target)}. They were signed out on every device.`,
+    })
+  })
 
   return { success: true, message: 'Password reset successfully' }
 })

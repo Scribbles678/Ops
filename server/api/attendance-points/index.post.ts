@@ -1,6 +1,7 @@
-import { query, transaction } from '../../utils/db'
-import { requireTeamLead } from '../../utils/authorize'
+import { transaction } from '../../utils/db'
+import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
 import { logChange, employeeDisplayName, pointsWord, shortDate } from '../../utils/auditLog'
+import { assertEmployeeOnTeam } from '../../utils/teamOwnership'
 
 /** The only two values a point can take. Mirrors the CHECK constraint. */
 const ALLOWED_POINTS = [0.5, 1]
@@ -9,8 +10,10 @@ const ALLOWED_POINTS = [0.5, 1]
  * Assign an attendance point (half or full) to an employee on a date. TEAM LEAD
  * AND ABOVE. Logged to the change log.
  *
- * team_id is taken from the EMPLOYEE, not the logged-in user, so the record lands
- * with the team that owns the employee even when a super admin logs it.
+ * The employee must be on the writer's own team, and the record is stamped with that
+ * team. It used to take the EMPLOYEE's team, unchecked, so a lead at one site could
+ * file a point against another site's employee — which that site then couldn't
+ * remove (Sep 2026 audit).
  */
 export default defineEventHandler(async (event) => {
   const user = requireTeamLead(event)
@@ -33,25 +36,20 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, message: 'notes must be 2000 characters or fewer' })
   }
 
-  const emp = await query<{ team_id: string | null }>(
-    'SELECT team_id FROM employees WHERE id = $1',
-    [employee_id]
-  )
-  if (!emp.rows[0]) {
-    throw createError({ statusCode: 404, message: 'Employee not found' })
-  }
+  const teamId = getWriteTeamId(user)
+  await assertEmployeeOnTeam(employee_id, teamId)
 
   return transaction(async (client) => {
     const result = await client.query(
       `INSERT INTO attendance_points (employee_id, point_date, points, notes, team_id, created_by)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, employee_id, point_date::text AS point_date, points, notes, created_at`,
-      [employee_id, point_date, value, note, emp.rows[0].team_id, user.id]
+      [employee_id, point_date, value, note, teamId, user.id]
     )
     const row = result.rows[0]
     const who = await employeeDisplayName(client, employee_id)
     await logChange(client, {
-      teamId: emp.rows[0].team_id,
+      teamId,
       actor: user,
       action: 'add',
       entity: 'attendance_point',

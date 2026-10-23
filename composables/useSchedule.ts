@@ -9,21 +9,26 @@ export const useSchedule = () => {
   // them (so a deactivated shift can be switched back on); every other page gets
   // active only. Remembered so a save refreshes the same list it came from.
   let includeInactiveShifts = false
+  // Only the newest request's answer lands. Two quick saves each refetch the list,
+  // and the older reply can arrive last — it used to overwrite the newer one.
+  let shiftsSeq = 0
 
   const fetchShifts = async (opts?: { includeInactive?: boolean }) => {
     if (typeof opts?.includeInactive === 'boolean') includeInactiveShifts = opts.includeInactive
+    const mine = ++shiftsSeq
     loading.value = true
     error.value = null
     try {
-      shifts.value = await $fetch<any[]>('/api/shifts', {
+      const rows = await $fetch<any[]>('/api/shifts', {
         params: includeInactiveShifts ? { include_inactive: 'true' } : {},
       })
+      if (mine === shiftsSeq) shifts.value = rows
       return shifts.value
     } catch (e: any) {
-      error.value = e.message
+      if (mine === shiftsSeq) error.value = e.data?.message ?? e.message
       return []
     } finally {
-      loading.value = false
+      if (mine === shiftsSeq) loading.value = false
     }
   }
 
@@ -232,13 +237,19 @@ export const useSchedule = () => {
     })
   }
 
-  const fetchTargetHours = async () => {
+  /**
+   * job_function_id → saved target hours. A job with no row isn't in the map.
+   * `strict` throws on failure (Team Setup, so a failed load isn't mistaken for
+   * "nothing set" and saved over); otherwise a failure returns {}.
+   */
+  const fetchTargetHours = async (opts?: { strict?: boolean }) => {
     try {
       const rows = await $fetch<{ job_function_id: string; target_hours: number }[]>('/api/target-hours')
       const out: Record<string, number> = {}
       rows.forEach((r) => { out[r.job_function_id] = Number(r.target_hours) })
       return out
-    } catch {
+    } catch (e) {
+      if (opts?.strict) throw e
       return {}
     }
   }

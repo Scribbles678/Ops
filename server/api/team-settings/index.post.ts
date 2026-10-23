@@ -1,27 +1,53 @@
-import { query } from '../../utils/db'
-import { requireSupervisor, getTeamFilter } from '../../utils/authorize'
+import { transaction } from '../../utils/db'
+import { requireSupervisor, getWriteTeamId } from '../../utils/authorize'
+import { isRuleKey, ruleProblem, ruleStoredValue } from '../../../utils/requestRuleSettings'
 
+/**
+ * Save a team's Request Rules (Settings → Request rules).
+ *
+ * Body: { settings: { <rule key>: value, ... } } — the whole form, saved in ONE
+ * transaction: all of it or none. The page used to send seven requests in a row and
+ * stop at the first failure, leaving a team with half its rules saved.
+ * The older { setting_key, setting_value } form (one rule) is still accepted, so a
+ * page loaded before a deploy can't write around the checks.
+ *
+ * Every key must be a known rule and every value pass utils/requestRuleSettings.ts.
+ * Until Oct 2026 anything was stored as sent: a cleared weekday box became a 0-hour
+ * limit that refused every request that day, and "-1" refused every shift change.
+ */
 export default defineEventHandler(async (event) => {
   const user = requireSupervisor(event)
-  const teamId = getTeamFilter(user) || user.team_id
+  const teamId = getWriteTeamId(user)
   const body = await readBody(event)
-  const { setting_key, setting_value } = body
 
-  if (!setting_key || setting_value == null) {
-    throw createError({ statusCode: 400, message: 'setting_key and setting_value are required' })
+  const entries: [string, unknown][] =
+    body?.settings && typeof body.settings === 'object'
+      ? Object.entries(body.settings)
+      : body?.setting_key != null
+        ? [[body.setting_key, body.setting_value]]
+        : []
+  if (!entries.length) {
+    throw createError({ statusCode: 400, message: 'Send the rules to save as { settings: { ... } }' })
   }
 
-  if (!teamId) {
-    throw createError({ statusCode: 400, message: 'Team context required — assign yourself to a team first' })
+  const rows: [string, string][] = []
+  for (const [key, value] of entries) {
+    if (!isRuleKey(key)) throw createError({ statusCode: 400, message: `Unknown setting: ${key}` })
+    const problem = ruleProblem(key, value)
+    if (problem) throw createError({ statusCode: 400, message: problem })
+    rows.push([key, ruleStoredValue(key, value)])
   }
 
-  const result = await query(
-    `INSERT INTO team_settings (team_id, setting_key, setting_value)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (team_id, setting_key)
-     DO UPDATE SET setting_value = $3, updated_at = NOW()
-     RETURNING *`,
-    [teamId, setting_key, String(setting_value)]
-  )
-  return result.rows[0]
+  const saved = await transaction(async (client) => {
+    const result = await client.query(
+      `INSERT INTO team_settings (team_id, setting_key, setting_value)
+       SELECT $1, k, v FROM unnest($2::text[], $3::text[]) AS t(k, v)
+       ON CONFLICT (team_id, setting_key)
+       DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW()
+       RETURNING setting_key, setting_value`,
+      [teamId, rows.map((r) => r[0]), rows.map((r) => r[1])]
+    )
+    return result.rows as { setting_key: string; setting_value: string }[]
+  })
+  return Object.fromEntries(saved.map((r) => [r.setting_key, r.setting_value]))
 })

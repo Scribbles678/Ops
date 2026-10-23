@@ -1,5 +1,6 @@
 import { transaction } from '../../utils/db'
-import { requireAuth, getTeamFilter, getWriteTeamId } from '../../utils/authorize'
+import { requireTeamLead, getTeamFilter, getWriteTeamId } from '../../utils/authorize'
+import { assertJobFunctionsOnTeam } from '../../utils/teamOwnership'
 
 interface BlockInput {
   start_time: string
@@ -8,7 +9,7 @@ interface BlockInput {
 }
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getTeamFilter(user)
   const writeTeamId = getWriteTeamId(user)
   const id = getRouterParam(event, 'id')
@@ -29,6 +30,11 @@ export default defineEventHandler(async (event) => {
     : []
   // When replacing with blocks, the base function follows the first block; am/pm cleared.
   const baseJfId = validBlocks[0]?.job_function_id ?? job_function_id ?? null
+  // Every job named must be this team's (the row itself is matched on team below).
+  await assertJobFunctionsOnTeam(
+    [baseJfId, am_job_function_id, pm_job_function_id, ...validBlocks.map((b) => b.job_function_id)].filter(Boolean) as string[],
+    teamId
+  )
 
   const result = await transaction(async (client) => {
     const params: unknown[] = [

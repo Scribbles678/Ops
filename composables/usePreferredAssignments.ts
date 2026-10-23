@@ -10,7 +10,7 @@ export const usePreferredAssignments = () => {
       preferredAssignments.value = await $fetch<any[]>('/api/preferred-assignments')
       return preferredAssignments.value
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return []
     } finally {
       loading.value = false
@@ -25,7 +25,7 @@ export const usePreferredAssignments = () => {
       await fetchPreferredAssignments()
       return result
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return null
     } finally {
       loading.value = false
@@ -40,7 +40,7 @@ export const usePreferredAssignments = () => {
       await fetchPreferredAssignments()
       return result
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return null
     } finally {
       loading.value = false
@@ -55,7 +55,7 @@ export const usePreferredAssignments = () => {
       await fetchPreferredAssignments()
       return true
     } catch (e: any) {
-      error.value = e.message
+      error.value = e.data?.message ?? e.message
       return false
     } finally {
       loading.value = false

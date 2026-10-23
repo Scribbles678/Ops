@@ -171,12 +171,16 @@ const lastUpdated = ref('')
 const refreshInterval = ref<NodeJS.Timeout | null>(null)
 const rolloverInterval = ref<NodeJS.Timeout | null>(null)
 
-// Timezone-aware date helper (America/Chicago) to avoid UTC off-by-one
+// Timezone-aware date helper, to avoid the UTC off-by-one
 import { getTZISODate } from '~/utils/localDate'
 
-// Today as a reactive ref in America/Chicago timezone
-const TIMEZONE = 'America/Chicago'
-const today = ref(getTZISODate(TIMEZONE))
+// "Today" in the SITE's time zone (the team's, set in Settings → Teams). This was
+// hard-wired to America/Chicago, so a Pacific site's board showed tomorrow from 10pm
+// and an Eastern one yesterday until 1am. Until the kiosk's account has loaded, the
+// device's own zone is the best guess — a wall display sits at its site.
+const { user: displayUser, fetchCurrentUser: fetchDisplayUser } = useAuth()
+const siteZone = () => displayUser.value?.team_timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
+const today = ref(getTZISODate(siteZone()))
 
 const formattedDate = computed(() => {
   return formatDate(today.value)
@@ -347,8 +351,10 @@ const consolidateAssignments = (assignments: any[]) => {
   return consolidated
 }
 
-onMounted(() => {
-  today.value = getTZISODate(TIMEZONE)
+onMounted(async () => {
+  // /display is a public route, so the route guard hasn't loaded the account.
+  if (!displayUser.value) await fetchDisplayUser()
+  today.value = getTZISODate(siteZone())
   loadData()
 
   // Auto-refresh every 2 minutes
@@ -358,7 +364,7 @@ onMounted(() => {
 
   // Update date every minute to catch midnight rollover
   const tick = () => {
-    const current = getTZISODate(TIMEZONE)
+    const current = getTZISODate(siteZone())
     if (today.value !== current) {
       today.value = current
       loadData()
@@ -374,7 +380,7 @@ onMounted(() => {
 
 const handleVisible = () => {
   if (document.visibilityState !== 'visible') return
-  const current = getTZISODate(TIMEZONE)
+  const current = getTZISODate(siteZone())
   if (today.value !== current) today.value = current
   loadData()
 }

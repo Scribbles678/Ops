@@ -1,8 +1,9 @@
 import { transaction } from '../../utils/db'
-import { requireAuth, getWriteTeamId } from '../../utils/authorize'
+import { requireTeamLead, getWriteTeamId } from '../../utils/authorize'
+import { assertJobFunctionsOnTeam } from '../../utils/teamOwnership'
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
+  const user = requireTeamLead(event)
   const teamId = getWriteTeamId(user)
   const body = await readBody(event)
   const { items } = body
@@ -10,6 +11,7 @@ export default defineEventHandler(async (event) => {
   if (!Array.isArray(items) || items.length === 0) {
     throw createError({ statusCode: 400, message: 'items array is required' })
   }
+  await assertJobFunctionsOnTeam(items.map((i: any) => i?.job_function_id).filter(Boolean), teamId)
 
   const results = await transaction(async (client) => {
     const upserted: any[] = []

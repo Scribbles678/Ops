@@ -11,6 +11,18 @@
         <!-- Step 1: Request reset (enter email) -->
         <div v-if="!hasToken" class="space-y-4">
           <h2 class="text-2xl font-bold text-gray-900 mb-2">Forgot your password?</h2>
+          <!-- Without email on this site no link can be sent; this page used to promise
+               one anyway, and nothing ever arrived. -->
+          <div v-if="emailLinks === false" class="space-y-4">
+            <p class="text-gray-700">
+              This site can't send email, so a reset link can't be sent. Ask your supervisor to set a new
+              password for you — they do it in Settings → Users — then sign in with it.
+            </p>
+            <NuxtLink to="/login" class="inline-flex px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50">
+              Back to Login
+            </NuxtLink>
+          </div>
+          <template v-else>
           <p class="text-gray-600 mb-4">
             Enter your email address and we'll send you a link to reset your password.
           </p>
@@ -46,6 +58,7 @@
               </NuxtLink>
             </div>
           </form>
+          </template>
         </div>
 
         <!-- Step 2: Set new password (have token from email link) -->
@@ -137,14 +150,28 @@ const resetSuccess = ref(false)
 
 const token = computed(() => (route.query.token as string) || '')
 
+// Can this site email a reset link? null until asked; a failed check shows the form.
+const emailLinks = ref<boolean | null>(null)
+onMounted(async () => {
+  try {
+    emailLinks.value = (await $fetch<{ emailLinks: boolean }>('/api/auth/reset-options')).emailLinks
+  } catch {
+    emailLinks.value = null
+  }
+})
+
 async function requestReset() {
   requesting.value = true
   requestMessage.value = ''
   try {
-    await $fetch('/api/auth/forgot-password', {
+    const res = await $fetch<{ emailLinks?: boolean }>('/api/auth/forgot-password', {
       method: 'POST',
       body: { email: email.value.trim().toLowerCase() }
     })
+    if (res.emailLinks === false) {
+      emailLinks.value = false
+      return
+    }
     requestSuccess.value = true
     requestMessage.value = "If that email is registered, you'll receive a reset link shortly. Check your inbox and spam folder."
   } catch (err: any) {

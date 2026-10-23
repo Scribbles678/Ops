@@ -34,6 +34,18 @@ export const slotCeil = (minutes: number): number => Math.ceil(minutes / SLOT_MI
 export const slotToMinutes = (slot: number): number => slot * SLOT_MINUTES
 export const slotToTime = (slot: number): string => toTime(slotToMinutes(slot))
 
+/** The day's last minute: stands in for midnight at the END of the day. */
+const END_OF_DAY = '23:59'
+
+/**
+ * A saved assignment's end time. The end of slot 95 is midnight, and slotToTime
+ * wraps it to "00:00" — an assignment 23:00–00:00 runs backwards, and the database
+ * refuses it and with it the whole day's save. That happens when a shift ends after
+ * 23:45 (a slot a shift only partly covers still counts). Every time in the app is
+ * within one day, so the last minute stands in for midnight.
+ */
+export const slotToEndTime = (slot: number): string => (slot >= SLOTS_PER_DAY ? END_OF_DAY : slotToTime(slot))
+
 /**
  * Mark [startMin, endMin) in a slot array. Handles overnight wrap by splitting.
  * Partial slots are marked — a break from 19:00-19:15 occupies exactly one slot,
